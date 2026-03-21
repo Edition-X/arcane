@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from arcane.plugins.builtin.gha_ingest import GHAIngestionPlugin
-
 
 MOCK_RUNS = [
     {

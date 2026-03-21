@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
@@ -56,8 +56,8 @@ class TestSearchCLI:
         assert "No results" in result.output
 
     def test_search_with_results(self, runner, mock_container):
-        from arcane.services.memory import MemoryService
         from arcane.domain.models import RawMemoryInput
+        from arcane.services.memory import MemoryService
 
         svc = MemoryService(mock_container)
         svc.save(

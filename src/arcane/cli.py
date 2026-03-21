@@ -353,7 +353,10 @@ def journey_show(journey_id):
 @main.command()
 @click.argument("source")
 @click.argument("target")
-@click.option("--relation", required=True, type=click.Choice(["led_to", "informed_by", "resulted_in", "part_of", "supersedes", "references"]))
+@click.option(
+    "--relation", required=True,
+    type=click.Choice(["led_to", "informed_by", "resulted_in", "part_of", "supersedes", "references"]),
+)
 @click.option("--source-type", default="memory")
 @click.option("--target-type", default="journey")
 def link(source, target, relation, source_type, target_type):
@@ -388,7 +391,9 @@ def trace(entity_id, entity_type, depth):
 
     click.echo(f"\nRelationship graph ({len(rels)} edges):")
     for r in rels:
-        click.echo(f"  {r['source_type']}:{r['source_id'][:12]} --{r['relation']}--> {r['target_type']}:{r['target_id'][:12]}")
+        src = f"{r['source_type']}:{r['source_id'][:12]}"
+        tgt = f"{r['target_type']}:{r['target_id'][:12]}"
+        click.echo(f"  {src} --{r['relation']}--> {tgt}")
 
 
 # ── Migration commands ─────────────────────────────────────────────────────
@@ -690,6 +695,7 @@ def draft_adr(memory_id):
 def mcp():
     """Start the Arcane MCP server (stdio transport)."""
     import asyncio
+
     from arcane.mcp_server.server import run_server
 
     asyncio.run(run_server())

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -31,7 +31,7 @@ class LinearIngestionPlugin:
                 continue
 
             labels_nodes = issue.get("labels", {}).get("nodes", [])
-            labels = [l["name"] for l in labels_nodes]
+            labels = [node["name"] for node in labels_nodes]
             state_name = issue.get("state", {}).get("name", "Unknown")
             assignee_name = (issue.get("assignee") or {}).get("name")
 

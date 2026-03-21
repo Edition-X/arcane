@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any
 
 from arcane.services.container import ServiceContainer
 from arcane.services.ingestion import IngestionService

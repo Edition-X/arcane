@@ -3,8 +3,6 @@
 import uuid
 from datetime import datetime, timezone
 
-import pytest
-
 
 def make_journey(**overrides) -> dict:
     now = datetime.now(timezone.utc).isoformat()

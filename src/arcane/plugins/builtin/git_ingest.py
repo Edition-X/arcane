@@ -5,9 +5,8 @@ from __future__ import annotations
 import os
 import subprocess
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
-
 
 # Use record separator to cleanly delimit commits
 _RS = "\x1e"  # record separator

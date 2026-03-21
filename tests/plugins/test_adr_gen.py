@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import uuid
-from datetime import datetime, timezone
-
 import pytest
 
 from arcane.plugins.builtin.adr_gen import ADRGenerator
@@ -14,8 +10,8 @@ from arcane.plugins.builtin.adr_gen import ADRGenerator
 @pytest.fixture
 def decision_memory(container):
     """Create a decision memory with details."""
-    from arcane.services.memory import MemoryService
     from arcane.domain.models import RawMemoryInput
+    from arcane.services.memory import MemoryService
 
     ms = MemoryService(container)
     raw = RawMemoryInput(
@@ -88,8 +84,8 @@ class TestADRGenerator:
 
     def test_generate_without_details(self, container):
         """ADR from memory without detailed body should still work."""
-        from arcane.services.memory import MemoryService
         from arcane.domain.models import RawMemoryInput
+        from arcane.services.memory import MemoryService
 
         ms = MemoryService(container)
         raw = RawMemoryInput(

@@ -5,7 +5,6 @@ Computes activity metrics across commits, memories, and journeys for a project.
 
 from __future__ import annotations
 
-import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any

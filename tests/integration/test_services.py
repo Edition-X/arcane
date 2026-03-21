@@ -1,9 +1,6 @@
 """Integration tests for MemoryService and JourneyService."""
 
-import json
 import os
-
-import pytest
 
 from arcane.domain.models import RawMemoryInput
 from arcane.services.journey import JourneyService

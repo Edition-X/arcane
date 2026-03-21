@@ -5,10 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-import pytest
-
 from arcane.plugins.builtin.linear_ingest import LinearIngestionPlugin
-
 
 MOCK_ISSUES = [
     {

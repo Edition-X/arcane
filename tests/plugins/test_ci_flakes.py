@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import uuid
-from datetime import datetime, timezone
 
 import pytest
 
@@ -14,7 +12,6 @@ from arcane.plugins.builtin.ci_flakes import CIFlakeDetector
 @pytest.fixture
 def artifact_repo_with_runs(artifact_repo):
     """Populate artifact_repo with CI run artifacts, some flaky."""
-    now = datetime.now(timezone.utc).isoformat()
     runs = [
         # Same commit, same branch, failure then success → flake
         {"id": str(uuid.uuid4()), "artifact_type": "ci_run", "external_id": "run-1",

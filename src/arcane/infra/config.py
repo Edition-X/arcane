@@ -8,7 +8,6 @@ from typing import Any
 
 import yaml
 
-
 APP_NAME = "arcane"
 LEGACY_APP_NAME = "echovault"
 

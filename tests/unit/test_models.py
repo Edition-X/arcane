@@ -15,7 +15,6 @@ from arcane.domain.models import (
     Insight,
     Journey,
     Memory,
-    MemoryDetail,
     RawMemoryInput,
     Relationship,
     SearchResult,

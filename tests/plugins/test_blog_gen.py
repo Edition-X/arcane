@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import uuid
-from datetime import datetime, timezone
-
 import pytest
 
 from arcane.plugins.builtin.blog_gen import BlogGenerator
@@ -14,10 +10,10 @@ from arcane.plugins.builtin.blog_gen import BlogGenerator
 @pytest.fixture
 def journey_with_memories(container):
     """Create a journey with linked memories and artifacts."""
+    from arcane.domain.enums import ArtifactType, RelationType
+    from arcane.domain.models import Artifact, RawMemoryInput, Relationship
     from arcane.services.journey import JourneyService
     from arcane.services.memory import MemoryService
-    from arcane.domain.models import RawMemoryInput, Relationship, Artifact
-    from arcane.domain.enums import RelationType, ArtifactType
 
     js = JourneyService(container)
     ms = MemoryService(container)
@@ -127,8 +123,8 @@ class TestBlogGenerator:
 
     def test_generate_with_project_memories_only(self, container):
         """Generate a brief from project memories without a journey."""
-        from arcane.services.memory import MemoryService
         from arcane.domain.models import RawMemoryInput
+        from arcane.services.memory import MemoryService
 
         ms = MemoryService(container)
         for i in range(3):

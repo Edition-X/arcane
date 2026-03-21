@@ -1,7 +1,5 @@
 """Unit tests for the redaction pipeline."""
 
-import os
-import tempfile
 
 from arcane.infra.redaction import load_memoryignore, redact
 

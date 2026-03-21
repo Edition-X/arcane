@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from arcane.domain.enums import JourneyStatus, RelationType
+from arcane.domain.enums import RelationType
 from arcane.domain.models import Journey, Relationship
 from arcane.services.container import ServiceContainer
 

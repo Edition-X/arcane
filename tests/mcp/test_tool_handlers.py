@@ -1,7 +1,6 @@
 """Tests for MCP tool handler functions."""
 
 import json
-import os
 
 import pytest
 

@@ -8,7 +8,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
-from arcane.domain.enums import Category, RelationType
+from arcane.domain.enums import RelationType
 from arcane.mcp_server.tools.content_tools import handle_draft_adr, handle_draft_blog
 from arcane.mcp_server.tools.ingestion_tools import (
     handle_analyze,
