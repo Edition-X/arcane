@@ -213,6 +213,25 @@ class TestIntelligenceToolHandlers:
         assert len(remaining) == 0
 
 
+class TestIngestionToolHandlers:
+    def test_handle_ingest_git_empty_repo(self, container, tmp_path):
+        from arcane.mcp_server.tools.ingestion_tools import handle_ingest_git
+        result = json.loads(handle_ingest_git(container, project="test", repo_path=str(tmp_path)))
+        assert result["plugin"] == "git"
+        assert result["ingested"] == 0
+
+    def test_handle_analyze_velocity(self, container):
+        from arcane.mcp_server.tools.ingestion_tools import handle_analyze
+        result = json.loads(handle_analyze(container, plugin_name="velocity", project="test"))
+        assert result["plugin"] == "velocity"
+        assert result["insights_created"] >= 1
+
+    def test_handle_analyze_unknown(self, container):
+        from arcane.mcp_server.tools.ingestion_tools import handle_analyze
+        result = json.loads(handle_analyze(container, plugin_name="unknown"))
+        assert "error" in result
+
+
 class TestContentToolHandlers:
     def test_handle_draft_adr(self, container):
         from tests.conftest import make_memory_dict

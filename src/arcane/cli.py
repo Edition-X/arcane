@@ -493,6 +493,196 @@ def stats():
     container.close()
 
 
+# ── Ingestion commands ─────────────────────────────────────────────────────
+
+
+@main.group()
+def ingest():
+    """Ingest data from external sources."""
+    pass
+
+
+@ingest.command("git")
+@click.option("--project", default=None, help="Project name")
+@click.option("--repo-path", default=None, help="Path to git repo (default: cwd)")
+@click.option("--max-count", default=100, help="Max commits to ingest")
+@click.option("--journey-id", default=None, help="Link artifacts to a journey")
+def ingest_git(project, repo_path, max_count, journey_id):
+    """Ingest commits from a git repository."""
+    from arcane.plugins.builtin.git_ingest import GitIngestionPlugin
+    from arcane.services.ingestion import IngestionService
+
+    project = project or os.path.basename(os.getcwd())
+    plugin = GitIngestionPlugin(repo_path=repo_path or os.getcwd(), max_count=max_count)
+
+    container = create_container()
+    svc = IngestionService(container)
+    result = svc.run_plugin(plugin, project=project, journey_id=journey_id)
+    container.close()
+
+    click.echo(f"Git ingestion: {result['ingested']} ingested, {result['skipped']} skipped")
+
+
+@ingest.command("gha")
+@click.option("--owner", required=True, help="GitHub repo owner")
+@click.option("--repo", required=True, help="GitHub repo name")
+@click.option("--project", default=None, help="Project name")
+@click.option("--journey-id", default=None, help="Link artifacts to a journey")
+def ingest_gha(owner, repo, project, journey_id):
+    """Ingest CI runs from GitHub Actions."""
+    from arcane.plugins.builtin.gha_ingest import GHAIngestionPlugin
+    from arcane.services.ingestion import IngestionService
+
+    project = project or os.path.basename(os.getcwd())
+    plugin = GHAIngestionPlugin(owner=owner, repo=repo)
+
+    container = create_container()
+    svc = IngestionService(container)
+    result = svc.run_plugin(plugin, project=project, journey_id=journey_id)
+    container.close()
+
+    click.echo(f"GHA ingestion: {result['ingested']} ingested, {result['skipped']} skipped")
+
+
+@ingest.command("linear")
+@click.option("--team", required=True, help="Linear team ID")
+@click.option("--project", default=None, help="Project name")
+@click.option("--journey-id", default=None, help="Link artifacts to a journey")
+def ingest_linear(team, project, journey_id):
+    """Ingest tickets from Linear."""
+    from arcane.plugins.builtin.linear_ingest import LinearIngestionPlugin
+    from arcane.services.ingestion import IngestionService
+
+    project = project or os.path.basename(os.getcwd())
+    plugin = LinearIngestionPlugin(team_id=team)
+
+    container = create_container()
+    svc = IngestionService(container)
+    result = svc.run_plugin(plugin, project=project, journey_id=journey_id)
+    container.close()
+
+    click.echo(f"Linear ingestion: {result['ingested']} ingested, {result['skipped']} skipped")
+
+
+# ── Analysis commands ─────────────────────────────────────────────────────
+
+
+@main.group()
+def analyze():
+    """Run intelligence analysis plugins."""
+    pass
+
+
+@analyze.command("flakes")
+@click.option("--project", default=None, help="Project name")
+def analyze_flakes(project):
+    """Detect flaky CI runs."""
+    from arcane.plugins.builtin.ci_flakes import CIFlakeDetector
+    from arcane.services.intelligence import IntelligenceService
+
+    project = project or os.path.basename(os.getcwd())
+    container = create_container()
+    plugin = CIFlakeDetector(artifact_repo=container.artifact_repo)
+
+    svc = IntelligenceService(container)
+    result = svc.run_plugin(plugin, project=project)
+    container.close()
+
+    if result["insights_created"] > 0:
+        click.echo(f"CI flake analysis: {result['insights_created']} insight(s) created")
+    else:
+        click.echo("No CI flakes detected.")
+
+
+@analyze.command("velocity")
+@click.option("--project", default=None, help="Project name")
+def analyze_velocity(project):
+    """Generate engineering velocity summary."""
+    from arcane.plugins.builtin.velocity import VelocityTracker
+    from arcane.services.intelligence import IntelligenceService
+
+    project = project or os.path.basename(os.getcwd())
+    container = create_container()
+    plugin = VelocityTracker(
+        artifact_repo=container.artifact_repo,
+        memory_repo=container.memory_repo,
+        journey_repo=container.journey_repo,
+    )
+
+    svc = IntelligenceService(container)
+    result = svc.run_plugin(plugin, project=project)
+    container.close()
+
+    click.echo(f"Velocity analysis: {result['insights_created']} insight(s) created")
+
+
+# ── Content generation commands ───────────────────────────────────────────
+
+
+@main.group()
+def draft():
+    """Generate structured content briefs."""
+    pass
+
+
+@draft.command("blog")
+@click.option("--journey-id", default=None, help="Journey to generate brief from")
+@click.option("--project", default=None, help="Project for memory-based brief")
+def draft_blog(journey_id, project):
+    """Generate a structured blog brief."""
+    from arcane.plugins.builtin.blog_gen import BlogGenerator
+
+    container = create_container()
+
+    context: dict = {}
+    if journey_id:
+        from arcane.services.journey import JourneyService
+        js = JourneyService(container)
+        journey_data = js.show(journey_id)
+        if not journey_data:
+            click.echo(f"Journey {journey_id} not found.")
+            container.close()
+            return
+        context["journey"] = journey_data
+    elif project:
+        memories = container.memory_repo.list_recent(limit=20, project=project)
+        context["memories"] = memories
+        context["project"] = project
+    else:
+        click.echo("Provide --journey-id or --project.")
+        container.close()
+        return
+
+    gen = BlogGenerator()
+    brief = gen.generate(context)
+    container.close()
+
+    click.echo(brief)
+
+
+@draft.command("adr")
+@click.argument("memory_id")
+def draft_adr(memory_id):
+    """Generate a structured ADR from a decision memory."""
+    from arcane.plugins.builtin.adr_gen import ADRGenerator
+
+    container = create_container()
+    mem = container.memory_repo.get(memory_id)
+    if not mem:
+        click.echo(f"Memory {memory_id} not found.")
+        container.close()
+        return
+
+    detail = container.memory_repo.get_details(memory_id)
+    detail_body = detail["body"] if detail else ""
+
+    gen = ADRGenerator()
+    adr = gen.generate(context={"memory": mem, "details": detail_body})
+    container.close()
+
+    click.echo(adr)
+
+
 # ── MCP server command ─────────────────────────────────────────────────────
 
 

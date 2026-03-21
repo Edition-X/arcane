@@ -10,6 +10,12 @@ from mcp.types import TextContent, Tool
 
 from arcane.domain.enums import Category, RelationType
 from arcane.mcp_server.tools.content_tools import handle_draft_adr, handle_draft_blog
+from arcane.mcp_server.tools.ingestion_tools import (
+    handle_analyze,
+    handle_ingest_gha,
+    handle_ingest_git,
+    handle_ingest_linear,
+)
 from arcane.mcp_server.tools.intelligence_tools import handle_insights, handle_insights_ack
 from arcane.mcp_server.tools.journey_tools import (
     handle_journey_complete,
@@ -206,6 +212,60 @@ def _create_server(container: ServiceContainer) -> Server:
                     "required": ["insight_id"],
                 },
             ),
+            # ── Ingestion tools ──
+            Tool(
+                name="ingest_git",
+                description="Ingest commits from a git repository as artifacts.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "project": {"type": "string"},
+                        "repo_path": {"type": "string", "description": "Path to git repo."},
+                        "max_count": {"type": "integer", "default": 100},
+                        "journey_id": {"type": "string"},
+                    },
+                },
+            ),
+            Tool(
+                name="ingest_gha",
+                description="Ingest CI runs from GitHub Actions.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "owner": {"type": "string"},
+                        "repo": {"type": "string"},
+                        "project": {"type": "string"},
+                        "journey_id": {"type": "string"},
+                    },
+                    "required": ["owner", "repo"],
+                },
+            ),
+            Tool(
+                name="ingest_linear",
+                description="Ingest tickets from Linear.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "team_id": {"type": "string"},
+                        "project": {"type": "string"},
+                        "journey_id": {"type": "string"},
+                    },
+                    "required": ["team_id"],
+                },
+            ),
+            # ── Analysis tools ──
+            Tool(
+                name="analyze",
+                description="Run an intelligence analysis plugin (ci_flakes, velocity).",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "plugin_name": {"type": "string", "enum": ["ci_flakes", "velocity"]},
+                        "project": {"type": "string"},
+                    },
+                    "required": ["plugin_name"],
+                },
+            ),
             # ── Content tools ──
             Tool(
                 name="draft_blog",
@@ -241,6 +301,10 @@ def _create_server(container: ServiceContainer) -> Server:
             "journey_update": lambda: handle_journey_update(journey_svc, **arguments),
             "journey_complete": lambda: handle_journey_complete(journey_svc, **arguments),
             "journey_list": lambda: handle_journey_list(journey_svc, **arguments),
+            "ingest_git": lambda: handle_ingest_git(container, **arguments),
+            "ingest_gha": lambda: handle_ingest_gha(container, **arguments),
+            "ingest_linear": lambda: handle_ingest_linear(container, **arguments),
+            "analyze": lambda: handle_analyze(container, **arguments),
             "link": lambda: handle_link(container, **arguments),
             "trace": lambda: handle_trace(container, **arguments),
             "insights": lambda: handle_insights(container, **arguments),
