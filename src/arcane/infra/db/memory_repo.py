@@ -1,0 +1,300 @@
+"""Memory repository — SQLite persistence for memories."""
+
+from __future__ import annotations
+
+import json
+import struct
+from datetime import datetime, timezone
+from typing import Any
+
+from arcane.infra.db.connection import Database
+
+
+class MemoryRepository:
+    """CRUD operations for the memories table."""
+
+    def __init__(self, db: Database) -> None:
+        self.db = db
+
+    def insert(self, mem: dict[str, Any], details: str | None = None) -> int:
+        cursor = self.db.execute(
+            """
+            INSERT INTO memories (
+                id, title, what, why, impact, tags, category, project,
+                source, related_files, file_path, section_anchor,
+                created_at, updated_at, metadata
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                mem["id"], mem["title"], mem["what"], mem.get("why"),
+                mem.get("impact"), json.dumps(mem.get("tags", [])),
+                mem.get("category"), mem["project"], mem.get("source"),
+                json.dumps(mem.get("related_files", [])), mem.get("file_path", ""),
+                mem.get("section_anchor", ""), mem["created_at"], mem["updated_at"],
+                json.dumps(mem.get("metadata", {})),
+            ),
+        )
+        rowid = cursor.lastrowid
+
+        if details:
+            self.db.execute(
+                "INSERT INTO memory_details (memory_id, body) VALUES (?, ?)",
+                (mem["id"], details),
+            )
+
+        self.db.commit()
+        return rowid  # type: ignore[return-value]
+
+    def get(self, memory_id: str) -> dict[str, Any] | None:
+        return self.db.fetchone(
+            """
+            SELECT m.*,
+                   EXISTS(SELECT 1 FROM memory_details WHERE memory_id = m.id) as has_details
+            FROM memories m WHERE m.id = ?
+            """,
+            (memory_id,),
+        )
+
+    def get_details(self, memory_id: str) -> dict[str, Any] | None:
+        return self.db.fetchone(
+            "SELECT memory_id, body FROM memory_details WHERE memory_id LIKE ?",
+            (memory_id + "%",),
+        )
+
+    def update(
+        self,
+        memory_id: str,
+        what: str | None = None,
+        why: str | None = None,
+        impact: str | None = None,
+        tags: list[str] | None = None,
+        details_append: str | None = None,
+    ) -> bool:
+        row = self.db.fetchone(
+            "SELECT id, rowid FROM memories WHERE id LIKE ?", (memory_id + "%",)
+        )
+        if not row:
+            return False
+
+        full_id = row["id"]
+        now = datetime.now(timezone.utc).isoformat()
+        sets = ["updated_count = updated_count + 1", "updated_at = ?"]
+        params: list[Any] = [now]
+
+        if what is not None:
+            sets.append("what = ?")
+            params.append(what)
+        if why is not None:
+            sets.append("why = ?")
+            params.append(why)
+        if impact is not None:
+            sets.append("impact = ?")
+            params.append(impact)
+        if tags is not None:
+            sets.append("tags = ?")
+            params.append(json.dumps(tags))
+
+        params.append(full_id)
+        self.db.execute(f"UPDATE memories SET {', '.join(sets)} WHERE id = ?", params)
+
+        if details_append:
+            existing = self.db.fetchone(
+                "SELECT body FROM memory_details WHERE memory_id = ?", (full_id,)
+            )
+            if existing:
+                new_body = existing["body"] + "\n\n" + details_append
+                self.db.execute(
+                    "UPDATE memory_details SET body = ? WHERE memory_id = ?",
+                    (new_body, full_id),
+                )
+            else:
+                self.db.execute(
+                    "INSERT INTO memory_details (memory_id, body) VALUES (?, ?)",
+                    (full_id, details_append),
+                )
+
+        self.db.commit()
+        return True
+
+    def delete(self, memory_id: str) -> bool:
+        row = self.db.fetchone(
+            "SELECT id FROM memories WHERE id LIKE ?", (memory_id + "%",)
+        )
+        if not row:
+            return False
+
+        full_id = row["id"]
+        self.db.execute("DELETE FROM memory_details WHERE memory_id = ?", (full_id,))
+        self.db.execute("DELETE FROM memories WHERE id = ?", (full_id,))
+        self.db.commit()
+        return True
+
+    def fts_search(
+        self,
+        query: str,
+        limit: int = 10,
+        project: str | None = None,
+        source: str | None = None,
+    ) -> list[dict[str, Any]]:
+        terms = query.split()
+        fts_query = " OR ".join(f'"{term}"*' for term in terms)
+
+        where_clauses: list[str] = []
+        params: list[Any] = [fts_query]
+
+        if project:
+            where_clauses.append("m.project = ?")
+            params.append(project)
+        if source:
+            where_clauses.append("m.source = ?")
+            params.append(source)
+
+        where_clause = ""
+        if where_clauses:
+            where_clause = "AND " + " AND ".join(where_clauses)
+
+        params.append(limit)
+
+        return self.db.fetchall(
+            f"""
+            SELECT m.*, -fts.rank as score,
+                   EXISTS(SELECT 1 FROM memory_details WHERE memory_id = m.id) as has_details
+            FROM memories_fts fts
+            JOIN memories m ON m.rowid = fts.rowid
+            WHERE fts.memories_fts MATCH ?
+            {where_clause}
+            ORDER BY fts.rank
+            LIMIT ?
+            """,
+            params,
+        )
+
+    def vector_search(
+        self,
+        query_embedding: list[float],
+        limit: int = 10,
+        project: str | None = None,
+        source: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if not self._has_vec_table():
+            return []
+
+        vec_bytes = struct.pack(f"{len(query_embedding)}f", *query_embedding)
+
+        rows = self.db.fetchall(
+            """
+            SELECT m.*, v.distance,
+                   EXISTS(SELECT 1 FROM memory_details WHERE memory_id = m.id) as has_details
+            FROM memories_vec v
+            JOIN memories m ON m.rowid = v.rowid
+            WHERE v.embedding MATCH ?
+            AND k = ?
+            ORDER BY v.distance
+            """,
+            (vec_bytes, limit),
+        )
+
+        results = []
+        for row in rows:
+            row["score"] = 1.0 - row.pop("distance")
+            results.append(row)
+
+        if project:
+            results = [r for r in results if r["project"] == project]
+        if source:
+            results = [r for r in results if r["source"] == source]
+
+        return results
+
+    def list_recent(
+        self,
+        limit: int = 10,
+        project: str | None = None,
+        source: str | None = None,
+    ) -> list[dict[str, Any]]:
+        where_clauses: list[str] = []
+        params: list[Any] = []
+
+        if project:
+            where_clauses.append("m.project = ?")
+            params.append(project)
+        if source:
+            where_clauses.append("m.source = ?")
+            params.append(source)
+
+        where_clause = ""
+        if where_clauses:
+            where_clause = "WHERE " + " AND ".join(where_clauses)
+
+        params.append(limit)
+
+        return self.db.fetchall(
+            f"""
+            SELECT m.id, m.title, m.category, m.tags, m.project, m.source, m.created_at,
+                   EXISTS(SELECT 1 FROM memory_details WHERE memory_id = m.id) as has_details
+            FROM memories m
+            {where_clause}
+            ORDER BY m.created_at DESC
+            LIMIT ?
+            """,
+            params,
+        )
+
+    def list_all_for_reindex(self) -> list[dict[str, Any]]:
+        return self.db.fetchall(
+            "SELECT rowid, title, what, why, impact, tags FROM memories ORDER BY rowid"
+        )
+
+    def count(self, project: str | None = None, source: str | None = None) -> int:
+        where_clauses: list[str] = []
+        params: list[Any] = []
+
+        if project:
+            where_clauses.append("project = ?")
+            params.append(project)
+        if source:
+            where_clauses.append("source = ?")
+            params.append(source)
+
+        where_clause = ""
+        if where_clauses:
+            where_clause = "WHERE " + " AND ".join(where_clauses)
+
+        row = self.db.fetchone(f"SELECT COUNT(*) as cnt FROM memories {where_clause}", params)
+        return row["cnt"] if row else 0
+
+    def insert_vector(self, rowid: int, embedding: list[float]) -> None:
+        if not self._has_vec_table():
+            return
+        vec_bytes = struct.pack(f"{len(embedding)}f", *embedding)
+        self.db.execute(
+            "INSERT INTO memories_vec (rowid, embedding) VALUES (?, ?)",
+            (rowid, vec_bytes),
+        )
+        self.db.commit()
+
+    def _has_vec_table(self) -> bool:
+        row = self.db.fetchone(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='memories_vec'"
+        )
+        return row is not None
+
+    # Meta helpers
+    def get_meta(self, key: str) -> str | None:
+        row = self.db.fetchone("SELECT value FROM meta WHERE key = ?", (key,))
+        return row["value"] if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        self.db.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, value))
+        self.db.commit()
+
+    def get_embedding_dim(self) -> int | None:
+        val = self.get_meta("embedding_dim")
+        return int(val) if val is not None else None
+
+    def set_embedding_dim(self, dim: int) -> None:
+        self.set_meta("embedding_dim", str(dim))
+
+    def drop_vec_table(self) -> None:
+        self.db.execute("DROP TABLE IF EXISTS memories_vec")
+        self.db.commit()

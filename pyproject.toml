@@ -1,0 +1,68 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "arcane"
+version = "0.1.0"
+description = "Unified engineering intelligence platform — agent memory, decision journeys, and knowledge capture"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "Dan Kelly" }]
+keywords = ["agent", "memory", "mcp", "engineering", "knowledge"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "click>=8.0",
+    "httpx>=0.24",
+    "mcp>=1.0",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "sqlite-vec>=0.1",
+]
+
+[project.optional-dependencies]
+pysqlite3 = ["pysqlite3-binary>=0.5"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+arcane = "arcane.cli:main"
+memory = "arcane.cli:main"
+
+[project.entry-points."arcane.plugins.ingestion"]
+git = "arcane.plugins.builtin.git_ingest:GitIngestionPlugin"
+github_actions = "arcane.plugins.builtin.gha_ingest:GHAIngestionPlugin"
+linear = "arcane.plugins.builtin.linear_ingest:LinearIngestionPlugin"
+
+[project.entry-points."arcane.plugins.intelligence"]
+ci_flakes = "arcane.plugins.builtin.ci_flakes:CIFlakeDetector"
+velocity = "arcane.plugins.builtin.velocity:VelocityTracker"
+
+[project.entry-points."arcane.plugins.content"]
+blog = "arcane.plugins.builtin.blog_gen:BlogGenerator"
+adr = "arcane.plugins.builtin.adr_gen:ADRGenerator"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/arcane"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
