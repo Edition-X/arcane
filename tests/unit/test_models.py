@@ -37,9 +37,9 @@ class TestRawMemoryInput:
         raw = RawMemoryInput(title="Test", what="x", category="decision")
         assert raw.category == "decision"
 
-    def test_invalid_category_falls_back_to_context(self):
-        raw = RawMemoryInput(title="Test", what="x", category="nonsense")
-        assert raw.category == "context"
+    def test_invalid_category_raises(self):
+        with pytest.raises(ValidationError, match="Invalid category"):
+            RawMemoryInput(title="Test", what="x", category="nonsense")
 
     def test_none_category_stays_none(self):
         raw = RawMemoryInput(title="Test", what="x", category=None)

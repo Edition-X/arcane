@@ -59,6 +59,49 @@ class TestRedact:
         assert "<redacted>" not in result
         assert "</redacted>" not in result
 
+    # ── False-positive guard tests ────────────────────────────────────────────
+
+    def test_no_fp_password_word_in_prose(self):
+        """'password' without := should NOT be redacted."""
+        text = "The password field is very useful in forms"
+        assert redact(text) == text
+
+    def test_no_fp_secret_word_in_prose(self):
+        """'secret sauce' should NOT be redacted."""
+        text = "Secret sauce is our competitive advantage"
+        assert redact(text) == text
+
+    def test_no_fp_api_key_in_prose(self):
+        """'api_key' as a prose noun should NOT be redacted."""
+        text = "Use the api_key from config"
+        assert redact(text) == text
+
+    def test_value_preserves_key_name(self):
+        """The key name should survive; only value is redacted."""
+        result = redact("password=hunter2")
+        assert "password" in result
+        assert "hunter2" not in result
+        assert "[REDACTED]" in result
+
+    def test_password_colon_assignment(self):
+        """Colon-style assignment is redacted."""
+        result = redact("password: hunter2 and more text")
+        assert "hunter2" not in result
+        # The word after the value should survive (greedy guard)
+        assert "more text" in result
+
+    def test_multiline_does_not_bleed(self):
+        """Greedy patterns must not consume across newlines."""
+        text = "password=secret123\nnormal content here"
+        result = redact(text)
+        assert "secret123" not in result
+        assert "normal content here" in result
+
+    def test_malformed_extra_pattern_skipped(self):
+        """Malformed user patterns should be silently ignored."""
+        result = redact("hello world", extra_patterns=["[invalid("])
+        assert result == "hello world"
+
 
 class TestLoadMemoryignore:
     def test_load_existing_file(self, tmp_path):

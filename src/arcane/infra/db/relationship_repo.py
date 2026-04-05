@@ -49,9 +49,14 @@ class RelationshipRepository:
     def trace(
         self, entity_type: str, entity_id: str, max_depth: int = 5
     ) -> list[dict[str, Any]]:
-        """Walk the relationship graph from an entity, returning all connected edges."""
+        """Walk the relationship graph from an entity, returning all connected edges.
+
+        Direction is determined by exact ID equality so prefix matches in other
+        entities don't accidentally flip source/target traversal.
+        """
         visited: set[str] = set()
         result: list[dict[str, Any]] = []
+        seen_rel_ids: set[str] = set()
         queue: list[tuple[str, str, int]] = [(entity_type, entity_id, 0)]
 
         while queue:
@@ -66,11 +71,18 @@ class RelationshipRepository:
 
             rels = self.get_all_for(etype, eid)
             for rel in rels:
-                if rel["id"] not in {r["id"] for r in result}:
+                if rel["id"] not in seen_rel_ids:
+                    seen_rel_ids.add(rel["id"])
                     result.append(rel)
 
-                other_type = rel["target_type"] if rel["source_id"].startswith(eid) else rel["source_type"]
-                other_id = rel["target_id"] if rel["source_id"].startswith(eid) else rel["source_id"]
+                # Determine the *other* side by exact equality (not prefix).
+                if rel["source_type"] == etype and rel["source_id"] == eid:
+                    other_type = rel["target_type"]
+                    other_id = rel["target_id"]
+                else:
+                    other_type = rel["source_type"]
+                    other_id = rel["source_id"]
+
                 other_key = f"{other_type}:{other_id}"
                 if other_key not in visited:
                     queue.append((other_type, other_id, depth + 1))

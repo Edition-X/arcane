@@ -176,33 +176,50 @@ class MemoryRepository:
         project: str | None = None,
         source: str | None = None,
     ) -> list[dict[str, Any]]:
+        """Return the nearest-neighbour memories for ``query_embedding``.
+
+        Project/source filters are applied inside SQL (via a JOIN condition)
+        so that the ``limit`` guarantee is meaningful — we never burn our K
+        budget on rows that will be discarded afterwards.
+        """
         if not self._has_vec_table():
             return []
 
+        # Fetch a wider candidate pool when filters are active so the final
+        # result still has a chance of reaching ``limit`` rows.
+        fetch_k = limit * 5 if (project or source) else limit
+
         vec_bytes = struct.pack(f"{len(query_embedding)}f", *query_embedding)
 
+        where_clauses: list[str] = ["v.embedding MATCH ?", "k = ?"]
+        params: list[Any] = [vec_bytes, fetch_k]
+
+        if project:
+            where_clauses.append("m.project = ?")
+            params.append(project)
+        if source:
+            where_clauses.append("m.source = ?")
+            params.append(source)
+
+        where_sql = " AND ".join(where_clauses)
+
         rows = self.db.fetchall(
-            """
+            f"""
             SELECT m.*, v.distance,
                    EXISTS(SELECT 1 FROM memory_details WHERE memory_id = m.id) as has_details
             FROM memories_vec v
             JOIN memories m ON m.rowid = v.rowid
-            WHERE v.embedding MATCH ?
-            AND k = ?
+            WHERE {where_sql}
             ORDER BY v.distance
+            LIMIT ?
             """,
-            (vec_bytes, limit),
+            params + [limit],
         )
 
         results = []
         for row in rows:
             row["score"] = 1.0 - row.pop("distance")
             results.append(row)
-
-        if project:
-            results = [r for r in results if r["project"] == project]
-        if source:
-            results = [r for r in results if r["source"] == source]
 
         return results
 
