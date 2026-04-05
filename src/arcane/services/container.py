@@ -54,6 +54,12 @@ class ServiceContainer:
     def close(self) -> None:
         self.db.close()
 
+    def __enter__(self) -> "ServiceContainer":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
 
 def create_container(home: str | None = None) -> ServiceContainer:
     """Create a fully wired service container."""
