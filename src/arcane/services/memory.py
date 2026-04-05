@@ -275,26 +275,49 @@ class MemoryService:
         return self.c.memory_repo.delete(memory_id)
 
     def reindex(self, progress_callback: Any = None) -> dict[str, Any]:
-        """Rebuild the vector index from scratch."""
+        """Rebuild the vector index from scratch using a crash-safe strategy.
+
+        All embeddings are written to a *staging* virtual table first.  Only
+        when every row has been embedded successfully is the staging table
+        atomically swapped into place, making the operation resumable and
+        safe to interrupt.
+        """
         probe = self.c.embedding_provider.embed("dimension probe")
         dim = len(probe)
-
-        self.c.memory_repo.drop_vec_table()
-        self.c.memory_repo.set_embedding_dim(dim)
-        create_vec_table(self.c.db, dim)
-        self.c.memory_repo.invalidate_vec_cache()
 
         memories = self.c.memory_repo.list_all_for_reindex()
         total = len(memories)
         logger.info("Reindexing %d memories with dim=%d model=%s", total, dim, self.c.config.embedding.model)
 
+        # Build into a staging table so interruptions don't leave the live
+        # table in a half-populated state.
+        self.c.db.execute("DROP TABLE IF EXISTS memories_vec_staging")
+        self.c.db.execute(f"""
+            CREATE VIRTUAL TABLE memories_vec_staging USING vec0(
+                rowid INTEGER PRIMARY KEY,
+                embedding float[{dim}]
+            )
+        """)
+
+        import struct
         for i, mem in enumerate(memories):
             tags = mem.get("tags") or []  # already deserialized by _process_row
             text = _embedding_text(mem["title"], mem["what"], mem.get("why"), mem.get("impact"), tags)
             embedding = self.c.embedding_provider.embed(text)
-            self.c.memory_repo.insert_vector(mem["rowid"], embedding)
+            vec_bytes = struct.pack(f"{dim}f", *embedding)
+            self.c.db.execute(
+                "INSERT INTO memories_vec_staging (rowid, embedding) VALUES (?, ?)",
+                (mem["rowid"], vec_bytes),
+            )
 
             if progress_callback:
                 progress_callback(i + 1, total)
+
+        # Atomic swap: drop live table, rename staging → live.
+        self.c.db.execute("DROP TABLE IF EXISTS memories_vec")
+        self.c.db.execute("ALTER TABLE memories_vec_staging RENAME TO memories_vec")
+        self.c.memory_repo.set_embedding_dim(dim)
+        self.c.db.commit()
+        self.c.memory_repo.invalidate_vec_cache()
 
         return {"count": total, "dim": dim, "model": self.c.config.embedding.model}

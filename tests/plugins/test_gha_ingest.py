@@ -49,6 +49,9 @@ MOCK_RUNS = [
     },
 ]
 
+# Convenience patch decorator targeting the new paginated method name.
+_PATCH_FETCH = "arcane.plugins.builtin.gha_ingest.GHAIngestionPlugin._fetch_all_runs"
+
 
 class TestGHAIngestionPlugin:
     def test_implements_protocol(self):
@@ -64,7 +67,7 @@ class TestGHAIngestionPlugin:
         plugin = GHAIngestionPlugin(owner="o", repo="r")
         assert plugin.supports_incremental() is True
 
-    @patch("arcane.plugins.builtin.gha_ingest.GHAIngestionPlugin._fetch_runs")
+    @patch(_PATCH_FETCH)
     def test_ingest_converts_to_artifacts(self, mock_fetch):
         mock_fetch.return_value = MOCK_RUNS
         plugin = GHAIngestionPlugin(owner="owner", repo="repo")
@@ -80,7 +83,7 @@ class TestGHAIngestionPlugin:
             assert "raw_data" in r
             assert "created_at" in r
 
-    @patch("arcane.plugins.builtin.gha_ingest.GHAIngestionPlugin._fetch_runs")
+    @patch(_PATCH_FETCH)
     def test_ingest_title_includes_conclusion(self, mock_fetch):
         mock_fetch.return_value = MOCK_RUNS[:1]
         plugin = GHAIngestionPlugin(owner="owner", repo="repo")
@@ -88,7 +91,7 @@ class TestGHAIngestionPlugin:
 
         assert "success" in results[0]["title"].lower() or "CI" in results[0]["title"]
 
-    @patch("arcane.plugins.builtin.gha_ingest.GHAIngestionPlugin._fetch_runs")
+    @patch(_PATCH_FETCH)
     def test_ingest_since_filter(self, mock_fetch):
         mock_fetch.return_value = MOCK_RUNS
         plugin = GHAIngestionPlugin(owner="owner", repo="repo")
@@ -99,7 +102,7 @@ class TestGHAIngestionPlugin:
         assert len(results) == 1
         assert results[0]["external_id"] == "12345"
 
-    @patch("arcane.plugins.builtin.gha_ingest.GHAIngestionPlugin._fetch_runs")
+    @patch(_PATCH_FETCH)
     def test_ingest_raw_data_preserved(self, mock_fetch):
         mock_fetch.return_value = MOCK_RUNS[:1]
         plugin = GHAIngestionPlugin(owner="owner", repo="repo")
@@ -110,7 +113,7 @@ class TestGHAIngestionPlugin:
         assert raw["head_branch"] == "main"
         assert raw["event"] == "push"
 
-    @patch("arcane.plugins.builtin.gha_ingest.GHAIngestionPlugin._fetch_runs")
+    @patch(_PATCH_FETCH)
     def test_ingest_failure_detection(self, mock_fetch):
         mock_fetch.return_value = MOCK_RUNS
         plugin = GHAIngestionPlugin(owner="owner", repo="repo")
@@ -119,7 +122,7 @@ class TestGHAIngestionPlugin:
         failures = [r for r in results if r["raw_data"]["conclusion"] == "failure"]
         assert len(failures) == 1
 
-    @patch("arcane.plugins.builtin.gha_ingest.GHAIngestionPlugin._fetch_runs")
+    @patch(_PATCH_FETCH)
     def test_ingest_empty_runs(self, mock_fetch):
         mock_fetch.return_value = []
         plugin = GHAIngestionPlugin(owner="owner", repo="repo")

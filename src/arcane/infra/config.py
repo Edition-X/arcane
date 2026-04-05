@@ -3,33 +3,42 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 import yaml
+from pydantic import BaseModel, Field
 
 APP_NAME = "arcane"
 LEGACY_APP_NAME = "echovault"
 
 
-@dataclass
-class EmbeddingConfig:
+class EmbeddingConfig(BaseModel):
+    """Embedding provider configuration."""
+
     provider: str = "ollama"
     model: str = "nomic-embed-text"
     base_url: str | None = "http://localhost:11434"
     api_key: str | None = None
 
+    model_config = {"extra": "ignore"}
 
-@dataclass
-class ContextConfig:
-    semantic: str = "auto"
+
+class ContextConfig(BaseModel):
+    """Context retrieval configuration."""
+
+    semantic: Literal["auto", "always", "never"] = "auto"
     topup_recent: bool = True
 
+    model_config = {"extra": "ignore"}
 
-@dataclass
-class ArcaneConfig:
-    embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
-    context: ContextConfig = field(default_factory=ContextConfig)
+
+class ArcaneConfig(BaseModel):
+    """Top-level Arcane configuration."""
+
+    embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
+    context: ContextConfig = Field(default_factory=ContextConfig)
+
+    model_config = {"extra": "ignore"}
 
 
 def _global_config_path() -> str:
@@ -128,25 +137,11 @@ def get_home() -> str:
 
 
 def load_config(path: str) -> ArcaneConfig:
+    """Load ``ArcaneConfig`` from a YAML file, falling back to defaults."""
     try:
         with open(path) as f:
             data = yaml.safe_load(f) or {}
     except FileNotFoundError:
         return ArcaneConfig()
 
-    config = ArcaneConfig()
-    if "embedding" in data:
-        e = data["embedding"]
-        config.embedding = EmbeddingConfig(
-            provider=e.get("provider", "ollama"),
-            model=e.get("model", "nomic-embed-text"),
-            base_url=e.get("base_url", "http://localhost:11434"),
-            api_key=e.get("api_key"),
-        )
-    if "context" in data:
-        cx = data["context"]
-        config.context = ContextConfig(
-            semantic=cx.get("semantic", "auto"),
-            topup_recent=cx.get("topup_recent", True),
-        )
-    return config
+    return ArcaneConfig.model_validate(data)

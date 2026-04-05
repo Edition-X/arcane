@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import time
 import uuid
 from datetime import datetime
 from typing import Any
 
 import httpx
+
+logger = logging.getLogger(__name__)
+
+_LINEAR_GQL_URL = "https://api.linear.app/graphql"
+_PAGE_SIZE = 50
+_MAX_PAGES = 20
+_RETRY_ATTEMPTS = 3
+_RETRY_BACKOFF = 2.0  # seconds, doubles each attempt
 
 
 class LinearIngestionPlugin:
@@ -22,7 +32,7 @@ class LinearIngestionPlugin:
         self.team_id = team_id
 
     def ingest(self, project: str, since: datetime | None = None) -> list[dict[str, Any]]:
-        issues = self._fetch_issues()
+        issues = self._fetch_all_issues()
         artifacts: list[dict[str, Any]] = []
 
         for issue in issues:
@@ -59,13 +69,38 @@ class LinearIngestionPlugin:
 
         return artifacts
 
-    def _fetch_issues(self) -> list[dict[str, Any]]:
-        """Fetch issues from Linear GraphQL API."""
+    def _fetch_all_issues(self) -> list[dict[str, Any]]:
+        """Fetch all issues with cursor-based pagination (up to _MAX_PAGES)."""
+        all_issues: list[dict[str, Any]] = []
+        cursor: str | None = None
+
+        for page in range(_MAX_PAGES):
+            result = self._fetch_page(cursor)
+            if result is None:
+                break  # hard error — stop quietly (already logged)
+
+            nodes = result.get("nodes", [])
+            all_issues.extend(nodes)
+
+            page_info = result.get("pageInfo", {})
+            if not page_info.get("hasNextPage"):
+                break
+            cursor = page_info.get("endCursor")
+            if not cursor:
+                break
+
+            logger.debug("Linear: fetched page %d (%d issues so far)", page + 1, len(all_issues))
+
+        return all_issues
+
+    def _fetch_page(self, after: str | None = None) -> dict[str, Any] | None:
+        """Fetch a single page of issues with retry + exponential back-off."""
         query = """
-        query($teamId: String, $first: Int) {
+        query($teamId: String, $first: Int, $after: String) {
             issues(
                 filter: { team: { key: { eq: $teamId } } }
                 first: $first
+                after: $after
                 orderBy: createdAt
             ) {
                 nodes {
@@ -82,6 +117,7 @@ class LinearIngestionPlugin:
                     priority
                     estimate
                 }
+                pageInfo { hasNextPage endCursor }
             }
         }
         """
@@ -89,18 +125,39 @@ class LinearIngestionPlugin:
             "Authorization": self.api_key,
             "Content-Type": "application/json",
         }
-        try:
-            resp = httpx.post(
-                "https://api.linear.app/graphql",
-                headers=headers,
-                json={"query": query, "variables": {"teamId": self.team_id, "first": 50}},
-                timeout=15,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            return data.get("data", {}).get("issues", {}).get("nodes", [])
-        except Exception:
-            return []
+        variables: dict[str, Any] = {"teamId": self.team_id, "first": _PAGE_SIZE}
+        if after:
+            variables["after"] = after
+
+        delay = _RETRY_BACKOFF
+        for attempt in range(1, _RETRY_ATTEMPTS + 1):
+            try:
+                resp = httpx.post(
+                    _LINEAR_GQL_URL,
+                    headers=headers,
+                    json={"query": query, "variables": variables},
+                    timeout=15,
+                )
+                if resp.status_code == 429:
+                    retry_after = float(resp.headers.get("Retry-After", delay))
+                    logger.warning("Linear rate-limited; waiting %.1fs (attempt %d)", retry_after, attempt)
+                    time.sleep(retry_after)
+                    delay *= 2
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+                return data.get("data", {}).get("issues")
+            except httpx.HTTPStatusError as exc:
+                logger.warning("Linear API error %s (attempt %d)", exc.response.status_code, attempt)
+            except httpx.RequestError as exc:
+                logger.warning("Linear network error: %s (attempt %d)", exc, attempt)
+
+            if attempt < _RETRY_ATTEMPTS:
+                time.sleep(delay)
+                delay *= 2
+
+        logger.error("Linear: all %d attempts failed", _RETRY_ATTEMPTS)
+        return None
 
     def supports_incremental(self) -> bool:
         return True

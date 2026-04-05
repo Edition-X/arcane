@@ -38,6 +38,9 @@ MOCK_ISSUES = [
     },
 ]
 
+# Convenience patch decorator targeting the paginated method name.
+_PATCH_FETCH = "arcane.plugins.builtin.linear_ingest.LinearIngestionPlugin._fetch_all_issues"
+
 
 class TestLinearIngestionPlugin:
     def test_implements_protocol(self):
@@ -53,7 +56,7 @@ class TestLinearIngestionPlugin:
         plugin = LinearIngestionPlugin(api_key="test-key", team_id="PROJ")
         assert plugin.supports_incremental() is True
 
-    @patch("arcane.plugins.builtin.linear_ingest.LinearIngestionPlugin._fetch_issues")
+    @patch(_PATCH_FETCH)
     def test_ingest_converts_to_artifacts(self, mock_fetch):
         mock_fetch.return_value = MOCK_ISSUES
         plugin = LinearIngestionPlugin(api_key="test-key", team_id="PROJ")
@@ -69,21 +72,21 @@ class TestLinearIngestionPlugin:
             assert "raw_data" in r
             assert "created_at" in r
 
-    @patch("arcane.plugins.builtin.linear_ingest.LinearIngestionPlugin._fetch_issues")
+    @patch(_PATCH_FETCH)
     def test_ingest_external_id_uses_identifier(self, mock_fetch):
         mock_fetch.return_value = MOCK_ISSUES[:1]
         plugin = LinearIngestionPlugin(api_key="test-key", team_id="PROJ")
         results = plugin.ingest(project="test")
         assert results[0]["external_id"] == "PROJ-101"
 
-    @patch("arcane.plugins.builtin.linear_ingest.LinearIngestionPlugin._fetch_issues")
+    @patch(_PATCH_FETCH)
     def test_ingest_raw_data_includes_labels(self, mock_fetch):
         mock_fetch.return_value = MOCK_ISSUES[:1]
         plugin = LinearIngestionPlugin(api_key="test-key", team_id="PROJ")
         results = plugin.ingest(project="test")
         assert results[0]["raw_data"]["labels"] == ["bug", "auth"]
 
-    @patch("arcane.plugins.builtin.linear_ingest.LinearIngestionPlugin._fetch_issues")
+    @patch(_PATCH_FETCH)
     def test_ingest_since_filter(self, mock_fetch):
         mock_fetch.return_value = MOCK_ISSUES
         plugin = LinearIngestionPlugin(api_key="test-key", team_id="PROJ")
@@ -94,14 +97,14 @@ class TestLinearIngestionPlugin:
         assert len(results) == 1
         assert results[0]["external_id"] == "PROJ-102"
 
-    @patch("arcane.plugins.builtin.linear_ingest.LinearIngestionPlugin._fetch_issues")
+    @patch(_PATCH_FETCH)
     def test_ingest_empty(self, mock_fetch):
         mock_fetch.return_value = []
         plugin = LinearIngestionPlugin(api_key="test-key", team_id="PROJ")
         results = plugin.ingest(project="test")
         assert results == []
 
-    @patch("arcane.plugins.builtin.linear_ingest.LinearIngestionPlugin._fetch_issues")
+    @patch(_PATCH_FETCH)
     def test_ingest_state_preserved(self, mock_fetch):
         mock_fetch.return_value = MOCK_ISSUES
         plugin = LinearIngestionPlugin(api_key="test-key", team_id="PROJ")

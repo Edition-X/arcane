@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from dataclasses import asdict
 
 import click
 import yaml
@@ -31,7 +30,7 @@ def config(ctx: click.Context) -> None:
     if ctx.invoked_subcommand is None:
         home, source = resolve_home()
         cfg = load_config(os.path.join(home, "config.yaml"))
-        data = _redact_api_keys(asdict(cfg))
+        data = _redact_api_keys(cfg.model_dump())
         data["arcane_home"] = home
         data["arcane_home_source"] = source
         click.echo(yaml.safe_dump(data, sort_keys=False))

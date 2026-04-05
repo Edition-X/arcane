@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 
+import anyio
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
+
+logger = logging.getLogger(__name__)
 
 from arcane.domain.enums import RelationType
 from arcane.mcp_server.tools.content_tools import handle_draft_adr, handle_draft_blog
@@ -291,6 +295,8 @@ def _create_server(container: ServiceContainer) -> Server:
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+        # All handler functions are synchronous (SQLite + subprocess work).
+        # Run them in a thread so the asyncio event loop is never blocked.
         handlers = {
             "memory_save": lambda: handle_save(mem_svc, **arguments),
             "memory_search": lambda: handle_search(mem_svc, **arguments),
@@ -315,8 +321,9 @@ def _create_server(container: ServiceContainer) -> Server:
 
         handler = handlers.get(name)
         if handler:
-            result = handler()
+            result = await anyio.to_thread.run_sync(handler)
         else:
+            logger.warning("Unknown MCP tool requested: %s", name)
             result = json.dumps({"error": f"Unknown tool: {name}"})
 
         return [TextContent(type="text", text=result)]
