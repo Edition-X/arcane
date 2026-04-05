@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import uuid
 from datetime import datetime
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # Use record separator to cleanly delimit commits
 _RS = "\x1e"  # record separator
@@ -44,8 +47,13 @@ class GitIngestionPlugin:
                 cmd, cwd=self.repo_path, capture_output=True, text=True, timeout=30,
             )
             if result.returncode != 0:
+                logger.warning("git log returned non-zero exit code %d", result.returncode)
                 return []
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+        except subprocess.TimeoutExpired:
+            logger.warning("git log timed out in %s", self.repo_path)
+            return []
+        except FileNotFoundError:
+            logger.warning("git not found on PATH")
             return []
 
         # Parse commits from metadata
@@ -110,8 +118,10 @@ class GitIngestionPlugin:
             )
             if result.returncode == 0:
                 return [f for f in result.stdout.strip().split("\n") if f.strip()]
-        except Exception:
-            pass
+        except subprocess.TimeoutExpired:
+            logger.debug("diff-tree timed out for sha=%s", sha)
+        except FileNotFoundError:
+            logger.debug("git not found when fetching changed files")
         return []
 
     def _get_branch(self) -> str:
@@ -121,7 +131,8 @@ class GitIngestionPlugin:
                 cwd=self.repo_path, capture_output=True, text=True, timeout=5,
             )
             return result.stdout.strip() if result.returncode == 0 else "unknown"
-        except Exception:
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            logger.debug("Could not determine current branch")
             return "unknown"
 
     def supports_incremental(self) -> bool:

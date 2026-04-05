@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from datetime import datetime
 from typing import Any
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 class GHAIngestionPlugin:
@@ -73,7 +76,11 @@ class GHAIngestionPlugin:
             resp = httpx.get(url, headers=headers, params={"per_page": self.per_page}, timeout=15)
             resp.raise_for_status()
             return resp.json().get("workflow_runs", [])
-        except Exception:
+        except httpx.HTTPStatusError as exc:
+            logger.warning("GitHub API returned %s for %s", exc.response.status_code, url)
+            return []
+        except httpx.RequestError as exc:
+            logger.warning("Network error fetching GHA runs: %s", exc)
             return []
 
     def supports_incremental(self) -> bool:

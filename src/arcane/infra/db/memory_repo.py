@@ -3,11 +3,37 @@
 from __future__ import annotations
 
 import json
+import logging
 import struct
 from datetime import datetime, timezone
 from typing import Any
 
 from arcane.infra.db.connection import Database
+
+logger = logging.getLogger(__name__)
+
+
+def _parse_tags(raw: Any) -> list[str]:
+    """Deserialise tags from whatever shape the DB row delivers.
+
+    Tags are stored as a JSON array string.  This helper normalises them so
+    callers always receive ``list[str]`` — no json.loads scattered everywhere.
+    """
+    if isinstance(raw, list):
+        return raw
+    if raw and isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, ValueError):
+            return []
+    return []
+
+
+def _process_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Deserialise JSON fields on a raw DB row before returning to callers."""
+    row["tags"] = _parse_tags(row.get("tags"))
+    return row
 
 
 class MemoryRepository:
@@ -15,6 +41,7 @@ class MemoryRepository:
 
     def __init__(self, db: Database) -> None:
         self.db = db
+        self._vec_table_exists: bool | None = None
 
     def insert(self, mem: dict[str, Any], details: str | None = None) -> int:
         cursor = self.db.execute(
@@ -46,7 +73,7 @@ class MemoryRepository:
         return rowid  # type: ignore[return-value]
 
     def get(self, memory_id: str) -> dict[str, Any] | None:
-        return self.db.fetchone(
+        row = self.db.fetchone(
             """
             SELECT m.*,
                    EXISTS(SELECT 1 FROM memory_details WHERE memory_id = m.id) as has_details
@@ -54,12 +81,29 @@ class MemoryRepository:
             """,
             (memory_id,),
         )
+        return _process_row(row) if row else None
+
+    def get_rowid(self, memory_id: str) -> int | None:
+        """Return the SQLite rowid for *memory_id*, or ``None`` if not found."""
+        row = self.db.fetchone("SELECT rowid FROM memories WHERE id = ?", (memory_id,))
+        return row["rowid"] if row else None
 
     def get_details(self, memory_id: str) -> dict[str, Any] | None:
         return self.db.fetchone(
             "SELECT memory_id, body FROM memory_details WHERE memory_id LIKE ?",
             (memory_id + "%",),
         )
+
+    def resolve_prefix(self, id_prefix: str) -> str | None:
+        """Return the full ID for a given prefix, or ``None`` if not found.
+
+        Use this in CLI/MCP entry points where users supply short ID prefixes.
+        Internal service code should always pass exact IDs.
+        """
+        row = self.db.fetchone(
+            "SELECT id FROM memories WHERE id LIKE ?", (id_prefix + "%",)
+        )
+        return row["id"] if row else None
 
     def update(
         self,
@@ -70,9 +114,15 @@ class MemoryRepository:
         tags: list[str] | None = None,
         details_append: str | None = None,
     ) -> bool:
+        """Update an existing memory by exact ID."""
         row = self.db.fetchone(
-            "SELECT id, rowid FROM memories WHERE id LIKE ?", (memory_id + "%",)
+            "SELECT id, rowid FROM memories WHERE id = ?", (memory_id,)
         )
+        if not row:
+            # Fall back to prefix resolution for callers that pass short IDs
+            row = self.db.fetchone(
+                "SELECT id, rowid FROM memories WHERE id LIKE ?", (memory_id + "%",)
+            )
         if not row:
             return False
 
@@ -118,8 +168,12 @@ class MemoryRepository:
 
     def delete(self, memory_id: str) -> bool:
         row = self.db.fetchone(
-            "SELECT id FROM memories WHERE id LIKE ?", (memory_id + "%",)
+            "SELECT id FROM memories WHERE id = ?", (memory_id,)
         )
+        if not row:
+            row = self.db.fetchone(
+                "SELECT id FROM memories WHERE id LIKE ?", (memory_id + "%",)
+            )
         if not row:
             return False
 
@@ -155,7 +209,7 @@ class MemoryRepository:
 
         params.append(limit)
 
-        return self.db.fetchall(
+        rows = self.db.fetchall(
             f"""
             SELECT m.*, -fts.rank as score,
                    EXISTS(SELECT 1 FROM memory_details WHERE memory_id = m.id) as has_details
@@ -168,6 +222,7 @@ class MemoryRepository:
             """,
             params,
         )
+        return [_process_row(r) for r in rows]
 
     def vector_search(
         self,
@@ -179,7 +234,7 @@ class MemoryRepository:
         """Return the nearest-neighbour memories for ``query_embedding``.
 
         Project/source filters are applied inside SQL (via a JOIN condition)
-        so that the ``limit`` guarantee is meaningful — we never burn our K
+        so that the ``limit`` guarantee is meaningful — we never burn our k
         budget on rows that will be discarded afterwards.
         """
         if not self._has_vec_table():
@@ -219,7 +274,7 @@ class MemoryRepository:
         results = []
         for row in rows:
             row["score"] = 1.0 - row.pop("distance")
-            results.append(row)
+            results.append(_process_row(row))
 
         return results
 
@@ -245,7 +300,7 @@ class MemoryRepository:
 
         params.append(limit)
 
-        return self.db.fetchall(
+        rows = self.db.fetchall(
             f"""
             SELECT m.id, m.title, m.category, m.tags, m.project, m.source, m.created_at,
                    EXISTS(SELECT 1 FROM memory_details WHERE memory_id = m.id) as has_details
@@ -256,11 +311,13 @@ class MemoryRepository:
             """,
             params,
         )
+        return [_process_row(r) for r in rows]
 
     def list_all_for_reindex(self) -> list[dict[str, Any]]:
-        return self.db.fetchall(
+        rows = self.db.fetchall(
             "SELECT rowid, title, what, why, impact, tags FROM memories ORDER BY rowid"
         )
+        return [_process_row(r) for r in rows]
 
     def count(self, project: str | None = None, source: str | None = None) -> int:
         where_clauses: list[str] = []
@@ -281,9 +338,15 @@ class MemoryRepository:
         return row["cnt"] if row else 0
 
     def insert_vector(self, rowid: int, embedding: list[float]) -> None:
+        """Upsert a vector for *rowid* into the vec0 table.
+
+        vec0 virtual tables do not support ``INSERT OR REPLACE``, so we delete
+        the existing row first (if any) then insert.
+        """
         if not self._has_vec_table():
             return
         vec_bytes = struct.pack(f"{len(embedding)}f", *embedding)
+        self.db.execute("DELETE FROM memories_vec WHERE rowid = ?", (rowid,))
         self.db.execute(
             "INSERT INTO memories_vec (rowid, embedding) VALUES (?, ?)",
             (rowid, vec_bytes),
@@ -291,10 +354,17 @@ class MemoryRepository:
         self.db.commit()
 
     def _has_vec_table(self) -> bool:
-        row = self.db.fetchone(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='memories_vec'"
-        )
-        return row is not None
+        """Return whether the vector table exists, caching the result."""
+        if self._vec_table_exists is None:
+            row = self.db.fetchone(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='memories_vec'"
+            )
+            self._vec_table_exists = row is not None
+        return self._vec_table_exists
+
+    def invalidate_vec_cache(self) -> None:
+        """Force ``_has_vec_table`` to re-query on next access."""
+        self._vec_table_exists = None
 
     # Meta helpers
     def get_meta(self, key: str) -> str | None:
@@ -315,3 +385,4 @@ class MemoryRepository:
     def drop_vec_table(self) -> None:
         self.db.execute("DROP TABLE IF EXISTS memories_vec")
         self.db.commit()
+        self._vec_table_exists = False

@@ -42,7 +42,7 @@ class TestMemoryRepoUpdate:
 
         fetched = memory_repo.get(mem["id"])
         assert fetched["what"] == "Updated what"
-        assert json.loads(fetched["tags"]) == ["new-tag"]
+        assert fetched["tags"] == ["new-tag"]
 
     def test_update_nonexistent(self, memory_repo):
         assert memory_repo.update("nonexistent-id", what="x") is False

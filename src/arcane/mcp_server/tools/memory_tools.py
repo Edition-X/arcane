@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import datetime
 
 from arcane.domain.enums import Category
 from arcane.domain.models import RawMemoryInput
 from arcane.services.memory import MemoryService
+
+logger = logging.getLogger(__name__)
 
 VALID_CATEGORIES = tuple(c.value for c in Category)
 
@@ -42,7 +45,9 @@ def handle_save(
     journey_id: str | None = None,
 ) -> str:
     project = project or os.path.basename(os.getcwd())
+    # Sanitise category at the handler boundary so the domain model stays strict
     if category and category not in VALID_CATEGORIES:
+        logger.debug("Unknown category '%s' received via MCP; coercing to 'context'", category)
         category = "context"
 
     raw = RawMemoryInput(
@@ -71,15 +76,6 @@ def handle_search(
 
     clean = []
     for r in results:
-        tags_raw = r.get("tags", "[]")
-        if isinstance(tags_raw, str):
-            try:
-                tags_list = json.loads(tags_raw)
-            except (json.JSONDecodeError, TypeError):
-                tags_list = []
-        else:
-            tags_list = tags_raw if isinstance(tags_raw, list) else []
-
         clean.append({
             "id": r["id"],
             "title": r["title"],
@@ -87,7 +83,7 @@ def handle_search(
             "why": r.get("why"),
             "impact": r.get("impact"),
             "category": r.get("category"),
-            "tags": tags_list,
+            "tags": r.get("tags", []),  # already list[str] from repo
             "project": r.get("project"),
             "created_at": r.get("created_at", "")[:10],
             "score": round(r.get("score", 0), 2),
@@ -102,19 +98,11 @@ def handle_context(
     limit: int = 10,
 ) -> str:
     project = project or os.path.basename(os.getcwd())
-    results, total = svc.get_context(limit=limit, project=project, semantic_mode="never")
+    # Honour the configured semantic mode rather than hardcoding "never"
+    results, total = svc.get_context(limit=limit, project=project)
 
     memories = []
     for r in results:
-        tags_raw = r.get("tags", "[]")
-        if isinstance(tags_raw, str):
-            try:
-                tags_list = json.loads(tags_raw)
-            except (json.JSONDecodeError, TypeError):
-                tags_list = []
-        else:
-            tags_list = tags_raw if isinstance(tags_raw, list) else []
-
         date_str = r.get("created_at", "")[:10]
         try:
             dt = datetime.fromisoformat(date_str)
@@ -126,7 +114,7 @@ def handle_context(
             "id": r["id"],
             "title": r.get("title", "Untitled"),
             "category": r.get("category", ""),
-            "tags": tags_list,
+            "tags": r.get("tags", []),  # already list[str] from repo
             "date": date_display,
         })
 

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from importlib.metadata import entry_points
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def discover_plugins(group: str) -> dict[str, Any]:
@@ -20,5 +23,5 @@ def discover_plugins(group: str) -> dict[str, Any]:
         try:
             plugins[ep.name] = ep.load()
         except Exception:
-            pass
+            logger.warning("Failed to load plugin '%s' from group '%s'", ep.name, group, exc_info=True)
     return plugins
