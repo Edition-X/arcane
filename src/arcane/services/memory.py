@@ -125,20 +125,10 @@ class MemoryService:
             logger.debug("FTS dedup search failed; treating as new memory", exc_info=True)
 
         if candidates:
-            # Widen the pool to compute a stable normalisation baseline
-            broad = candidates
-            if len(broad) == 1:
-                try:
-                    broad = self.c.memory_repo.fts_search(f"{raw.title} {raw.what}", limit=5) or broad
-                except Exception:
-                    logger.debug("Broadened dedup search failed; using narrow pool", exc_info=True)
-
-            max_score = max(c["score"] for c in broad) if broad else 0.0
             top = candidates[0]
-            normalized = top["score"] / max_score if max_score > 0 else 0.0
             title_match = raw.title.strip().lower() == top["title"].strip().lower()
 
-            if normalized >= 0.7 and title_match:
+            if title_match:
                 existing_id = top["id"]
                 merged_tags = self._merge_tags(top.get("tags") or [], raw.tags)
                 details_append = f"--- updated {today} ---\n{raw.details}" if raw.details else None

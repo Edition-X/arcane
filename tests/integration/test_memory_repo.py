@@ -78,7 +78,35 @@ class TestMemoryRepoDelete:
         assert memory_repo.delete("nonexistent") is False
 
 
+class TestMemoryRepoGetMany:
+    def test_get_many_returns_all(self, memory_repo):
+        ids = []
+        for i in range(3):
+            mem = make_memory_dict(title=f"Bulk {i}", what=f"Item {i}")
+            memory_repo.insert(mem)
+            ids.append(mem["id"])
+
+        results = memory_repo.get_many(ids)
+        assert len(results) == 3
+        result_ids = {r["id"] for r in results}
+        assert result_ids == set(ids)
+
+    def test_get_many_ignores_missing(self, memory_repo):
+        mem = make_memory_dict()
+        memory_repo.insert(mem)
+        results = memory_repo.get_many([mem["id"], "nonexistent-id"])
+        assert len(results) == 1
+
+    def test_get_many_empty_list(self, memory_repo):
+        assert memory_repo.get_many([]) == []
+
+
 class TestMemoryRepoFTSSearch:
+    def test_fts_empty_query_returns_empty(self, memory_repo):
+        memory_repo.insert(make_memory_dict(title="Something", what="Content"))
+        assert memory_repo.fts_search("") == []
+        assert memory_repo.fts_search("   ") == []
+
     def test_fts_finds_by_title(self, memory_repo):
         mem = make_memory_dict(title="Terraform AMI pipeline", what="Built a pipeline")
         memory_repo.insert(mem)
