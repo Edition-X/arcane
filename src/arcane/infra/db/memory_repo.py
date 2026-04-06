@@ -79,7 +79,7 @@ class MemoryRepository:
             )
 
         self.db.commit()
-        return rowid  # type: ignore[return-value]
+        return rowid  # type: ignore[no-any-return]
 
     def get(self, memory_id: str) -> dict[str, Any] | None:
         row = self.db.fetchone(

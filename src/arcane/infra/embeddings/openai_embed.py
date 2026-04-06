@@ -20,4 +20,4 @@ class OpenAIEmbedding(EmbeddingProvider):
             timeout=30.0,
         )
         resp.raise_for_status()
-        return resp.json()["data"][0]["embedding"]
+        return list(resp.json()["data"][0]["embedding"])

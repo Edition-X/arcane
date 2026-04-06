@@ -33,7 +33,7 @@ class ArtifactRepository:
             ),
         )
         self.db.commit()
-        return cursor.lastrowid  # type: ignore[return-value]
+        return cursor.lastrowid  # type: ignore[no-any-return]
 
     def get_many(self, artifact_ids: list[str]) -> list[dict[str, Any]]:
         """Fetch multiple artifacts by exact ID in a single query."""

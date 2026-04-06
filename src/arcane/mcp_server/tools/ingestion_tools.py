@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 
+from arcane.plugins.protocols import IntelligencePlugin
 from arcane.services.container import ServiceContainer
 from arcane.services.ingestion import IngestionService
 
@@ -70,6 +71,7 @@ def handle_analyze(
     project = project or os.path.basename(os.getcwd())
     svc = IntelligenceService(container)
 
+    plugin: IntelligencePlugin
     if plugin_name == "ci_flakes":
         from arcane.plugins.builtin.ci_flakes import CIFlakeDetector
 

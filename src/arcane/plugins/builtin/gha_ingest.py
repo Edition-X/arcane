@@ -80,6 +80,8 @@ class GHAIngestionPlugin:
         params: dict[str, Any] = {"per_page": self.per_page}
 
         for page in range(_MAX_PAGES):
+            if url is None:
+                break
             result = self._fetch_page(url, params)
             if result is None:
                 break

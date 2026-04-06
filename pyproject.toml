@@ -36,6 +36,7 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.10",
     "pre-commit>=3.7",
+    "types-PyYAML>=6.0",
 ]
 
 [project.scripts]
@@ -89,5 +90,5 @@ no_implicit_optional = true
 files = ["src/arcane"]
 
 [[tool.mypy.overrides]]
-module = ["sqlite_vec", "mcp.*"]
+module = ["sqlite_vec", "mcp.*", "pysqlite3", "pysqlite3.dbapi2"]
 ignore_missing_imports = true

@@ -36,7 +36,7 @@ class JourneyRepository:
             ),
         )
         self.db.commit()
-        return cursor.lastrowid  # type: ignore[return-value]
+        return cursor.lastrowid  # type: ignore[no-any-return]
 
     def get(self, journey_id: str) -> dict[str, Any] | None:
         return self.db.fetchone("SELECT * FROM journeys WHERE id LIKE ?", (journey_id + "%",))

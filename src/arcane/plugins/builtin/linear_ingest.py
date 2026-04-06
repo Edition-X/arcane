@@ -148,7 +148,8 @@ class LinearIngestionPlugin:
                     continue
                 resp.raise_for_status()
                 data = resp.json()
-                return data.get("data", {}).get("issues")
+                result: dict[str, Any] | None = data.get("data", {}).get("issues")
+                return result
             except httpx.HTTPStatusError as exc:
                 logger.warning("Linear API error %s (attempt %d)", exc.response.status_code, attempt)
             except httpx.RequestError as exc:

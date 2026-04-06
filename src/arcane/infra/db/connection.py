@@ -7,7 +7,7 @@ from typing import Any
 try:
     import pysqlite3.dbapi2 as sqlite3
 except ImportError:
-    import sqlite3  # type: ignore[no-redef]
+    import sqlite3
 
 import sqlite_vec
 
