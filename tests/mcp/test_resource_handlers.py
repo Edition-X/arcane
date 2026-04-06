@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
-from arcane.mcp_server.resources import _parse_project_from_uri, RESOURCE_TEMPLATE_URI
+from arcane.mcp_server.resources import RESOURCE_TEMPLATE_URI, _parse_project_from_uri
 from arcane.mcp_server.tools.memory_tools import handle_context, handle_save
 from arcane.services.memory import MemoryService
 

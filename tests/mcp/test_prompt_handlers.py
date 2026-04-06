@@ -6,9 +6,9 @@ import pytest
 
 from arcane.mcp_server.prompts import (
     PROMPTS,
-    build_recall_prompt,
     build_catchup_prompt,
     build_journey_prompt,
+    build_recall_prompt,
 )
 
 
