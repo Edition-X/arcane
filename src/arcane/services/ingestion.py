@@ -33,7 +33,9 @@ class IngestionService:
         for art in artifacts:
             # Dedup: check if artifact already exists by type + external_id + project
             existing = self.c.artifact_repo.find_by_external(
-                art["artifact_type"], art["external_id"], art["project"],
+                art["artifact_type"],
+                art["external_id"],
+                art["project"],
             )
             if existing:
                 skipped += 1
@@ -68,7 +70,4 @@ class IngestionService:
         journey_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Run multiple ingestion plugins."""
-        return [
-            self.run_plugin(plugin, project=project, since=since, journey_id=journey_id)
-            for plugin in plugins
-        ]
+        return [self.run_plugin(plugin, project=project, since=since, journey_id=journey_id) for plugin in plugins]

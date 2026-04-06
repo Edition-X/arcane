@@ -10,8 +10,6 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
-logger = logging.getLogger(__name__)
-
 from arcane.domain.enums import RelationType
 from arcane.mcp_server.tools.content_tools import handle_draft_adr, handle_draft_blog
 from arcane.mcp_server.tools.ingestion_tools import (
@@ -42,6 +40,8 @@ from arcane.mcp_server.tools.relationship_tools import handle_link, handle_trace
 from arcane.services.container import ServiceContainer, create_container
 from arcane.services.journey import JourneyService
 from arcane.services.memory import MemoryService
+
+logger = logging.getLogger(__name__)
 
 
 def _create_server(container: ServiceContainer) -> Server:

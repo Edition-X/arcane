@@ -79,12 +79,10 @@ class JourneyService:
         art_by_id = {a["id"]: a for a in self.c.artifact_repo.get_many(art_ids)}
 
         linked_memories = [
-            {"memory": mem_by_id[mid], "relation": mem_rel_map[mid]}
-            for mid in mem_ids if mid in mem_by_id
+            {"memory": mem_by_id[mid], "relation": mem_rel_map[mid]} for mid in mem_ids if mid in mem_by_id
         ]
         linked_artifacts = [
-            {"artifact": art_by_id[aid], "relation": art_rel_map[aid]}
-            for aid in art_ids if aid in art_by_id
+            {"artifact": art_by_id[aid], "relation": art_rel_map[aid]} for aid in art_ids if aid in art_by_id
         ]
 
         journey["linked_memories"] = linked_memories

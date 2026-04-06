@@ -67,44 +67,68 @@ class TestRelationshipRepoBasic:
 class TestRelationshipTrace:
     def test_trace_simple_chain(self, relationship_repo):
         """A -> B -> C should return both edges."""
-        relationship_repo.insert(make_rel(
-            source_type="memory", source_id="a",
-            target_type="journey", target_id="b",
-            relation="led_to",
-        ))
-        relationship_repo.insert(make_rel(
-            source_type="journey", source_id="b",
-            target_type="artifact", target_id="c",
-            relation="resulted_in",
-        ))
+        relationship_repo.insert(
+            make_rel(
+                source_type="memory",
+                source_id="a",
+                target_type="journey",
+                target_id="b",
+                relation="led_to",
+            )
+        )
+        relationship_repo.insert(
+            make_rel(
+                source_type="journey",
+                source_id="b",
+                target_type="artifact",
+                target_id="c",
+                relation="resulted_in",
+            )
+        )
 
         result = relationship_repo.trace("memory", "a", max_depth=5)
         assert len(result) == 2
 
     def test_trace_max_depth_0(self, relationship_repo):
         """Depth 0 should only return direct edges."""
-        relationship_repo.insert(make_rel(
-            source_type="memory", source_id="a",
-            target_type="journey", target_id="b",
-        ))
-        relationship_repo.insert(make_rel(
-            source_type="journey", source_id="b",
-            target_type="artifact", target_id="c",
-        ))
+        relationship_repo.insert(
+            make_rel(
+                source_type="memory",
+                source_id="a",
+                target_type="journey",
+                target_id="b",
+            )
+        )
+        relationship_repo.insert(
+            make_rel(
+                source_type="journey",
+                source_id="b",
+                target_type="artifact",
+                target_id="c",
+            )
+        )
 
         result = relationship_repo.trace("memory", "a", max_depth=0)
         assert len(result) == 1
 
     def test_trace_handles_cycle(self, relationship_repo):
         """Graph with a cycle should not loop infinitely."""
-        relationship_repo.insert(make_rel(
-            source_type="memory", source_id="a",
-            target_type="memory", target_id="b",
-        ))
-        relationship_repo.insert(make_rel(
-            source_type="memory", source_id="b",
-            target_type="memory", target_id="a",
-        ))
+        relationship_repo.insert(
+            make_rel(
+                source_type="memory",
+                source_id="a",
+                target_type="memory",
+                target_id="b",
+            )
+        )
+        relationship_repo.insert(
+            make_rel(
+                source_type="memory",
+                source_id="b",
+                target_type="memory",
+                target_id="a",
+            )
+        )
 
         result = relationship_repo.trace("memory", "a", max_depth=10)
         assert len(result) == 2

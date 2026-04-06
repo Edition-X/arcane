@@ -34,9 +34,7 @@ class VelocityTracker:
         completed_journeys = 0
 
         if self.artifact_repo:
-            commits = self.artifact_repo.list_all(
-                project=project, artifact_type="commit", limit=1000
-            )
+            commits = self.artifact_repo.list_all(project=project, artifact_type="commit", limit=1000)
             commit_count = len(commits)
 
         if self.memory_repo:
@@ -66,22 +64,23 @@ class VelocityTracker:
         if memory_count == 0 and commit_count > 10:
             severity = "warning"
             body_lines.append(
-                "\n  Warning: Many commits but no memories captured. "
-                "Consider documenting decisions and learnings."
+                "\n  Warning: Many commits but no memories captured. Consider documenting decisions and learnings."
             )
 
-        return [{
-            "id": str(uuid.uuid4()),
-            "insight_type": "velocity",
-            "title": f"Velocity: {commit_count} commits, {memory_count} memories, {journey_count} journeys",
-            "body": "\n".join(body_lines),
-            "severity": severity,
-            "project": project,
-            "metadata": {
-                "commit_count": commit_count,
-                "memory_count": memory_count,
-                "journey_count": journey_count,
-                "completed_journeys": completed_journeys,
-            },
-            "created_at": now,
-        }]
+        return [
+            {
+                "id": str(uuid.uuid4()),
+                "insight_type": "velocity",
+                "title": f"Velocity: {commit_count} commits, {memory_count} memories, {journey_count} journeys",
+                "body": "\n".join(body_lines),
+                "severity": severity,
+                "project": project,
+                "metadata": {
+                    "commit_count": commit_count,
+                    "memory_count": memory_count,
+                    "journey_count": journey_count,
+                    "completed_journeys": completed_journeys,
+                },
+                "created_at": now,
+            }
+        ]

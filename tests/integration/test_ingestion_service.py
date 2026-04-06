@@ -92,6 +92,7 @@ class TestIngestionService:
     def test_run_plugin_auto_links_to_journey(self, container):
         """If a journey_id is provided, link ingested artifacts."""
         from arcane.services.journey import JourneyService
+
         js = JourneyService(container)
         journey = js.start(title="Test Journey", project="test-project")
 

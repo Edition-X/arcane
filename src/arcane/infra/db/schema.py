@@ -179,7 +179,9 @@ def create_schema(db: Database) -> None:
     db.execute("CREATE INDEX IF NOT EXISTS idx_journeys_project_status ON journeys(project, status)")
 
     db.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_project ON artifacts(project)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_type_ext_proj ON artifacts(artifact_type, external_id, project)")
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_artifacts_type_ext_proj ON artifacts(artifact_type, external_id, project)"
+    )
 
     db.execute("CREATE INDEX IF NOT EXISTS idx_insights_project ON insights(project)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_insights_ack ON insights(acknowledged, project)")

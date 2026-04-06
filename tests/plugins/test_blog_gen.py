@@ -57,8 +57,10 @@ def journey_with_memories(container):
 
     # Link artifact to journey
     rel = Relationship(
-        source_type="artifact", source_id=art.id,
-        target_type="journey", target_id=journey_id,
+        source_type="artifact",
+        source_id=art.id,
+        target_type="journey",
+        target_id=journey_id,
         relation=RelationType.RESULTED_IN,
     )
     container.relationship_repo.insert(rel.model_dump())
@@ -72,6 +74,7 @@ def journey_with_memories(container):
 class TestBlogGenerator:
     def test_implements_protocol(self):
         from arcane.plugins.protocols import ContentPlugin
+
         gen = BlogGenerator()
         assert isinstance(gen, ContentPlugin)
 
@@ -82,6 +85,7 @@ class TestBlogGenerator:
     def test_generate_from_journey_context(self, container, journey_with_memories):
         """Generate a structured blog brief from a journey context."""
         from arcane.services.journey import JourneyService
+
         js = JourneyService(container)
         journey_data = js.show(journey_with_memories)
 
@@ -95,6 +99,7 @@ class TestBlogGenerator:
 
     def test_generate_includes_artifacts(self, container, journey_with_memories):
         from arcane.services.journey import JourneyService
+
         js = JourneyService(container)
         journey_data = js.show(journey_with_memories)
 
@@ -105,6 +110,7 @@ class TestBlogGenerator:
 
     def test_generate_has_structure(self, container, journey_with_memories):
         from arcane.services.journey import JourneyService
+
         js = JourneyService(container)
         journey_data = js.show(journey_with_memories)
 

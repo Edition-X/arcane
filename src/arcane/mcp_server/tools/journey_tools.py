@@ -49,14 +49,16 @@ def handle_journey_list(
 ) -> str:
     project = project or os.path.basename(os.getcwd())
     journeys = svc.list(project=project, status=status, limit=limit)
-    return json.dumps([
-        {
-            "id": j["id"],
-            "title": j["title"],
-            "status": j["status"],
-            "project": j["project"],
-            "started_at": j["started_at"][:10],
-            "completed_at": (j.get("completed_at") or "")[:10] or None,
-        }
-        for j in journeys
-    ])
+    return json.dumps(
+        [
+            {
+                "id": j["id"],
+                "title": j["title"],
+                "status": j["status"],
+                "project": j["project"],
+                "started_at": j["started_at"][:10],
+                "completed_at": (j.get("completed_at") or "")[:10] or None,
+            }
+            for j in journeys
+        ]
+    )

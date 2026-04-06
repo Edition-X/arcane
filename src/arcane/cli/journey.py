@@ -23,9 +23,7 @@ def journey_start(title: str, project: str | None, linear_issue: str | None) -> 
     from arcane.services.journey import JourneyService
 
     with create_container() as container:
-        result = JourneyService(container).start(
-            title=title, project=project, linear_issue_id=linear_issue
-        )
+        result = JourneyService(container).start(title=title, project=project, linear_issue_id=linear_issue)
     click.echo(f"Journey started: {result['title']} (id: {result['id'][:12]})")
 
 

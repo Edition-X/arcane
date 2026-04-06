@@ -72,9 +72,11 @@ def handle_analyze(
 
     if plugin_name == "ci_flakes":
         from arcane.plugins.builtin.ci_flakes import CIFlakeDetector
+
         plugin = CIFlakeDetector(artifact_repo=container.artifact_repo)
     elif plugin_name == "velocity":
         from arcane.plugins.builtin.velocity import VelocityTracker
+
         plugin = VelocityTracker(
             artifact_repo=container.artifact_repo,
             memory_repo=container.memory_repo,

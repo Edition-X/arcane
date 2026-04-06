@@ -20,6 +20,7 @@ from arcane.cli.relationship import link, trace
 def main(ctx: click.Context, verbose: bool) -> None:
     """Arcane — unified engineering intelligence."""
     from arcane.infra.logging import configure_logging
+
     configure_logging(verbose=verbose)
     ctx.ensure_object(dict)
     ctx.obj["verbose"] = verbose
@@ -48,5 +49,7 @@ main.add_command(draft)
 def mcp() -> None:
     """Start the Arcane MCP server (stdio transport)."""
     import asyncio
+
     from arcane.mcp_server.server import run_server
+
     asyncio.run(run_server())

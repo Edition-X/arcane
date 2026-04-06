@@ -42,39 +42,47 @@ class ADRGenerator:
 
         # Tags as keywords
         if tag_list:
-            lines.extend([
-                "## Keywords",
-                ", ".join(tag_list),
-                "",
-            ])
+            lines.extend(
+                [
+                    "## Keywords",
+                    ", ".join(tag_list),
+                    "",
+                ]
+            )
 
-        lines.extend([
-            "## Context",
-            what or "No context provided.",
-            "",
-            "## Decision",
-            why or "See details below.",
-            "",
-            "## Consequences",
-            impact or "See details below.",
-            "",
-        ])
+        lines.extend(
+            [
+                "## Context",
+                what or "No context provided.",
+                "",
+                "## Decision",
+                why or "See details below.",
+                "",
+                "## Consequences",
+                impact or "See details below.",
+                "",
+            ]
+        )
 
         if details:
-            lines.extend([
-                "## Details",
-                details,
-                "",
-            ])
+            lines.extend(
+                [
+                    "## Details",
+                    details,
+                    "",
+                ]
+            )
 
         # Add category-specific sections
         category = memory.get("category", "")
         if category == "decision" and not details:
-            lines.extend([
-                "## Details",
-                "*No detailed analysis was captured for this decision.*",
-                "*Consider adding: options considered, tradeoffs, and follow-up items.*",
-                "",
-            ])
+            lines.extend(
+                [
+                    "## Details",
+                    "*No detailed analysis was captured for this decision.*",
+                    "*Consider adding: options considered, tradeoffs, and follow-up items.*",
+                    "",
+                ]
+            )
 
         return "\n".join(lines)

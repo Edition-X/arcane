@@ -114,9 +114,7 @@ class MigrationService:
         checks["fts_synced"] = fts_count == checks["memories_count"]
 
         # Check vec table
-        row = db.fetchone(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='memories_vec'"
-        )
+        row = db.fetchone("SELECT name FROM sqlite_master WHERE type='table' AND name='memories_vec'")
         checks["vec_table_exists"] = row is not None
 
         # Check embedding dim

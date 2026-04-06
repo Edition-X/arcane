@@ -38,19 +38,19 @@ def handle_draft_adr(
     detail = container.memory_repo.get_details(memory_id)
     detail_body = detail["body"] if detail else ""
 
-    brief = f"""# ADR: {mem['title']}
+    brief = f"""# ADR: {mem["title"]}
 
 ## Status
 Accepted
 
 ## Context
-{mem.get('what', '')}
+{mem.get("what", "")}
 
 ## Decision
-{mem.get('why', 'See details below.')}
+{mem.get("why", "See details below.")}
 
 ## Consequences
-{mem.get('impact', 'See details below.')}
+{mem.get("impact", "See details below.")}
 
 ## Details
 {detail_body}

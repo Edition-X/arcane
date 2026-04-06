@@ -1,7 +1,5 @@
 """Integration tests for MemoryRepository with real SQLite."""
 
-import json
-
 from tests.conftest import make_memory_dict
 
 

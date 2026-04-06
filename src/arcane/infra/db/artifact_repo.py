@@ -22,10 +22,14 @@ class ArtifactRepository:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                artifact["id"], artifact["artifact_type"], artifact["external_id"],
-                artifact["title"], artifact.get("url"),
+                artifact["id"],
+                artifact["artifact_type"],
+                artifact["external_id"],
+                artifact["title"],
+                artifact.get("url"),
                 json.dumps(artifact.get("raw_data", {})),
-                artifact["project"], artifact["created_at"],
+                artifact["project"],
+                artifact["created_at"],
             ),
         )
         self.db.commit()
@@ -42,13 +46,9 @@ class ArtifactRepository:
         )
 
     def get(self, artifact_id: str) -> dict[str, Any] | None:
-        return self.db.fetchone(
-            "SELECT * FROM artifacts WHERE id LIKE ?", (artifact_id + "%",)
-        )
+        return self.db.fetchone("SELECT * FROM artifacts WHERE id LIKE ?", (artifact_id + "%",))
 
-    def find_by_external(
-        self, artifact_type: str, external_id: str, project: str
-    ) -> dict[str, Any] | None:
+    def find_by_external(self, artifact_type: str, external_id: str, project: str) -> dict[str, Any] | None:
         return self.db.fetchone(
             "SELECT * FROM artifacts WHERE artifact_type = ? AND external_id = ? AND project = ?",
             (artifact_type, external_id, project),
@@ -83,9 +83,7 @@ class ArtifactRepository:
 
     def count(self, project: str | None = None) -> int:
         if project:
-            row = self.db.fetchone(
-                "SELECT COUNT(*) as cnt FROM artifacts WHERE project = ?", (project,)
-            )
+            row = self.db.fetchone("SELECT COUNT(*) as cnt FROM artifacts WHERE project = ?", (project,))
         else:
             row = self.db.fetchone("SELECT COUNT(*) as cnt FROM artifacts")
         return row["cnt"] if row else 0

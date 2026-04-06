@@ -59,14 +59,16 @@ def handle_trace(
     max_depth: int = 5,
 ) -> str:
     rels = container.relationship_repo.trace(entity_type, entity_id, max_depth=max_depth)
-    return json.dumps([
-        {
-            "id": r["id"],
-            "source_type": r["source_type"],
-            "source_id": r["source_id"],
-            "target_type": r["target_type"],
-            "target_id": r["target_id"],
-            "relation": r["relation"],
-        }
-        for r in rels
-    ])
+    return json.dumps(
+        [
+            {
+                "id": r["id"],
+                "source_type": r["source_type"],
+                "source_id": r["source_id"],
+                "target_type": r["target_type"],
+                "target_id": r["target_id"],
+                "relation": r["relation"],
+            }
+            for r in rels
+        ]
+    )

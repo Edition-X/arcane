@@ -46,9 +46,7 @@ class ServiceContainer:
     @property
     def ignore_patterns(self) -> list[str]:
         if self._ignore_patterns is None:
-            self._ignore_patterns = load_memoryignore(
-                os.path.join(self.home, ".memoryignore")
-            )
+            self._ignore_patterns = load_memoryignore(os.path.join(self.home, ".memoryignore"))
         return self._ignore_patterns
 
     def close(self) -> None:
