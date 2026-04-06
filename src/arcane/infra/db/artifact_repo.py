@@ -22,23 +22,33 @@ class ArtifactRepository:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                artifact["id"], artifact["artifact_type"], artifact["external_id"],
-                artifact["title"], artifact.get("url"),
+                artifact["id"],
+                artifact["artifact_type"],
+                artifact["external_id"],
+                artifact["title"],
+                artifact.get("url"),
                 json.dumps(artifact.get("raw_data", {})),
-                artifact["project"], artifact["created_at"],
+                artifact["project"],
+                artifact["created_at"],
             ),
         )
         self.db.commit()
-        return cursor.lastrowid  # type: ignore[return-value]
+        return cursor.lastrowid  # type: ignore[no-any-return]
 
-    def get(self, artifact_id: str) -> dict[str, Any] | None:
-        return self.db.fetchone(
-            "SELECT * FROM artifacts WHERE id LIKE ?", (artifact_id + "%",)
+    def get_many(self, artifact_ids: list[str]) -> list[dict[str, Any]]:
+        """Fetch multiple artifacts by exact ID in a single query."""
+        if not artifact_ids:
+            return []
+        placeholders = ",".join("?" for _ in artifact_ids)
+        return self.db.fetchall(
+            f"SELECT * FROM artifacts WHERE id IN ({placeholders})",
+            artifact_ids,
         )
 
-    def find_by_external(
-        self, artifact_type: str, external_id: str, project: str
-    ) -> dict[str, Any] | None:
+    def get(self, artifact_id: str) -> dict[str, Any] | None:
+        return self.db.fetchone("SELECT * FROM artifacts WHERE id LIKE ?", (artifact_id + "%",))
+
+    def find_by_external(self, artifact_type: str, external_id: str, project: str) -> dict[str, Any] | None:
         return self.db.fetchone(
             "SELECT * FROM artifacts WHERE artifact_type = ? AND external_id = ? AND project = ?",
             (artifact_type, external_id, project),
@@ -73,9 +83,7 @@ class ArtifactRepository:
 
     def count(self, project: str | None = None) -> int:
         if project:
-            row = self.db.fetchone(
-                "SELECT COUNT(*) as cnt FROM artifacts WHERE project = ?", (project,)
-            )
+            row = self.db.fetchone("SELECT COUNT(*) as cnt FROM artifacts WHERE project = ?", (project,))
         else:
             row = self.db.fetchone("SELECT COUNT(*) as cnt FROM artifacts")
         return row["cnt"] if row else 0

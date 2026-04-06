@@ -22,23 +22,24 @@ class InsightRepository:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                insight["id"], insight["insight_type"], insight["title"],
-                insight["body"], insight.get("severity", "info"),
-                insight["project"], json.dumps(insight.get("metadata", {})),
-                insight["created_at"], 0,
+                insight["id"],
+                insight["insight_type"],
+                insight["title"],
+                insight["body"],
+                insight.get("severity", "info"),
+                insight["project"],
+                json.dumps(insight.get("metadata", {})),
+                insight["created_at"],
+                0,
             ),
         )
         self.db.commit()
 
     def acknowledge(self, insight_id: str) -> bool:
-        row = self.db.fetchone(
-            "SELECT id FROM insights WHERE id LIKE ?", (insight_id + "%",)
-        )
+        row = self.db.fetchone("SELECT id FROM insights WHERE id LIKE ?", (insight_id + "%",))
         if not row:
             return False
-        self.db.execute(
-            "UPDATE insights SET acknowledged = 1 WHERE id = ?", (row["id"],)
-        )
+        self.db.execute("UPDATE insights SET acknowledged = 1 WHERE id = ?", (row["id"],))
         self.db.commit()
         return True
 
@@ -70,9 +71,7 @@ class InsightRepository:
 
     def count(self, project: str | None = None) -> int:
         if project:
-            row = self.db.fetchone(
-                "SELECT COUNT(*) as cnt FROM insights WHERE project = ?", (project,)
-            )
+            row = self.db.fetchone("SELECT COUNT(*) as cnt FROM insights WHERE project = ?", (project,))
         else:
             row = self.db.fetchone("SELECT COUNT(*) as cnt FROM insights")
         return row["cnt"] if row else 0

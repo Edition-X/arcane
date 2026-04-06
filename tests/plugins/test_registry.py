@@ -25,6 +25,7 @@ class TestPluginRegistry:
     def test_discover_returns_classes(self):
         plugins = discover_plugins("arcane.plugins.ingestion")
         from arcane.plugins.builtin.git_ingest import GitIngestionPlugin
+
         assert plugins["git"] is GitIngestionPlugin
 
     def test_discover_unknown_group(self):
@@ -35,11 +36,21 @@ class TestPluginRegistry:
         from arcane.plugins.protocols import ContentPlugin, IngestionPlugin, IntelligencePlugin
 
         for name, cls in discover_plugins("arcane.plugins.ingestion").items():
-            instance = cls() if name == "git" else cls(api_key="k", team_id="t") if name == "linear" else cls(owner="o", repo="r")
+            instance = (
+                cls()
+                if name == "git"
+                else cls(api_key="k", team_id="t")
+                if name == "linear"
+                else cls(owner="o", repo="r")
+            )
             assert isinstance(instance, IngestionPlugin), f"{name} doesn't implement IngestionPlugin"
 
         for name, cls in discover_plugins("arcane.plugins.intelligence").items():
-            instance = cls(artifact_repo=None) if name == "ci_flakes" else cls(artifact_repo=None, memory_repo=None, journey_repo=None)
+            instance = (
+                cls(artifact_repo=None)
+                if name == "ci_flakes"
+                else cls(artifact_repo=None, memory_repo=None, journey_repo=None)
+            )
             assert isinstance(instance, IntelligencePlugin), f"{name} doesn't implement IntelligencePlugin"
 
         for name, cls in discover_plugins("arcane.plugins.content").items():

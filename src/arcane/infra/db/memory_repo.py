@@ -53,11 +53,20 @@ class MemoryRepository:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                mem["id"], mem["title"], mem["what"], mem.get("why"),
-                mem.get("impact"), json.dumps(mem.get("tags", [])),
-                mem.get("category"), mem["project"], mem.get("source"),
-                json.dumps(mem.get("related_files", [])), mem.get("file_path", ""),
-                mem.get("section_anchor", ""), mem["created_at"], mem["updated_at"],
+                mem["id"],
+                mem["title"],
+                mem["what"],
+                mem.get("why"),
+                mem.get("impact"),
+                json.dumps(mem.get("tags", [])),
+                mem.get("category"),
+                mem["project"],
+                mem.get("source"),
+                json.dumps(mem.get("related_files", [])),
+                mem.get("file_path", ""),
+                mem.get("section_anchor", ""),
+                mem["created_at"],
+                mem["updated_at"],
                 json.dumps(mem.get("metadata", {})),
             ),
         )
@@ -70,7 +79,7 @@ class MemoryRepository:
             )
 
         self.db.commit()
-        return rowid  # type: ignore[return-value]
+        return rowid  # type: ignore[no-any-return]
 
     def get(self, memory_id: str) -> dict[str, Any] | None:
         row = self.db.fetchone(
@@ -82,6 +91,21 @@ class MemoryRepository:
             (memory_id,),
         )
         return _process_row(row) if row else None
+
+    def get_many(self, memory_ids: list[str]) -> list[dict[str, Any]]:
+        """Fetch multiple memories by exact ID in a single query."""
+        if not memory_ids:
+            return []
+        placeholders = ",".join("?" for _ in memory_ids)
+        rows = self.db.fetchall(
+            f"""
+            SELECT m.*,
+                   EXISTS(SELECT 1 FROM memory_details WHERE memory_id = m.id) as has_details
+            FROM memories m WHERE m.id IN ({placeholders})
+            """,
+            memory_ids,
+        )
+        return [_process_row(r) for r in rows]
 
     def get_rowid(self, memory_id: str) -> int | None:
         """Return the SQLite rowid for *memory_id*, or ``None`` if not found."""
@@ -100,9 +124,7 @@ class MemoryRepository:
         Use this in CLI/MCP entry points where users supply short ID prefixes.
         Internal service code should always pass exact IDs.
         """
-        row = self.db.fetchone(
-            "SELECT id FROM memories WHERE id LIKE ?", (id_prefix + "%",)
-        )
+        row = self.db.fetchone("SELECT id FROM memories WHERE id LIKE ?", (id_prefix + "%",))
         return row["id"] if row else None
 
     def update(
@@ -115,14 +137,10 @@ class MemoryRepository:
         details_append: str | None = None,
     ) -> bool:
         """Update an existing memory by exact ID."""
-        row = self.db.fetchone(
-            "SELECT id, rowid FROM memories WHERE id = ?", (memory_id,)
-        )
+        row = self.db.fetchone("SELECT id, rowid FROM memories WHERE id = ?", (memory_id,))
         if not row:
             # Fall back to prefix resolution for callers that pass short IDs
-            row = self.db.fetchone(
-                "SELECT id, rowid FROM memories WHERE id LIKE ?", (memory_id + "%",)
-            )
+            row = self.db.fetchone("SELECT id, rowid FROM memories WHERE id LIKE ?", (memory_id + "%",))
         if not row:
             return False
 
@@ -148,9 +166,7 @@ class MemoryRepository:
         self.db.execute(f"UPDATE memories SET {', '.join(sets)} WHERE id = ?", params)
 
         if details_append:
-            existing = self.db.fetchone(
-                "SELECT body FROM memory_details WHERE memory_id = ?", (full_id,)
-            )
+            existing = self.db.fetchone("SELECT body FROM memory_details WHERE memory_id = ?", (full_id,))
             if existing:
                 new_body = existing["body"] + "\n\n" + details_append
                 self.db.execute(
@@ -167,13 +183,9 @@ class MemoryRepository:
         return True
 
     def delete(self, memory_id: str) -> bool:
-        row = self.db.fetchone(
-            "SELECT id FROM memories WHERE id = ?", (memory_id,)
-        )
+        row = self.db.fetchone("SELECT id FROM memories WHERE id = ?", (memory_id,))
         if not row:
-            row = self.db.fetchone(
-                "SELECT id FROM memories WHERE id LIKE ?", (memory_id + "%",)
-            )
+            row = self.db.fetchone("SELECT id FROM memories WHERE id LIKE ?", (memory_id + "%",))
         if not row:
             return False
 
@@ -191,6 +203,8 @@ class MemoryRepository:
         source: str | None = None,
     ) -> list[dict[str, Any]]:
         terms = query.split()
+        if not terms:
+            return []
         fts_query = " OR ".join(f'"{term}"*' for term in terms)
 
         where_clauses: list[str] = []
@@ -314,9 +328,7 @@ class MemoryRepository:
         return [_process_row(r) for r in rows]
 
     def list_all_for_reindex(self) -> list[dict[str, Any]]:
-        rows = self.db.fetchall(
-            "SELECT rowid, title, what, why, impact, tags FROM memories ORDER BY rowid"
-        )
+        rows = self.db.fetchall("SELECT rowid, title, what, why, impact, tags FROM memories ORDER BY rowid")
         return [_process_row(r) for r in rows]
 
     def count(self, project: str | None = None, source: str | None = None) -> int:
@@ -356,9 +368,7 @@ class MemoryRepository:
     def _has_vec_table(self) -> bool:
         """Return whether the vector table exists, caching the result."""
         if self._vec_table_exists is None:
-            row = self.db.fetchone(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='memories_vec'"
-            )
+            row = self.db.fetchone("SELECT name FROM sqlite_master WHERE type='table' AND name='memories_vec'")
             self._vec_table_exists = row is not None
         return self._vec_table_exists
 

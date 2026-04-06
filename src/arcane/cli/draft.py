@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 import click
 
 from arcane.cli._utils import create_container
@@ -25,6 +23,7 @@ def draft_blog(journey_id: str | None, project: str | None) -> None:
         context: dict = {}
         if journey_id:
             from arcane.services.journey import JourneyService
+
             journey_data = JourneyService(container).show(journey_id)
             if not journey_data:
                 click.echo(f"Journey {journey_id} not found.")

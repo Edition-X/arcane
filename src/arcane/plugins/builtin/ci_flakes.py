@@ -49,11 +49,13 @@ class CIFlakeDetector:
         for sha, sha_runs in by_sha.items():
             conclusions = {r["raw"].get("conclusion") for r in sha_runs}
             if "failure" in conclusions and "success" in conclusions:
-                flaky_commits.append({
-                    "sha": sha,
-                    "runs": sha_runs,
-                    "branch": sha_runs[0]["raw"].get("head_branch", "unknown"),
-                })
+                flaky_commits.append(
+                    {
+                        "sha": sha,
+                        "runs": sha_runs,
+                        "branch": sha_runs[0]["raw"].get("head_branch", "unknown"),
+                    }
+                )
 
         if not flaky_commits:
             return []
@@ -71,17 +73,19 @@ class CIFlakeDetector:
         for fc in flaky_commits:
             body_lines.append(f"  - {fc['sha'][:8]} on {fc['branch']} ({len(fc['runs'])} runs)")
 
-        return [{
-            "id": str(uuid.uuid4()),
-            "insight_type": "ci_flake",
-            "title": f"CI flakes detected: {len(flaky_commits)} flaky commit(s)",
-            "body": "\n".join(body_lines),
-            "severity": "warning" if len(flaky_commits) >= 3 else "info",
-            "project": project,
-            "metadata": {
-                "flake_count": len(flaky_commits),
-                "flaky_shas": shas,
-                "branches": branches,
-            },
-            "created_at": now,
-        }]
+        return [
+            {
+                "id": str(uuid.uuid4()),
+                "insight_type": "ci_flake",
+                "title": f"CI flakes detected: {len(flaky_commits)} flaky commit(s)",
+                "body": "\n".join(body_lines),
+                "severity": "warning" if len(flaky_commits) >= 3 else "info",
+                "project": project,
+                "metadata": {
+                    "flake_count": len(flaky_commits),
+                    "flaky_shas": shas,
+                    "branches": branches,
+                },
+                "created_at": now,
+            }
+        ]

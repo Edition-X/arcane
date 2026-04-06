@@ -45,6 +45,7 @@ _PATCH_FETCH = "arcane.plugins.builtin.linear_ingest.LinearIngestionPlugin._fetc
 class TestLinearIngestionPlugin:
     def test_implements_protocol(self):
         from arcane.plugins.protocols import IngestionPlugin
+
         plugin = LinearIngestionPlugin(api_key="test-key", team_id="PROJ")
         assert isinstance(plugin, IngestionPlugin)
 

@@ -14,21 +14,23 @@ def handle_insights(
     limit: int = 10,
 ) -> str:
     project = project or os.path.basename(os.getcwd())
-    insights = container.insight_repo.list_all(
-        project=project, unacknowledged_only=True, limit=limit
+    insights = container.insight_repo.list_all(project=project, unacknowledged_only=True, limit=limit)
+    return json.dumps(
+        [
+            {
+                "id": i["id"],
+                "type": i["insight_type"],
+                "title": i["title"],
+                "severity": i["severity"],
+                "created_at": i["created_at"][:10],
+            }
+            for i in insights
+        ]
     )
-    return json.dumps([
-        {
-            "id": i["id"],
-            "type": i["insight_type"],
-            "title": i["title"],
-            "severity": i["severity"],
-            "created_at": i["created_at"][:10],
-        }
-        for i in insights
-    ])
 
 
 def handle_insights_ack(container: ServiceContainer, insight_id: str) -> str:
     acked = container.insight_repo.acknowledge(insight_id)
-    return json.dumps({"acknowledged": acked, "insight_id": insight_id})
+    if not acked:
+        return json.dumps({"error": f"Insight not found: {insight_id}"})
+    return json.dumps({"acknowledged": True, "insight_id": insight_id})

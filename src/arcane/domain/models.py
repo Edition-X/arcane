@@ -52,9 +52,7 @@ class RawMemoryInput(BaseModel):
             return None
         valid = {c.value for c in Category}
         if v not in valid:
-            raise ValueError(
-                f"Invalid category '{v}'. Must be one of: {', '.join(sorted(valid))}"
-            )
+            raise ValueError(f"Invalid category '{v}'. Must be one of: {', '.join(sorted(valid))}")
         return v
 
 

@@ -45,6 +45,7 @@ def decision_memory(container):
 class TestADRGenerator:
     def test_implements_protocol(self):
         from arcane.plugins.protocols import ContentPlugin
+
         gen = ADRGenerator()
         assert isinstance(gen, ContentPlugin)
 
@@ -57,10 +58,12 @@ class TestADRGenerator:
         detail = container.memory_repo.get_details(decision_memory)
 
         gen = ADRGenerator()
-        adr = gen.generate(context={
-            "memory": mem,
-            "details": detail["body"] if detail else "",
-        })
+        adr = gen.generate(
+            context={
+                "memory": mem,
+                "details": detail["body"] if detail else "",
+            }
+        )
 
         assert "PostgreSQL" in adr
         assert "# ADR" in adr
@@ -74,10 +77,12 @@ class TestADRGenerator:
         detail = container.memory_repo.get_details(decision_memory)
 
         gen = ADRGenerator()
-        adr = gen.generate(context={
-            "memory": mem,
-            "details": detail["body"] if detail else "",
-        })
+        adr = gen.generate(
+            context={
+                "memory": mem,
+                "details": detail["body"] if detail else "",
+            }
+        )
 
         # The options from details should be included
         assert "Options Considered" in adr or "PostgreSQL" in adr
@@ -114,10 +119,12 @@ class TestADRGenerator:
         detail = container.memory_repo.get_details(decision_memory)
 
         gen = ADRGenerator()
-        adr = gen.generate(context={
-            "memory": mem,
-            "details": detail["body"] if detail else "",
-        })
+        adr = gen.generate(
+            context={
+                "memory": mem,
+                "details": detail["body"] if detail else "",
+            }
+        )
 
         # Tags should appear somewhere in the ADR
         assert "database" in adr.lower() or "architecture" in adr.lower()

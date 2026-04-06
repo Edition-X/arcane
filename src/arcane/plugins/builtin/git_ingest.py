@@ -34,7 +34,8 @@ class GitIngestionPlugin:
         # Use two commands: one for metadata, one for files per commit
         format_str = f"{_RS}%H{_FS}%s{_FS}%b{_FS}%an{_FS}%aI"
         cmd = [
-            "git", "log",
+            "git",
+            "log",
             f"--max-count={self.max_count}",
             f"--format={format_str}",
         ]
@@ -44,7 +45,11 @@ class GitIngestionPlugin:
 
         try:
             result = subprocess.run(
-                cmd, cwd=self.repo_path, capture_output=True, text=True, timeout=30,
+                cmd,
+                cwd=self.repo_path,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             if result.returncode != 0:
                 logger.warning("git log returned non-zero exit code %d", result.returncode)
@@ -70,23 +75,25 @@ class GitIngestionPlugin:
 
         artifacts: list[dict[str, Any]] = []
         for c in commits:
-            artifacts.append({
-                "id": str(uuid.uuid4()),
-                "artifact_type": "commit",
-                "external_id": c["sha"],
-                "title": c["title"],
-                "url": None,
-                "project": project,
-                "created_at": c["date"],
-                "raw_data": {
-                    "sha": c["sha"],
-                    "body": c["body"],
-                    "author": c["author"],
-                    "date": c["date"],
-                    "files_changed": c["files_changed"],
-                    "branch": current_branch,
-                },
-            })
+            artifacts.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "artifact_type": "commit",
+                    "external_id": c["sha"],
+                    "title": c["title"],
+                    "url": None,
+                    "project": project,
+                    "created_at": c["date"],
+                    "raw_data": {
+                        "sha": c["sha"],
+                        "body": c["body"],
+                        "author": c["author"],
+                        "date": c["date"],
+                        "files_changed": c["files_changed"],
+                        "branch": current_branch,
+                    },
+                }
+            )
 
         return artifacts
 
@@ -100,13 +107,15 @@ class GitIngestionPlugin:
             parts = record.split(_FS)
             if len(parts) < 5:
                 continue
-            commits.append({
-                "sha": parts[0].strip(),
-                "title": parts[1].strip(),
-                "body": parts[2].strip(),
-                "author": parts[3].strip(),
-                "date": parts[4].strip(),
-            })
+            commits.append(
+                {
+                    "sha": parts[0].strip(),
+                    "title": parts[1].strip(),
+                    "body": parts[2].strip(),
+                    "author": parts[3].strip(),
+                    "date": parts[4].strip(),
+                }
+            )
         return commits
 
     def _get_files_changed(self, sha: str) -> list[str]:
@@ -114,7 +123,10 @@ class GitIngestionPlugin:
         try:
             result = subprocess.run(
                 ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", sha],
-                cwd=self.repo_path, capture_output=True, text=True, timeout=10,
+                cwd=self.repo_path,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             if result.returncode == 0:
                 return [f for f in result.stdout.strip().split("\n") if f.strip()]
@@ -128,7 +140,10 @@ class GitIngestionPlugin:
         try:
             result = subprocess.run(
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                cwd=self.repo_path, capture_output=True, text=True, timeout=5,
+                cwd=self.repo_path,
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             return result.stdout.strip() if result.returncode == 0 else "unknown"
         except (subprocess.TimeoutExpired, FileNotFoundError):

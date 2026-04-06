@@ -36,33 +36,39 @@ def journey_svc(container):
 
 class TestMemoryToolHandlers:
     def test_handle_save(self, mem_svc):
-        result = json.loads(handle_save(
-            mem_svc,
-            title="Handler Test",
-            what="Testing the handler",
-            project="test",
-        ))
+        result = json.loads(
+            handle_save(
+                mem_svc,
+                title="Handler Test",
+                what="Testing the handler",
+                project="test",
+            )
+        )
         assert result["action"] == "created"
         assert result["id"]
 
     def test_handle_save_with_category(self, mem_svc):
-        result = json.loads(handle_save(
-            mem_svc,
-            title="Decision",
-            what="Chose X",
-            category="decision",
-            project="test",
-        ))
+        result = json.loads(
+            handle_save(
+                mem_svc,
+                title="Decision",
+                what="Chose X",
+                category="decision",
+                project="test",
+            )
+        )
         assert result["action"] == "created"
 
     def test_handle_save_invalid_category(self, mem_svc):
-        result = json.loads(handle_save(
-            mem_svc,
-            title="Bad Cat",
-            what="Invalid category",
-            category="invalid_cat",
-            project="test",
-        ))
+        result = json.loads(
+            handle_save(
+                mem_svc,
+                title="Bad Cat",
+                what="Invalid category",
+                category="invalid_cat",
+                project="test",
+            )
+        )
         assert result["action"] == "created"
 
     def test_handle_search(self, mem_svc):
@@ -83,13 +89,15 @@ class TestMemoryToolHandlers:
         assert len(result["memories"]) >= 1
 
     def test_handle_details(self, mem_svc):
-        saved = json.loads(handle_save(
-            mem_svc,
-            title="Detail Test",
-            what="Has details",
-            details="Full body content",
-            project="test",
-        ))
+        saved = json.loads(
+            handle_save(
+                mem_svc,
+                title="Detail Test",
+                what="Has details",
+                details="Full body content",
+                project="test",
+            )
+        )
         result = json.loads(handle_details(mem_svc, memory_id=saved["id"]))
         assert result["body"] == "Full body content"
 
@@ -127,48 +135,100 @@ class TestJourneyToolHandlers:
 
 
 class TestRelationshipToolHandlers:
+    @staticmethod
+    def _create_entities(container):
+        """Create a real memory and journey in the DB, return their IDs."""
+        from arcane.domain.models import Journey
+        from tests.conftest import make_memory_dict
+
+        mem = make_memory_dict()
+        container.memory_repo.insert(mem)
+        j = Journey(title="Test Journey", project="test-project")
+        container.journey_repo.insert(j.model_dump())
+        return mem["id"], j.id
+
     def test_handle_link(self, container):
-        result = json.loads(handle_link(
-            container,
-            source_type="memory",
-            source_id="m1",
-            target_type="journey",
-            target_id="j1",
-            relation="part_of",
-        ))
+        mem_id, j_id = self._create_entities(container)
+        result = json.loads(
+            handle_link(
+                container,
+                source_type="memory",
+                source_id=mem_id,
+                target_type="journey",
+                target_id=j_id,
+                relation="part_of",
+            )
+        )
         assert result["created"] is True
         assert result["id"]
 
+    def test_handle_link_nonexistent_source(self, container):
+        _, j_id = self._create_entities(container)
+        result = json.loads(
+            handle_link(
+                container,
+                source_type="memory",
+                source_id="nonexistent-id",
+                target_type="journey",
+                target_id=j_id,
+                relation="part_of",
+            )
+        )
+        assert "error" in result
+        assert "not found" in result["error"]
+
+    def test_handle_link_nonexistent_target(self, container):
+        mem_id, _ = self._create_entities(container)
+        result = json.loads(
+            handle_link(
+                container,
+                source_type="memory",
+                source_id=mem_id,
+                target_type="journey",
+                target_id="nonexistent-id",
+                relation="part_of",
+            )
+        )
+        assert "error" in result
+        assert "not found" in result["error"]
+
     def test_handle_link_invalid_type(self, container):
-        result = json.loads(handle_link(
-            container,
-            source_type="invalid",
-            source_id="m1",
-            target_type="journey",
-            target_id="j1",
-            relation="part_of",
-        ))
+        result = json.loads(
+            handle_link(
+                container,
+                source_type="invalid",
+                source_id="m1",
+                target_type="journey",
+                target_id="j1",
+                relation="part_of",
+            )
+        )
         assert "error" in result
 
     def test_handle_link_invalid_relation(self, container):
-        result = json.loads(handle_link(
-            container,
-            source_type="memory",
-            source_id="m1",
-            target_type="journey",
-            target_id="j1",
-            relation="bad_relation",
-        ))
+        result = json.loads(
+            handle_link(
+                container,
+                source_type="memory",
+                source_id="m1",
+                target_type="journey",
+                target_id="j1",
+                relation="bad_relation",
+            )
+        )
         assert "error" in result
 
     def test_handle_trace(self, container):
+        mem_id, j_id = self._create_entities(container)
         handle_link(
             container,
-            source_type="memory", source_id="m1",
-            target_type="journey", target_id="j1",
+            source_type="memory",
+            source_id=mem_id,
+            target_type="journey",
+            target_id=j_id,
             relation="part_of",
         )
-        result = json.loads(handle_trace(container, entity_type="memory", entity_id="m1"))
+        result = json.loads(handle_trace(container, entity_type="memory", entity_id=mem_id))
         assert isinstance(result, list)
         assert len(result) == 1
 
@@ -215,18 +275,21 @@ class TestIntelligenceToolHandlers:
 class TestIngestionToolHandlers:
     def test_handle_ingest_git_empty_repo(self, container, tmp_path):
         from arcane.mcp_server.tools.ingestion_tools import handle_ingest_git
+
         result = json.loads(handle_ingest_git(container, project="test", repo_path=str(tmp_path)))
         assert result["plugin"] == "git"
         assert result["ingested"] == 0
 
     def test_handle_analyze_velocity(self, container):
         from arcane.mcp_server.tools.ingestion_tools import handle_analyze
+
         result = json.loads(handle_analyze(container, plugin_name="velocity", project="test"))
         assert result["plugin"] == "velocity"
         assert result["insights_created"] >= 1
 
     def test_handle_analyze_unknown(self, container):
         from arcane.mcp_server.tools.ingestion_tools import handle_analyze
+
         result = json.loads(handle_analyze(container, plugin_name="unknown"))
         assert "error" in result
 

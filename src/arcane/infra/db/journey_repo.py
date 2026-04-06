@@ -23,25 +23,26 @@ class JourneyRepository:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                journey["id"], journey["title"], journey["project"],
-                journey.get("status", "active"), journey["started_at"],
-                journey.get("completed_at"), journey.get("summary"),
+                journey["id"],
+                journey["title"],
+                journey["project"],
+                journey.get("status", "active"),
+                journey["started_at"],
+                journey.get("completed_at"),
+                journey.get("summary"),
                 journey.get("linear_issue_id"),
-                journey["created_at"], journey["updated_at"],
+                journey["created_at"],
+                journey["updated_at"],
             ),
         )
         self.db.commit()
-        return cursor.lastrowid  # type: ignore[return-value]
+        return cursor.lastrowid  # type: ignore[no-any-return]
 
     def get(self, journey_id: str) -> dict[str, Any] | None:
-        return self.db.fetchone(
-            "SELECT * FROM journeys WHERE id LIKE ?", (journey_id + "%",)
-        )
+        return self.db.fetchone("SELECT * FROM journeys WHERE id LIKE ?", (journey_id + "%",))
 
     def update(self, journey_id: str, **fields: Any) -> bool:
-        row = self.db.fetchone(
-            "SELECT id FROM journeys WHERE id LIKE ?", (journey_id + "%",)
-        )
+        row = self.db.fetchone("SELECT id FROM journeys WHERE id LIKE ?", (journey_id + "%",))
         if not row:
             return False
 
@@ -90,9 +91,7 @@ class JourneyRepository:
 
     def count(self, project: str | None = None) -> int:
         if project:
-            row = self.db.fetchone(
-                "SELECT COUNT(*) as cnt FROM journeys WHERE project = ?", (project,)
-            )
+            row = self.db.fetchone("SELECT COUNT(*) as cnt FROM journeys WHERE project = ?", (project,))
         else:
             row = self.db.fetchone("SELECT COUNT(*) as cnt FROM journeys")
         return row["cnt"] if row else 0

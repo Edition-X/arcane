@@ -56,6 +56,7 @@ _PATCH_FETCH = "arcane.plugins.builtin.gha_ingest.GHAIngestionPlugin._fetch_all_
 class TestGHAIngestionPlugin:
     def test_implements_protocol(self):
         from arcane.plugins.protocols import IngestionPlugin
+
         plugin = GHAIngestionPlugin(owner="o", repo="r")
         assert isinstance(plugin, IngestionPlugin)
 

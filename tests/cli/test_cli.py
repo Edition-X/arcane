@@ -43,9 +43,7 @@ def mock_container(container, tmp_home):
 
     with ExitStack() as stack:
         for module in _CLI_MODULES_WITH_CONTAINER:
-            stack.enter_context(
-                patch(f"{module}.create_container", return_value=container)
-            )
+            stack.enter_context(patch(f"{module}.create_container", return_value=container))
         yield container
 
 
@@ -113,9 +111,7 @@ class TestJourneyCLI:
         assert "My Journey" in result.output
 
         # Complete
-        result = runner.invoke(main, [
-            "journey", "complete", journey_id, "--summary", "Done"
-        ])
+        result = runner.invoke(main, ["journey", "complete", journey_id, "--summary", "Done"])
         assert result.exit_code == 0, result.output
 
 

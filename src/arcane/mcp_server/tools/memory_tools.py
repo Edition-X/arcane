@@ -76,19 +76,21 @@ def handle_search(
 
     clean = []
     for r in results:
-        clean.append({
-            "id": r["id"],
-            "title": r["title"],
-            "what": r["what"],
-            "why": r.get("why"),
-            "impact": r.get("impact"),
-            "category": r.get("category"),
-            "tags": r.get("tags", []),  # already list[str] from repo
-            "project": r.get("project"),
-            "created_at": r.get("created_at", "")[:10],
-            "score": round(r.get("score", 0), 2),
-            "has_details": bool(r.get("has_details")),
-        })
+        clean.append(
+            {
+                "id": r["id"],
+                "title": r["title"],
+                "what": r["what"],
+                "why": r.get("why"),
+                "impact": r.get("impact"),
+                "category": r.get("category"),
+                "tags": r.get("tags", []),  # already list[str] from repo
+                "project": r.get("project"),
+                "created_at": r.get("created_at", "")[:10],
+                "score": round(r.get("score", 0), 2),
+                "has_details": bool(r.get("has_details")),
+            }
+        )
     return json.dumps(clean)
 
 
@@ -110,20 +112,24 @@ def handle_context(
         except (ValueError, TypeError):
             date_display = date_str
 
-        memories.append({
-            "id": r["id"],
-            "title": r.get("title", "Untitled"),
-            "category": r.get("category", ""),
-            "tags": r.get("tags", []),  # already list[str] from repo
-            "date": date_display,
-        })
+        memories.append(
+            {
+                "id": r["id"],
+                "title": r.get("title", "Untitled"),
+                "category": r.get("category", ""),
+                "tags": r.get("tags", []),  # already list[str] from repo
+                "date": date_display,
+            }
+        )
 
-    return json.dumps({
-        "total": total,
-        "showing": len(memories),
-        "memories": memories,
-        "message": "Use memory_search for specific topics. Save memories before session ends.",
-    })
+    return json.dumps(
+        {
+            "total": total,
+            "showing": len(memories),
+            "memories": memories,
+            "message": "Use memory_search for specific topics. Save memories before session ends.",
+        }
+    )
 
 
 def handle_details(svc: MemoryService, memory_id: str) -> str:
@@ -135,4 +141,6 @@ def handle_details(svc: MemoryService, memory_id: str) -> str:
 
 def handle_delete(svc: MemoryService, memory_id: str) -> str:
     deleted = svc.delete(memory_id)
-    return json.dumps({"deleted": deleted, "memory_id": memory_id})
+    if not deleted:
+        return json.dumps({"error": f"Memory not found: {memory_id}"})
+    return json.dumps({"deleted": True, "memory_id": memory_id})

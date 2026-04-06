@@ -135,9 +135,7 @@ def _insert_section_in_body(body: str, mem: dict[str, Any], section_content: str
         return _insert_new_category(body, category, category_heading, section_content)
 
 
-def _append_under_existing_category(
-    body: str, category_heading: str, section_content: str
-) -> str:
+def _append_under_existing_category(body: str, category_heading: str, section_content: str) -> str:
     lines = body.split("\n")
     result_lines = []
     i = 0
@@ -163,9 +161,7 @@ def _append_under_existing_category(
     return "\n".join(result_lines) + "\n"
 
 
-def _insert_new_category(
-    body: str, category: str, category_heading: str, section_content: str
-) -> str:
+def _insert_new_category(body: str, category: str, category_heading: str, section_content: str) -> str:
     category_order = [c.value for c in Category]
     target_index = category_order.index(category) if category in category_order else len(category_order)
 
@@ -184,9 +180,5 @@ def _insert_new_category(
             if insert_position < len(lines):
                 break
 
-    new_lines = (
-        lines[:insert_position]
-        + [f"## {category_heading}", "", section_content, ""]
-        + lines[insert_position:]
-    )
+    new_lines = lines[:insert_position] + [f"## {category_heading}", "", section_content, ""] + lines[insert_position:]
     return "\n".join(new_lines).rstrip() + "\n"

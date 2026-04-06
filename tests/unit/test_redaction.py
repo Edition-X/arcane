@@ -1,6 +1,5 @@
 """Unit tests for the redaction pipeline."""
 
-
 from arcane.infra.redaction import load_memoryignore, redact
 
 

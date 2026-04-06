@@ -76,10 +76,20 @@ def echovault_home(tmp_path):
                source, related_files, file_path, section_anchor, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                f"mem-{i:04d}", f"Memory {i}", f"What {i}", f"Why {i}", None,
-                json.dumps(["tag1"]), "context", "test-project",
-                None, json.dumps([]), f"/tmp/test-{i}.md", f"memory-{i}",
-                "2026-03-21T10:00:00+00:00", "2026-03-21T10:00:00+00:00",
+                f"mem-{i:04d}",
+                f"Memory {i}",
+                f"What {i}",
+                f"Why {i}",
+                None,
+                json.dumps(["tag1"]),
+                "context",
+                "test-project",
+                None,
+                json.dumps([]),
+                f"/tmp/test-{i}.md",
+                f"memory-{i}",
+                "2026-03-21T10:00:00+00:00",
+                "2026-03-21T10:00:00+00:00",
             ),
         )
 
@@ -118,10 +128,9 @@ class TestMigrationService:
 
         # Check new tables exist
         from arcane.infra.db.connection import Database
+
         db = Database(os.path.join(arcane_home, "index.db"))
-        tables = {r["name"] for r in db.fetchall(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        )}
+        tables = {r["name"] for r in db.fetchall("SELECT name FROM sqlite_master WHERE type='table'")}
         db.close()
 
         assert "journeys" in tables
@@ -134,6 +143,7 @@ class TestMigrationService:
         svc.migrate_from_echovault(source_home=echovault_home, target_home=arcane_home)
 
         from arcane.infra.db.connection import Database
+
         db = Database(os.path.join(arcane_home, "index.db"))
         cols = {r["name"] for r in db.fetchall("PRAGMA table_info(memories)")}
         db.close()
@@ -197,6 +207,7 @@ class TestMigrationService:
 
         from arcane.infra.db.connection import Database
         from arcane.infra.db.memory_repo import MemoryRepository
+
         db = Database(os.path.join(arcane_home, "index.db"))
         repo = MemoryRepository(db)
 

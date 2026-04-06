@@ -56,8 +56,7 @@ class MemoryService:
             return True
         if stored_dim != dim:
             logger.warning(
-                "Embedding dimension mismatch: DB has %d, provider returned %d. "
-                "Run 'arcane reindex' to rebuild.",
+                "Embedding dimension mismatch: DB has %d, provider returned %d. Run 'arcane reindex' to rebuild.",
                 stored_dim,
                 dim,
             )
@@ -86,7 +85,9 @@ class MemoryService:
             ]
         return []
 
-    def _embed_and_store(self, rowid: int, title: str, what: str, why: str | None, impact: str | None, tags: list[str]) -> None:
+    def _embed_and_store(
+        self, rowid: int, title: str, what: str, why: str | None, impact: str | None, tags: list[str]
+    ) -> None:
         """Compute embedding and upsert into the vector table.  Logs on failure."""
         text = _embedding_text(title, what, why, impact, tags)
         try:
@@ -118,27 +119,15 @@ class MemoryService:
         # Dedup check — FTS search by title + what
         candidates: list[dict[str, Any]] = []
         try:
-            candidates = self.c.memory_repo.fts_search(
-                f"{raw.title} {raw.what}", limit=5, project=project
-            )
+            candidates = self.c.memory_repo.fts_search(f"{raw.title} {raw.what}", limit=5, project=project)
         except Exception:
             logger.debug("FTS dedup search failed; treating as new memory", exc_info=True)
 
         if candidates:
-            # Widen the pool to compute a stable normalisation baseline
-            broad = candidates
-            if len(broad) == 1:
-                try:
-                    broad = self.c.memory_repo.fts_search(f"{raw.title} {raw.what}", limit=5) or broad
-                except Exception:
-                    logger.debug("Broadened dedup search failed; using narrow pool", exc_info=True)
-
-            max_score = max(c["score"] for c in broad) if broad else 0.0
             top = candidates[0]
-            normalized = top["score"] / max_score if max_score > 0 else 0.0
             title_match = raw.title.strip().lower() == top["title"].strip().lower()
 
-            if normalized >= 0.7 and title_match:
+            if title_match:
                 existing_id = top["id"]
                 merged_tags = self._merge_tags(top.get("tags") or [], raw.tags)
                 details_append = f"--- updated {today} ---\n{raw.details}" if raw.details else None
@@ -175,6 +164,7 @@ class MemoryService:
 
         if raw.journey_id:
             from arcane.services.journey import JourneyService
+
             JourneyService(self.c).link_memory(raw.journey_id, mem.id)
 
         self._embed_and_store(rowid, mem.title, mem.what, mem.why, mem.impact, mem.tags)
@@ -190,9 +180,7 @@ class MemoryService:
         use_vectors: bool = True,
     ) -> list[dict[str, Any]]:
         if not use_vectors:
-            return hybrid_search(
-                self.c.memory_repo, None, query, limit=limit, project=project, source=source
-            )
+            return hybrid_search(self.c.memory_repo, None, query, limit=limit, project=project, source=source)
 
         if self.vectors_available:
             try:
@@ -209,14 +197,13 @@ class MemoryService:
             except Exception:
                 logger.debug("Vector search failed; falling back to FTS", exc_info=True)
 
-        return tiered_search(
-            self.c.memory_repo, None, query, limit=limit, project=project, source=source
-        )
+        return tiered_search(self.c.memory_repo, None, query, limit=limit, project=project, source=source)
 
     def _ollama_warm(self) -> bool:
         base_url = self.c.config.embedding.base_url or "http://localhost:11434"
         try:
             from arcane.infra.embeddings.ollama import is_model_loaded
+
             return is_model_loaded(self.c.config.embedding.model, base_url)
         except Exception:
             logger.debug("Could not check Ollama model status", exc_info=True)
@@ -252,9 +239,7 @@ class MemoryService:
         results: list[dict[str, Any]]
         if query:
             use_vectors = self._should_use_semantic(semantic_mode)
-            results = self.search(
-                query, limit=limit, project=project, source=source, use_vectors=use_vectors
-            )
+            results = self.search(query, limit=limit, project=project, source=source, use_vectors=use_vectors)
             if topup_recent and len(results) < limit:
                 recent = self.c.memory_repo.list_recent(limit=limit, project=project, source=source)
                 seen = {r["id"] for r in results}
@@ -300,6 +285,7 @@ class MemoryService:
         """)
 
         import struct
+
         for i, mem in enumerate(memories):
             tags = mem.get("tags") or []  # already deserialized by _process_row
             text = _embedding_text(mem["title"], mem["what"], mem.get("why"), mem.get("impact"), tags)

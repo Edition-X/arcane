@@ -68,9 +68,7 @@ def tiered_search(
 
     try:
         query_vec = embedding_provider.embed(query)
-        vec_results = repo.vector_search(
-            query_vec, limit=limit * 2, project=project, source=source
-        )
+        vec_results = repo.vector_search(query_vec, limit=limit * 2, project=project, source=source)
         return merge_results(fts_results, vec_results, limit=limit)
     except Exception:
         return fts_results[:limit]
@@ -95,7 +93,5 @@ def hybrid_search(
         return fts_results[:limit]
 
     query_vec = embedding_provider.embed(query)
-    vec_results = repo.vector_search(
-        query_vec, limit=limit * 2, project=project, source=source
-    )
+    vec_results = repo.vector_search(query_vec, limit=limit * 2, project=project, source=source)
     return merge_results(fts_results, vec_results, limit=limit)

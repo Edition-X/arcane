@@ -16,8 +16,13 @@ def git_repo(tmp_path):
     """Create a real temporary git repo with commits."""
     repo = tmp_path / "test-repo"
     repo.mkdir()
-    env = {**os.environ, "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@test.com",
-           "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@test.com"}
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "Test",
+        "GIT_AUTHOR_EMAIL": "test@test.com",
+        "GIT_COMMITTER_NAME": "Test",
+        "GIT_COMMITTER_EMAIL": "test@test.com",
+    }
 
     subprocess.run(["git", "init"], cwd=repo, capture_output=True, env=env)
     subprocess.run(["git", "checkout", "-b", "main"], cwd=repo, capture_output=True, env=env)
@@ -30,14 +35,14 @@ def git_repo(tmp_path):
     # Second commit
     (repo / "src.py").write_text("print('hello')")
     subprocess.run(["git", "add", "."], cwd=repo, capture_output=True, env=env)
-    subprocess.run(["git", "commit", "-m", "Add source file\n\nThis adds the main source."],
-                   cwd=repo, capture_output=True, env=env)
+    subprocess.run(
+        ["git", "commit", "-m", "Add source file\n\nThis adds the main source."], cwd=repo, capture_output=True, env=env
+    )
 
     # Third commit
     (repo / "test.py").write_text("assert True")
     subprocess.run(["git", "add", "."], cwd=repo, capture_output=True, env=env)
-    subprocess.run(["git", "commit", "-m", "Add tests"],
-                   cwd=repo, capture_output=True, env=env)
+    subprocess.run(["git", "commit", "-m", "Add tests"], cwd=repo, capture_output=True, env=env)
 
     return str(repo)
 
@@ -45,6 +50,7 @@ def git_repo(tmp_path):
 class TestGitIngestionPlugin:
     def test_implements_protocol(self):
         from arcane.plugins.protocols import IngestionPlugin
+
         plugin = GitIngestionPlugin()
         assert isinstance(plugin, IngestionPlugin)
 

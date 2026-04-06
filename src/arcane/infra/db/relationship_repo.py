@@ -21,9 +21,13 @@ class RelationshipRepository:
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                rel["id"], rel["source_type"], rel["source_id"],
-                rel["target_type"], rel["target_id"],
-                rel["relation"], rel["created_at"],
+                rel["id"],
+                rel["source_type"],
+                rel["source_id"],
+                rel["target_type"],
+                rel["target_id"],
+                rel["relation"],
+                rel["created_at"],
             ),
         )
         self.db.commit()
@@ -46,9 +50,7 @@ class RelationshipRepository:
         incoming = self.get_to(entity_type, entity_id)
         return outgoing + incoming
 
-    def trace(
-        self, entity_type: str, entity_id: str, max_depth: int = 5
-    ) -> list[dict[str, Any]]:
+    def trace(self, entity_type: str, entity_id: str, max_depth: int = 5) -> list[dict[str, Any]]:
         """Walk the relationship graph from an entity, returning all connected edges.
 
         Direction is determined by exact ID equality so prefix matches in other

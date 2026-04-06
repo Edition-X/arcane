@@ -25,7 +25,9 @@ def handle_journey_update(
     summary: str | None = None,
 ) -> str:
     updated = svc.update(journey_id, summary=summary)
-    return json.dumps({"updated": updated, "journey_id": journey_id})
+    if not updated:
+        return json.dumps({"error": f"Journey not found: {journey_id}"})
+    return json.dumps({"updated": True, "journey_id": journey_id})
 
 
 def handle_journey_complete(
@@ -34,7 +36,9 @@ def handle_journey_complete(
     summary: str | None = None,
 ) -> str:
     completed = svc.complete(journey_id, summary=summary)
-    return json.dumps({"completed": completed, "journey_id": journey_id})
+    if not completed:
+        return json.dumps({"error": f"Journey not found: {journey_id}"})
+    return json.dumps({"completed": True, "journey_id": journey_id})
 
 
 def handle_journey_list(
@@ -45,14 +49,16 @@ def handle_journey_list(
 ) -> str:
     project = project or os.path.basename(os.getcwd())
     journeys = svc.list(project=project, status=status, limit=limit)
-    return json.dumps([
-        {
-            "id": j["id"],
-            "title": j["title"],
-            "status": j["status"],
-            "project": j["project"],
-            "started_at": j["started_at"][:10],
-            "completed_at": (j.get("completed_at") or "")[:10] or None,
-        }
-        for j in journeys
-    ])
+    return json.dumps(
+        [
+            {
+                "id": j["id"],
+                "title": j["title"],
+                "status": j["status"],
+                "project": j["project"],
+                "started_at": j["started_at"][:10],
+                "completed_at": (j.get("completed_at") or "")[:10] or None,
+            }
+            for j in journeys
+        ]
+    )

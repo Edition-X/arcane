@@ -45,27 +45,29 @@ class LinearIngestionPlugin:
             state_name = issue.get("state", {}).get("name", "Unknown")
             assignee_name = (issue.get("assignee") or {}).get("name")
 
-            artifacts.append({
-                "id": str(uuid.uuid4()),
-                "artifact_type": "linear_ticket",
-                "external_id": issue.get("identifier", issue["id"]),
-                "title": issue["title"],
-                "url": issue.get("url"),
-                "project": project,
-                "created_at": issue.get("createdAt", ""),
-                "raw_data": {
-                    "linear_id": issue["id"],
-                    "identifier": issue.get("identifier"),
-                    "state": state_name,
-                    "description": issue.get("description", ""),
-                    "labels": labels,
-                    "assignee": assignee_name,
-                    "priority": issue.get("priority"),
-                    "estimate": issue.get("estimate"),
-                    "created_at": issue.get("createdAt"),
-                    "updated_at": issue.get("updatedAt"),
-                },
-            })
+            artifacts.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "artifact_type": "linear_ticket",
+                    "external_id": issue.get("identifier", issue["id"]),
+                    "title": issue["title"],
+                    "url": issue.get("url"),
+                    "project": project,
+                    "created_at": issue.get("createdAt", ""),
+                    "raw_data": {
+                        "linear_id": issue["id"],
+                        "identifier": issue.get("identifier"),
+                        "state": state_name,
+                        "description": issue.get("description", ""),
+                        "labels": labels,
+                        "assignee": assignee_name,
+                        "priority": issue.get("priority"),
+                        "estimate": issue.get("estimate"),
+                        "created_at": issue.get("createdAt"),
+                        "updated_at": issue.get("updatedAt"),
+                    },
+                }
+            )
 
         return artifacts
 
@@ -146,7 +148,8 @@ class LinearIngestionPlugin:
                     continue
                 resp.raise_for_status()
                 data = resp.json()
-                return data.get("data", {}).get("issues")
+                result: dict[str, Any] | None = data.get("data", {}).get("issues")
+                return result
             except httpx.HTTPStatusError as exc:
                 logger.warning("Linear API error %s (attempt %d)", exc.response.status_code, attempt)
             except httpx.RequestError as exc:

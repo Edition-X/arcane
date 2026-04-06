@@ -11,7 +11,8 @@ from arcane.cli._utils import create_container
 @click.argument("source")
 @click.argument("target")
 @click.option(
-    "--relation", required=True,
+    "--relation",
+    required=True,
     type=click.Choice(["led_to", "informed_by", "resulted_in", "part_of", "supersedes", "references"]),
 )
 @click.option("--source-type", default="memory")
@@ -23,8 +24,10 @@ def link(source: str, target: str, relation: str, source_type: str, target_type:
 
     with create_container() as container:
         rel = Relationship(
-            source_type=source_type, source_id=source,
-            target_type=target_type, target_id=target,
+            source_type=source_type,
+            source_id=source,
+            target_type=target_type,
+            target_id=target,
             relation=RelationType(relation),
         )
         container.relationship_repo.insert(rel.model_dump())

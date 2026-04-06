@@ -47,7 +47,10 @@ class JourneyService:
         return self.c.journey_repo.list_all(project=project, status=status, limit=limit)
 
     def show(self, journey_id: str) -> dict[str, Any] | None:
-        """Get a journey with all its linked entities."""
+        """Get a journey with all its linked entities.
+
+        Uses bulk-fetch to avoid N+1 queries when many relationships exist.
+        """
         journey = self.c.journey_repo.get(journey_id)
         if not journey:
             return None
@@ -55,20 +58,32 @@ class JourneyService:
         full_id = journey["id"]
         rels = self.c.relationship_repo.get_all_for("journey", full_id)
 
-        linked_memories = []
-        linked_artifacts = []
-        for rel in rels:
-            if rel["source_type"] == "memory" or rel["target_type"] == "memory":
-                mem_id = rel["target_id"] if rel["source_type"] == "journey" else rel["source_id"]
-                mem = self.c.memory_repo.get(mem_id)
-                if mem:
-                    linked_memories.append({"memory": mem, "relation": rel["relation"]})
+        # Collect IDs by type, then fetch in bulk
+        mem_ids: list[str] = []
+        art_ids: list[str] = []
+        mem_rel_map: dict[str, str] = {}  # mem_id -> relation
+        art_rel_map: dict[str, str] = {}  # art_id -> relation
 
-            if rel["source_type"] == "artifact" or rel["target_type"] == "artifact":
-                art_id = rel["target_id"] if rel["source_type"] == "journey" else rel["source_id"]
-                art = self.c.artifact_repo.get(art_id)
-                if art:
-                    linked_artifacts.append({"artifact": art, "relation": rel["relation"]})
+        for rel in rels:
+            other_id = rel["target_id"] if rel["source_type"] == "journey" else rel["source_id"]
+            other_type = rel["target_type"] if rel["source_type"] == "journey" else rel["source_type"]
+
+            if other_type == "memory":
+                mem_ids.append(other_id)
+                mem_rel_map[other_id] = rel["relation"]
+            elif other_type == "artifact":
+                art_ids.append(other_id)
+                art_rel_map[other_id] = rel["relation"]
+
+        mem_by_id = {m["id"]: m for m in self.c.memory_repo.get_many(mem_ids)}
+        art_by_id = {a["id"]: a for a in self.c.artifact_repo.get_many(art_ids)}
+
+        linked_memories = [
+            {"memory": mem_by_id[mid], "relation": mem_rel_map[mid]} for mid in mem_ids if mid in mem_by_id
+        ]
+        linked_artifacts = [
+            {"artifact": art_by_id[aid], "relation": art_rel_map[aid]} for aid in art_ids if aid in art_by_id
+        ]
 
         journey["linked_memories"] = linked_memories
         journey["linked_artifacts"] = linked_artifacts

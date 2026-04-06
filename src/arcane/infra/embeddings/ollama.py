@@ -28,9 +28,7 @@ def is_model_loaded(model: str, base_url: str, timeout: float = 0.5) -> bool:
 
 
 class OllamaEmbedding(EmbeddingProvider):
-    def __init__(
-        self, model: str = "nomic-embed-text", base_url: str = "http://localhost:11434"
-    ):
+    def __init__(self, model: str = "nomic-embed-text", base_url: str = "http://localhost:11434"):
         self.model = model
         self.base_url = base_url
 
@@ -41,4 +39,4 @@ class OllamaEmbedding(EmbeddingProvider):
             timeout=30.0,
         )
         resp.raise_for_status()
-        return resp.json()["embedding"]
+        return list(resp.json()["embedding"])

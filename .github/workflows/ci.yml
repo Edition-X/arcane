@@ -25,13 +25,13 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dev dependencies
-        run: uv pip install -e ".[dev]" --system
+        run: uv sync --extra dev
 
       - name: Run pre-commit hooks
-        uses: pre-commit/action@v3.0.1
+        run: uv run pre-commit run --all-files
 
       - name: Type check
-        run: mypy src/arcane
+        run: uv run mypy src/arcane
 
   test:
     name: Test (Python ${{ matrix.python-version }})
@@ -53,7 +53,7 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv pip install -e ".[dev]" --system
+        run: uv sync --extra dev
 
       - name: Run tests
-        run: pytest -q --tb=short
+        run: uv run pytest -q --tb=short

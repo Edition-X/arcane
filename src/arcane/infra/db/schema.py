@@ -168,6 +168,24 @@ def create_schema(db: Database) -> None:
         )
     """)
 
+    # ── Performance indexes ─────────────────────────────────────────────
+    db.execute("CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_memories_source ON memories(source)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at DESC)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_mem_details_id ON memory_details(memory_id)")
+
+    db.execute("CREATE INDEX IF NOT EXISTS idx_journeys_project ON journeys(project)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_journeys_status ON journeys(status)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_journeys_project_status ON journeys(project, status)")
+
+    db.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_project ON artifacts(project)")
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_artifacts_type_ext_proj ON artifacts(artifact_type, external_id, project)"
+    )
+
+    db.execute("CREATE INDEX IF NOT EXISTS idx_insights_project ON insights(project)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_insights_ack ON insights(acknowledged, project)")
+
     db.commit()
 
     # Create vec table if dimension already known

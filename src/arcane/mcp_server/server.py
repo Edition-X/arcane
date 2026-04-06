@@ -10,8 +10,6 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
-logger = logging.getLogger(__name__)
-
 from arcane.domain.enums import RelationType
 from arcane.mcp_server.tools.content_tools import handle_draft_adr, handle_draft_blog
 from arcane.mcp_server.tools.ingestion_tools import (
@@ -42,6 +40,8 @@ from arcane.mcp_server.tools.relationship_tools import handle_link, handle_trace
 from arcane.services.container import ServiceContainer, create_container
 from arcane.services.journey import JourneyService
 from arcane.services.memory import MemoryService
+
+logger = logging.getLogger(__name__)
 
 
 def _create_server(container: ServiceContainer) -> Server:
@@ -321,7 +321,11 @@ def _create_server(container: ServiceContainer) -> Server:
 
         handler = handlers.get(name)
         if handler:
-            result = await anyio.to_thread.run_sync(handler)
+            try:
+                result = await anyio.to_thread.run_sync(handler)
+            except Exception:
+                logger.error("Tool '%s' failed", name, exc_info=True)
+                result = json.dumps({"error": f"Internal error in tool '{name}'. Check server logs."})
         else:
             logger.warning("Unknown MCP tool requested: %s", name)
             result = json.dumps({"error": f"Unknown tool: {name}"})
