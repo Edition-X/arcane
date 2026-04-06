@@ -31,6 +31,16 @@ class ArtifactRepository:
         self.db.commit()
         return cursor.lastrowid  # type: ignore[return-value]
 
+    def get_many(self, artifact_ids: list[str]) -> list[dict[str, Any]]:
+        """Fetch multiple artifacts by exact ID in a single query."""
+        if not artifact_ids:
+            return []
+        placeholders = ",".join("?" for _ in artifact_ids)
+        return self.db.fetchall(
+            f"SELECT * FROM artifacts WHERE id IN ({placeholders})",
+            artifact_ids,
+        )
+
     def get(self, artifact_id: str) -> dict[str, Any] | None:
         return self.db.fetchone(
             "SELECT * FROM artifacts WHERE id LIKE ?", (artifact_id + "%",)

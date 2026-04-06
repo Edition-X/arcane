@@ -83,6 +83,21 @@ class MemoryRepository:
         )
         return _process_row(row) if row else None
 
+    def get_many(self, memory_ids: list[str]) -> list[dict[str, Any]]:
+        """Fetch multiple memories by exact ID in a single query."""
+        if not memory_ids:
+            return []
+        placeholders = ",".join("?" for _ in memory_ids)
+        rows = self.db.fetchall(
+            f"""
+            SELECT m.*,
+                   EXISTS(SELECT 1 FROM memory_details WHERE memory_id = m.id) as has_details
+            FROM memories m WHERE m.id IN ({placeholders})
+            """,
+            memory_ids,
+        )
+        return [_process_row(r) for r in rows]
+
     def get_rowid(self, memory_id: str) -> int | None:
         """Return the SQLite rowid for *memory_id*, or ``None`` if not found."""
         row = self.db.fetchone("SELECT rowid FROM memories WHERE id = ?", (memory_id,))
