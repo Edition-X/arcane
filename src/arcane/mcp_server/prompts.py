@@ -64,8 +64,10 @@ def build_catchup_prompt(args: dict[str, str]) -> dict:
                     "type": "text",
                     "text": (
                         f"Get me up to speed on recent engineering activity in project '{project}'.\n\n"
-                        f"Use memory_context with project='{project}' and limit={limit} to fetch the most recent memories. "
-                        "Then summarise: key decisions made, bugs fixed, patterns established, and any open questions."
+                        f"Use memory_context with project='{project}' and limit={limit} "
+                        "to fetch the most recent memories. "
+                        "Then summarise: key decisions made, bugs fixed, "
+                        "patterns established, and any open questions."
                     ),
                 },
             }
