@@ -163,3 +163,60 @@ class TestMemoryRepoMeta:
         assert memory_repo.get_embedding_dim() is None
         memory_repo.set_embedding_dim(768)
         assert memory_repo.get_embedding_dim() == 768
+
+
+class TestMemoryTTL:
+    def test_insert_with_ttl_persists(self, memory_repo):
+        """Insert memory with TTL; get() returns it with ttl_days set."""
+        mem = make_memory_dict(ttl_days=7)
+        memory_repo.insert(mem)
+        fetched = memory_repo.get(mem["id"])
+        assert fetched is not None
+        assert fetched["ttl_days"] == 7
+
+    def test_insert_with_confidence_persists(self, memory_repo):
+        mem = make_memory_dict(confidence=0.9)
+        memory_repo.insert(mem)
+        fetched = memory_repo.get(mem["id"])
+        assert fetched is not None
+        assert abs(fetched["confidence"] - 0.9) < 0.001
+
+    def test_non_expired_memory_visible_in_list_recent(self, memory_repo):
+        mem = make_memory_dict(ttl_days=100)
+        memory_repo.insert(mem)
+        rows = memory_repo.list_recent(project=mem["project"])
+        assert any(r["id"] == mem["id"] for r in rows)
+
+    def test_expired_memory_excluded_from_list_recent(self, memory_repo):
+        """A memory with ttl_days=-1 (expired immediately) must not appear."""
+        mem = make_memory_dict(ttl_days=-1)
+        memory_repo.insert(mem)
+        rows = memory_repo.list_recent(project=mem["project"])
+        assert not any(r["id"] == mem["id"] for r in rows)
+
+    def test_expired_memory_excluded_from_fts_search(self, memory_repo):
+        mem = make_memory_dict(title="UniqueTTLTest", what="UniqueTTLSearch", ttl_days=-1)
+        memory_repo.insert(mem)
+        results = memory_repo.fts_search("UniqueTTLSearch", project=mem["project"])
+        assert not any(r["id"] == mem["id"] for r in results)
+
+    def test_expired_memory_excluded_from_count(self, memory_repo):
+        project = "ttl-count-project"
+        mem_ok = make_memory_dict(project=project, ttl_days=100)
+        mem_expired = make_memory_dict(project=project, ttl_days=-1)
+        memory_repo.insert(mem_ok)
+        memory_repo.insert(mem_expired)
+        assert memory_repo.count(project=project) == 1
+
+    def test_no_ttl_memory_always_visible(self, memory_repo):
+        mem = make_memory_dict(ttl_days=None)
+        memory_repo.insert(mem)
+        rows = memory_repo.list_recent(project=mem["project"])
+        assert any(r["id"] == mem["id"] for r in rows)
+
+    def test_get_returns_expired_memory(self, memory_repo):
+        """get() by exact ID should still return expired memories (for memory_details)."""
+        mem = make_memory_dict(ttl_days=-1)
+        memory_repo.insert(mem)
+        fetched = memory_repo.get(mem["id"])
+        assert fetched is not None

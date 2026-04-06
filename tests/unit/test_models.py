@@ -141,3 +141,33 @@ class TestEnums:
     def test_journey_status(self):
         assert JourneyStatus.ACTIVE == "active"
         assert JourneyStatus.COMPLETED == "completed"
+
+
+class TestMemoryTTLAndConfidence:
+    def test_confidence_validator_rejects_above_1(self):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            RawMemoryInput(title="x", what="x", confidence=1.5)
+
+    def test_confidence_validator_rejects_below_0(self):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            RawMemoryInput(title="x", what="x", confidence=-0.1)
+
+    def test_confidence_accepts_valid_range(self):
+        r = RawMemoryInput(title="x", what="x", confidence=0.75)
+        assert r.confidence == 0.75
+
+    def test_confidence_none_is_default(self):
+        r = RawMemoryInput(title="x", what="x")
+        assert r.confidence is None
+
+    def test_ttl_days_none_is_default(self):
+        r = RawMemoryInput(title="x", what="x")
+        assert r.ttl_days is None
+
+    def test_ttl_days_accepted(self):
+        r = RawMemoryInput(title="x", what="x", ttl_days=30)
+        assert r.ttl_days == 30
