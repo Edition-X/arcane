@@ -214,3 +214,11 @@ class TestMigrationService:
         results = repo.fts_search("Memory", limit=10)
         assert len(results) >= 1
         db.close()
+
+
+def test_migrate_adds_ttl_and_confidence_columns(db):
+    """After schema creation, memories table must have ttl_days and confidence."""
+    rows = db.fetchall("PRAGMA table_info(memories)")
+    cols = {r["name"] for r in rows}
+    assert "ttl_days" in cols
+    assert "confidence" in cols

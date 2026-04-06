@@ -28,7 +28,12 @@ When filling `details`, prefer: Context, Options considered, Decision, Tradeoffs
 
 SEARCH_DESCRIPTION = """Search memories using keyword and semantic search. Call this at session start and when the user's request relates to a topic with prior context."""
 
-CONTEXT_DESCRIPTION = """Get memory context for the current project. Call this at session start to load prior decisions, bugs, and context."""
+CONTEXT_DESCRIPTION = """Get memory context for the current project. Call this at session start to load prior decisions, bugs, and context.
+
+Use the `detail` parameter to control token usage:
+- minimal: title + category only (~500 tokens for 10 memories)
+- standard: title, category, tags, date, what (default)
+- full: all fields including why and impact"""
 
 
 def handle_save(
@@ -43,6 +48,8 @@ def handle_save(
     details: str | None = None,
     project: str | None = None,
     journey_id: str | None = None,
+    ttl_days: int | None = None,
+    confidence: float | None = None,
 ) -> str:
     project = project or os.path.basename(os.getcwd())
     # Sanitise category at the handler boundary so the domain model stays strict
@@ -61,6 +68,8 @@ def handle_save(
         details=details,
         source=None,
         journey_id=journey_id,
+        ttl_days=ttl_days,
+        confidence=confidence,
     )
     result = svc.save(raw, project=project)
     return json.dumps(result)
@@ -98,10 +107,15 @@ def handle_context(
     svc: MemoryService,
     project: str | None = None,
     limit: int = 10,
+    detail: str = "standard",
 ) -> str:
     project = project or os.path.basename(os.getcwd())
     # Honour the configured semantic mode rather than hardcoding "never"
     results, total = svc.get_context(limit=limit, project=project)
+
+    # Normalise detail level — fall back to standard for unknown values
+    if detail not in ("minimal", "standard", "full"):
+        detail = "standard"
 
     memories = []
     for r in results:
@@ -112,15 +126,39 @@ def handle_context(
         except (ValueError, TypeError):
             date_display = date_str
 
-        memories.append(
-            {
-                "id": r["id"],
-                "title": r.get("title", "Untitled"),
-                "category": r.get("category", ""),
-                "tags": r.get("tags", []),  # already list[str] from repo
-                "date": date_display,
-            }
-        )
+        if detail == "minimal":
+            memories.append(
+                {
+                    "id": r["id"],
+                    "title": r.get("title", "Untitled"),
+                    "category": r.get("category", ""),
+                }
+            )
+        elif detail == "full":
+            memories.append(
+                {
+                    "id": r["id"],
+                    "title": r.get("title", "Untitled"),
+                    "category": r.get("category", ""),
+                    "tags": r.get("tags", []),
+                    "date": date_display,
+                    "what": r.get("what", ""),
+                    "why": r.get("why"),
+                    "impact": r.get("impact"),
+                }
+            )
+        else:
+            # standard (default)
+            memories.append(
+                {
+                    "id": r["id"],
+                    "title": r.get("title", "Untitled"),
+                    "category": r.get("category", ""),
+                    "tags": r.get("tags", []),  # already list[str] from repo
+                    "date": date_display,
+                    "what": r.get("what", ""),
+                }
+            )
 
     return json.dumps(
         {

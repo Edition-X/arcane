@@ -72,6 +72,8 @@ def create_schema(db: Database) -> None:
     # Migration: add columns if missing
     _add_column_if_missing(db, "memories", "updated_count", "INTEGER DEFAULT 0")
     _add_column_if_missing(db, "memories", "metadata", "TEXT DEFAULT '{}'")
+    _add_column_if_missing(db, "memories", "ttl_days", "INTEGER")
+    _add_column_if_missing(db, "memories", "confidence", "REAL")
 
     # ── journeys ────────────────────────────────────────────────────────
     db.execute("""
@@ -172,6 +174,7 @@ def create_schema(db: Database) -> None:
     db.execute("CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_memories_source ON memories(source)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at DESC)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_memories_ttl ON memories(ttl_days, created_at)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_mem_details_id ON memory_details(memory_id)")
 
     db.execute("CREATE INDEX IF NOT EXISTS idx_journeys_project ON journeys(project)")

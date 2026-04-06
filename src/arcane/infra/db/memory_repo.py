@@ -49,8 +49,8 @@ class MemoryRepository:
             INSERT INTO memories (
                 id, title, what, why, impact, tags, category, project,
                 source, related_files, file_path, section_anchor,
-                created_at, updated_at, metadata
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, updated_at, metadata, ttl_days, confidence
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 mem["id"],
@@ -68,6 +68,8 @@ class MemoryRepository:
                 mem["created_at"],
                 mem["updated_at"],
                 json.dumps(mem.get("metadata", {})),
+                mem.get("ttl_days"),
+                mem.get("confidence"),
             ),
         )
         rowid = cursor.lastrowid
@@ -195,6 +197,11 @@ class MemoryRepository:
         self.db.commit()
         return True
 
+    @staticmethod
+    def _not_expired_clause() -> str:
+        """SQL fragment that filters out expired memories (lazy expiry)."""
+        return "(m.ttl_days IS NULL OR (unixepoch('now') - unixepoch(m.created_at)) < m.ttl_days * 86400)"
+
     def fts_search(
         self,
         query: str,
@@ -207,7 +214,7 @@ class MemoryRepository:
             return []
         fts_query = " OR ".join(f'"{term}"*' for term in terms)
 
-        where_clauses: list[str] = []
+        where_clauses: list[str] = [MemoryRepository._not_expired_clause()]
         params: list[Any] = [fts_query]
 
         if project:
@@ -217,9 +224,7 @@ class MemoryRepository:
             where_clauses.append("m.source = ?")
             params.append(source)
 
-        where_clause = ""
-        if where_clauses:
-            where_clause = "AND " + " AND ".join(where_clauses)
+        where_clause = "AND " + " AND ".join(where_clauses)
 
         params.append(limit)
 
@@ -260,7 +265,7 @@ class MemoryRepository:
 
         vec_bytes = struct.pack(f"{len(query_embedding)}f", *query_embedding)
 
-        where_clauses: list[str] = ["v.embedding MATCH ?", "k = ?"]
+        where_clauses: list[str] = ["v.embedding MATCH ?", "k = ?", MemoryRepository._not_expired_clause()]
         params: list[Any] = [vec_bytes, fetch_k]
 
         if project:
@@ -298,7 +303,7 @@ class MemoryRepository:
         project: str | None = None,
         source: str | None = None,
     ) -> list[dict[str, Any]]:
-        where_clauses: list[str] = []
+        where_clauses: list[str] = [MemoryRepository._not_expired_clause()]
         params: list[Any] = []
 
         if project:
@@ -308,16 +313,13 @@ class MemoryRepository:
             where_clauses.append("m.source = ?")
             params.append(source)
 
-        where_clause = ""
-        if where_clauses:
-            where_clause = "WHERE " + " AND ".join(where_clauses)
+        where_clause = "WHERE " + " AND ".join(where_clauses)
 
         params.append(limit)
 
         rows = self.db.fetchall(
             f"""
-            SELECT m.id, m.title, m.category, m.tags, m.project, m.source, m.created_at,
-                   EXISTS(SELECT 1 FROM memory_details WHERE memory_id = m.id) as has_details
+            SELECT m.*, EXISTS(SELECT 1 FROM memory_details WHERE memory_id = m.id) as has_details
             FROM memories m
             {where_clause}
             ORDER BY m.created_at DESC
@@ -332,21 +334,19 @@ class MemoryRepository:
         return [_process_row(r) for r in rows]
 
     def count(self, project: str | None = None, source: str | None = None) -> int:
-        where_clauses: list[str] = []
+        where_clauses: list[str] = [MemoryRepository._not_expired_clause()]
         params: list[Any] = []
 
         if project:
-            where_clauses.append("project = ?")
+            where_clauses.append("m.project = ?")
             params.append(project)
         if source:
-            where_clauses.append("source = ?")
+            where_clauses.append("m.source = ?")
             params.append(source)
 
-        where_clause = ""
-        if where_clauses:
-            where_clause = "WHERE " + " AND ".join(where_clauses)
+        where_clause = "WHERE " + " AND ".join(where_clauses)
 
-        row = self.db.fetchone(f"SELECT COUNT(*) as cnt FROM memories {where_clause}", params)
+        row = self.db.fetchone(f"SELECT COUNT(*) as cnt FROM memories m {where_clause}", params)
         return row["cnt"] if row else 0
 
     def insert_vector(self, rowid: int, embedding: list[float]) -> None:

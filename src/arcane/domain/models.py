@@ -45,6 +45,9 @@ class RawMemoryInput(BaseModel):
     source: str | None = None
     journey_id: str | None = None
 
+    ttl_days: int | None = None
+    confidence: float | None = None
+
     @field_validator("category", mode="before")
     @classmethod
     def validate_category(cls, v: str | None) -> str | None:
@@ -53,6 +56,15 @@ class RawMemoryInput(BaseModel):
         valid = {c.value for c in Category}
         if v not in valid:
             raise ValueError(f"Invalid category '{v}'. Must be one of: {', '.join(sorted(valid))}")
+        return v
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def validate_confidence(cls, v: float | None) -> float | None:
+        if v is None:
+            return None
+        if not (0.0 <= v <= 1.0):
+            raise ValueError(f"confidence must be between 0.0 and 1.0, got {v}")
         return v
 
 
@@ -75,6 +87,8 @@ class Memory(BaseModel):
     updated_at: str = Field(default_factory=_now_iso)
     updated_count: int = 0
     metadata: dict[str, Any] = Field(default_factory=dict)
+    ttl_days: int | None = None
+    confidence: float | None = None
 
     @staticmethod
     def from_raw(raw: RawMemoryInput, project: str, file_path: str = "") -> Memory:
@@ -95,6 +109,8 @@ class Memory(BaseModel):
             created_at=now,
             updated_at=now,
             metadata={"journey_id": raw.journey_id} if raw.journey_id else {},
+            ttl_days=raw.ttl_days,
+            confidence=raw.confidence,
         )
 
 

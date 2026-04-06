@@ -272,6 +272,46 @@ class TestIntelligenceToolHandlers:
         assert len(remaining) == 0
 
 
+class TestMemoryContextDetailLevels:
+    def test_context_default_is_standard(self, mem_svc):
+        handle_save(mem_svc, title="Context Test", what="the what", why="the why", impact="the impact", project="test")
+        result = json.loads(handle_context(mem_svc, project="test"))
+        mem = result["memories"][0]
+        # standard: has title, category, tags, date, what — no why, no impact
+        assert "title" in mem
+        assert "tags" in mem
+        assert "date" in mem
+        assert "why" not in mem
+        assert "impact" not in mem
+
+    def test_context_minimal(self, mem_svc):
+        handle_save(mem_svc, title="Min Test", what="the what", why="the why", project="test")
+        result = json.loads(handle_context(mem_svc, project="test", detail="minimal"))
+        mem = result["memories"][0]
+        assert "title" in mem
+        assert "category" in mem
+        assert "what" not in mem
+        assert "tags" not in mem
+        assert "why" not in mem
+
+    def test_context_full(self, mem_svc):
+        handle_save(mem_svc, title="Full Test", what="the what", why="the why", impact="the impact", project="test")
+        result = json.loads(handle_context(mem_svc, project="test", detail="full"))
+        mem = result["memories"][0]
+        assert "title" in mem
+        assert "what" in mem
+        assert "why" in mem
+        assert "impact" in mem
+
+    def test_context_invalid_detail_falls_back_to_standard(self, mem_svc):
+        handle_save(mem_svc, title="Fallback Test", what="the what", project="test")
+        result = json.loads(handle_context(mem_svc, project="test", detail="bogus"))
+        mem = result["memories"][0]
+        # standard has tags but not why
+        assert "tags" in mem
+        assert "why" not in mem
+
+
 class TestIngestionToolHandlers:
     def test_handle_ingest_git_empty_repo(self, container, tmp_path):
         from arcane.mcp_server.tools.ingestion_tools import handle_ingest_git

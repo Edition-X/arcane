@@ -7,10 +7,27 @@ import logging
 
 import anyio
 from mcp.server import Server
+from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.stdio import stdio_server
-from mcp.types import TextContent, Tool
+from mcp.types import (
+    AnyUrl,
+    GetPromptResult,
+    Prompt,
+    PromptArgument,
+    PromptMessage,
+    ResourceTemplate,
+    TextContent,
+    Tool,
+)
 
 from arcane.domain.enums import RelationType
+from arcane.mcp_server.prompts import (
+    PROMPTS,
+    build_catchup_prompt,
+    build_journey_prompt,
+    build_recall_prompt,
+)
+from arcane.mcp_server.resources import RESOURCE_TEMPLATE_URI, _parse_project_from_uri
 from arcane.mcp_server.tools.content_tools import handle_draft_adr, handle_draft_blog
 from arcane.mcp_server.tools.ingestion_tools import (
     handle_analyze,
@@ -70,6 +87,14 @@ def _create_server(container: ServiceContainer) -> Server:
                         "details": {"type": "string", "description": "Full context."},
                         "project": {"type": "string"},
                         "journey_id": {"type": "string", "description": "Link to a journey."},
+                        "ttl_days": {
+                            "type": "integer",
+                            "description": "Days until this memory expires. Omit for permanent memories.",
+                        },
+                        "confidence": {
+                            "type": "number",
+                            "description": "Confidence in accuracy 0.0–1.0. Default: omit.",
+                        },
                     },
                     "required": ["title", "what"],
                 },
@@ -95,6 +120,17 @@ def _create_server(container: ServiceContainer) -> Server:
                     "properties": {
                         "project": {"type": "string"},
                         "limit": {"type": "integer", "default": 10},
+                        "detail": {
+                            "type": "string",
+                            "enum": ["minimal", "standard", "full"],
+                            "default": "standard",
+                            "description": (
+                                "Level of detail per memory. "
+                                "minimal=title+category (~500 tokens), "
+                                "standard=+tags+what (default), "
+                                "full=all fields."
+                            ),
+                        },
                     },
                 },
             ),
@@ -331,6 +367,82 @@ def _create_server(container: ServiceContainer) -> Server:
             result = json.dumps({"error": f"Unknown tool: {name}"})
 
         return [TextContent(type="text", text=result)]
+
+    @server.list_resource_templates()
+    async def list_resource_templates() -> list[ResourceTemplate]:
+        return [
+            ResourceTemplate(
+                uriTemplate=RESOURCE_TEMPLATE_URI,
+                name="Project memory context",
+                description="Recent memories and decisions for a project. Pre-fetched by MCP hosts at session start.",
+                mimeType="application/json",
+            )
+        ]
+
+    @server.read_resource()
+    async def read_resource(uri: AnyUrl) -> list[ReadResourceContents]:
+        project = _parse_project_from_uri(str(uri))
+        text = await anyio.to_thread.run_sync(lambda: handle_context(mem_svc, project=project, detail="standard"))
+        return [ReadResourceContents(content=text, mime_type="application/json")]
+
+    @server.list_prompts()
+    async def list_prompts() -> list[Prompt]:
+        return [
+            Prompt(
+                name=p["name"],
+                description=p["description"],
+                arguments=[
+                    PromptArgument(
+                        name=a["name"],
+                        description=a["description"],
+                        required=a.get("required", False),
+                    )
+                    for a in p.get("arguments", [])
+                ],
+            )
+            for p in PROMPTS
+        ]
+
+    @server.get_prompt()
+    async def get_prompt(name: str, arguments: dict[str, str] | None) -> GetPromptResult:
+        args = arguments or {}
+        builders = {
+            "recall": build_recall_prompt,
+            "catchup": build_catchup_prompt,
+            "journey": build_journey_prompt,
+        }
+        builder = builders.get(name)
+        if builder is None:
+            return GetPromptResult(
+                description=f"Unknown prompt: {name}",
+                messages=[
+                    PromptMessage(
+                        role="user",
+                        content=TextContent(type="text", text=f"Unknown prompt: {name}"),
+                    )
+                ],
+            )
+        try:
+            raw = await anyio.to_thread.run_sync(lambda: builder(args))
+        except Exception:
+            logger.error("Prompt '%s' builder failed", name, exc_info=True)
+            return GetPromptResult(
+                description=f"Error building prompt: {name}",
+                messages=[
+                    PromptMessage(
+                        role="user",
+                        content=TextContent(type="text", text=f"Error building prompt '{name}'."),
+                    )
+                ],
+            )
+        messages = [
+            PromptMessage(
+                role=m["role"],
+                content=TextContent(type="text", text=m["content"]["text"]),
+            )
+            for m in raw["messages"]
+        ]
+        return GetPromptResult(description=raw.get("description", ""), messages=messages)
 
     return server
 
