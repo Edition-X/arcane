@@ -1,5 +1,7 @@
 # Arcane
 
+> **Beta software** — Arcane is in active development. APIs and storage formats may change between releases. Pin your version and back up `~/.arcane` before upgrading.
+
 **Unified engineering intelligence** — persistent memory, decision journeys, and knowledge capture for AI-assisted development workflows.
 
 Arcane runs as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server, giving Claude Code, Claude Desktop, and other MCP-compatible agents a persistent, searchable knowledge store that survives context window resets and spans every project you work on.
