@@ -135,4 +135,6 @@ def handle_details(svc: MemoryService, memory_id: str) -> str:
 
 def handle_delete(svc: MemoryService, memory_id: str) -> str:
     deleted = svc.delete(memory_id)
-    return json.dumps({"deleted": deleted, "memory_id": memory_id})
+    if not deleted:
+        return json.dumps({"error": f"Memory not found: {memory_id}"})
+    return json.dumps({"deleted": True, "memory_id": memory_id})

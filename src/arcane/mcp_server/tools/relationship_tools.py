@@ -9,6 +9,17 @@ from arcane.domain.models import Relationship
 from arcane.services.container import ServiceContainer
 
 
+def _entity_exists(container: ServiceContainer, entity_type: str, entity_id: str) -> bool:
+    """Check if an entity exists by type and ID."""
+    if entity_type == "memory":
+        return container.memory_repo.get(entity_id) is not None
+    if entity_type == "journey":
+        return container.journey_repo.get(entity_id) is not None
+    if entity_type == "artifact":
+        return container.artifact_repo.get(entity_id) is not None
+    return False
+
+
 def handle_link(
     container: ServiceContainer,
     source_type: str,
@@ -19,11 +30,16 @@ def handle_link(
 ) -> str:
     valid_types = {"memory", "journey", "artifact"}
     if source_type not in valid_types or target_type not in valid_types:
-        return json.dumps({"error": f"Invalid entity type. Must be one of: {valid_types}"})
+        return json.dumps({"error": f"Invalid entity type. Must be one of: {sorted(valid_types)}"})
 
     valid_relations = {r.value for r in RelationType}
     if relation not in valid_relations:
-        return json.dumps({"error": f"Invalid relation. Must be one of: {valid_relations}"})
+        return json.dumps({"error": f"Invalid relation. Must be one of: {sorted(valid_relations)}"})
+
+    if not _entity_exists(container, source_type, source_id):
+        return json.dumps({"error": f"Source {source_type} not found: {source_id}"})
+    if not _entity_exists(container, target_type, target_id):
+        return json.dumps({"error": f"Target {target_type} not found: {target_id}"})
 
     rel = Relationship(
         source_type=source_type,

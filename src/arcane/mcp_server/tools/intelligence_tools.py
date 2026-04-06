@@ -31,4 +31,6 @@ def handle_insights(
 
 def handle_insights_ack(container: ServiceContainer, insight_id: str) -> str:
     acked = container.insight_repo.acknowledge(insight_id)
-    return json.dumps({"acknowledged": acked, "insight_id": insight_id})
+    if not acked:
+        return json.dumps({"error": f"Insight not found: {insight_id}"})
+    return json.dumps({"acknowledged": True, "insight_id": insight_id})

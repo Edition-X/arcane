@@ -127,17 +127,56 @@ class TestJourneyToolHandlers:
 
 
 class TestRelationshipToolHandlers:
+    @staticmethod
+    def _create_entities(container):
+        """Create a real memory and journey in the DB, return their IDs."""
+        from tests.conftest import make_memory_dict
+        from arcane.domain.models import Journey
+
+        mem = make_memory_dict()
+        container.memory_repo.insert(mem)
+        j = Journey(title="Test Journey", project="test-project")
+        container.journey_repo.insert(j.model_dump())
+        return mem["id"], j.id
+
     def test_handle_link(self, container):
+        mem_id, j_id = self._create_entities(container)
         result = json.loads(handle_link(
             container,
             source_type="memory",
-            source_id="m1",
+            source_id=mem_id,
             target_type="journey",
-            target_id="j1",
+            target_id=j_id,
             relation="part_of",
         ))
         assert result["created"] is True
         assert result["id"]
+
+    def test_handle_link_nonexistent_source(self, container):
+        _, j_id = self._create_entities(container)
+        result = json.loads(handle_link(
+            container,
+            source_type="memory",
+            source_id="nonexistent-id",
+            target_type="journey",
+            target_id=j_id,
+            relation="part_of",
+        ))
+        assert "error" in result
+        assert "not found" in result["error"]
+
+    def test_handle_link_nonexistent_target(self, container):
+        mem_id, _ = self._create_entities(container)
+        result = json.loads(handle_link(
+            container,
+            source_type="memory",
+            source_id=mem_id,
+            target_type="journey",
+            target_id="nonexistent-id",
+            relation="part_of",
+        ))
+        assert "error" in result
+        assert "not found" in result["error"]
 
     def test_handle_link_invalid_type(self, container):
         result = json.loads(handle_link(
@@ -162,13 +201,14 @@ class TestRelationshipToolHandlers:
         assert "error" in result
 
     def test_handle_trace(self, container):
+        mem_id, j_id = self._create_entities(container)
         handle_link(
             container,
-            source_type="memory", source_id="m1",
-            target_type="journey", target_id="j1",
+            source_type="memory", source_id=mem_id,
+            target_type="journey", target_id=j_id,
             relation="part_of",
         )
-        result = json.loads(handle_trace(container, entity_type="memory", entity_id="m1"))
+        result = json.loads(handle_trace(container, entity_type="memory", entity_id=mem_id))
         assert isinstance(result, list)
         assert len(result) == 1
 
