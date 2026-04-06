@@ -29,6 +29,17 @@ It communicates via stdio (JSON-RPC). For Claude Desktop / Claude Code integrati
 - **DRY**: check existing services and repos before adding new logic
 - **Test at boundaries**: mock DB and network at the service/repo boundary, not deep inside
 
+## Arcane Memory Discipline (for Claude Code)
+
+After every `git commit` during development work, save relevant knowledge to Arcane before moving on:
+
+- **Decision made** → `memory_save` with `category: "decision"`
+- **Bug fixed** → `memory_save` with `category: "bug"`, including root cause and how to recognise it
+- **Pattern discovered** → `memory_save` with `category: "pattern"` or `"learning"`
+- **Milestone shipped** → `memory_save` with `category: "milestone"`
+
+One focused memory per commit is better than a large dump at session end. This is what keeps Arcane useful across sessions.
+
 ## Environment Variables
 
 | Variable | Purpose | Default |
