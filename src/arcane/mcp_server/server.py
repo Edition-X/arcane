@@ -321,7 +321,11 @@ def _create_server(container: ServiceContainer) -> Server:
 
         handler = handlers.get(name)
         if handler:
-            result = await anyio.to_thread.run_sync(handler)
+            try:
+                result = await anyio.to_thread.run_sync(handler)
+            except Exception:
+                logger.error("Tool '%s' failed", name, exc_info=True)
+                result = json.dumps({"error": f"Internal error in tool '{name}'. Check server logs."})
         else:
             logger.warning("Unknown MCP tool requested: %s", name)
             result = json.dumps({"error": f"Unknown tool: {name}"})

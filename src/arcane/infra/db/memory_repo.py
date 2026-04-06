@@ -191,6 +191,8 @@ class MemoryRepository:
         source: str | None = None,
     ) -> list[dict[str, Any]]:
         terms = query.split()
+        if not terms:
+            return []
         fts_query = " OR ".join(f'"{term}"*' for term in terms)
 
         where_clauses: list[str] = []
