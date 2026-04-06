@@ -1,0 +1,9 @@
+- [Home](/)
+- **Getting Started**
+  - [Installation](installation.md)
+  - [Quickstart](quickstart.md)
+- **Reference**
+  - [MCP Tools](mcp-tools.md)
+  - [Configuration](configuration.md)
+- **Architecture**
+  - [How It Works](architecture.md)

@@ -1,0 +1,14 @@
+services:
+  arcane-mcp:
+    build: .
+    image: arcane:latest
+    volumes:
+      - "${HOME}/.arcane:/data/.arcane"
+    environment:
+      ARCANE_HOME: /data/.arcane
+      ARCANE_LOG_LEVEL: "${ARCANE_LOG_LEVEL:-INFO}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
+      LINEAR_API_KEY: "${LINEAR_API_KEY:-}"
+    stdin_open: true
+    tty: true
