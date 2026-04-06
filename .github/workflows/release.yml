@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # full history needed for git-cliff
+          fetch-depth: 0  # full history needed for git-cliff and tag inspection
 
       - uses: astral-sh/setup-uv@v5
         with:
@@ -38,19 +38,21 @@ jobs:
       - name: Determine next version
         id: version
         run: |
-          # Read current version from pyproject.toml
-          CURRENT=$(grep '^version' pyproject.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-          echo "Current version: $CURRENT"
-
-          # Get latest tag (if any)
+          # Source of truth is git tags, not pyproject.toml.
+          # This avoids needing to commit back to main (which branch protection blocks).
           LATEST_TAG=$(git tag --sort=-version:refname | grep '^v' | head -1 || echo "")
           echo "Latest tag: $LATEST_TAG"
 
-          # Check if there are any new conventional commits since last tag
+          # Collect commits since last tag (or all commits if no tag yet)
           if [ -z "$LATEST_TAG" ]; then
             COMMITS=$(git log --oneline --format="%s" | head -20)
+            BASE="0.1.0"
+            BETA_NUM=""
           else
             COMMITS=$(git log "${LATEST_TAG}..HEAD" --oneline --format="%s")
+            CURRENT="${LATEST_TAG#v}"
+            BASE=$(echo "$CURRENT" | sed 's/-beta\..*//')
+            BETA_NUM=$(echo "$CURRENT" | grep -oP '(?<=-beta\.)\d+' || echo "")
           fi
 
           if [ -z "$COMMITS" ]; then
@@ -61,31 +63,24 @@ jobs:
 
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
-          # Determine bump type from conventional commits
-          if echo "$COMMITS" | grep -qiE "^(feat|fix|perf|refactor|docs)(\(.+\))?!:"; then
-            BUMP="major"
-          elif echo "$COMMITS" | grep -qiE "^feat(\(.+\))?:"; then
-            BUMP="minor"
-          else
-            BUMP="patch"
-          fi
-          echo "Bump type: $BUMP"
-
-          # Parse current version (handles both X.Y.Z and X.Y.Z-beta.N)
-          BASE=$(echo "$CURRENT" | sed 's/-beta\..*//')
-          MAJOR=$(echo "$BASE" | cut -d. -f1)
-          MINOR=$(echo "$BASE" | cut -d. -f2)
-          PATCH=$(echo "$BASE" | cut -d. -f3)
-
-          # Extract beta number if present
-          BETA_NUM=$(echo "$CURRENT" | grep -oP '(?<=-beta\.)\d+' || echo "")
-
           if [ -n "$BETA_NUM" ]; then
-            # Still in beta — increment beta number
-            NEXT_BETA=$((BETA_NUM + 1))
-            NEXT_VERSION="${BASE}-beta.${NEXT_BETA}"
+            # Already in a beta series — just increment the beta number
+            NEXT_VERSION="${BASE}-beta.$((BETA_NUM + 1))"
           else
-            # Stable version — bump according to commits and start new beta
+            # No beta tag yet — determine bump type from conventional commits
+            if echo "$COMMITS" | grep -qiE "^(feat|fix|perf|refactor|docs)(\(.+\))?!:"; then
+              BUMP="major"
+            elif echo "$COMMITS" | grep -qiE "^feat(\(.+\))?:"; then
+              BUMP="minor"
+            else
+              BUMP="patch"
+            fi
+            echo "Bump type: $BUMP"
+
+            MAJOR=$(echo "$BASE" | cut -d. -f1)
+            MINOR=$(echo "$BASE" | cut -d. -f2)
+            PATCH=$(echo "$BASE" | cut -d. -f3)
+
             case "$BUMP" in
               major) NEXT_VERSION="$((MAJOR + 1)).0.0-beta.1" ;;
               minor) NEXT_VERSION="${MAJOR}.$((MINOR + 1)).0-beta.1" ;;
@@ -97,32 +92,25 @@ jobs:
           echo "next=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$NEXT_VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Bump version in pyproject.toml
+      - name: Generate release notes
         if: steps.version.outputs.skip != 'true'
         run: |
-          NEXT="${{ steps.version.outputs.next }}"
-          sed -i "s/^version = \".*\"/version = \"${NEXT}\"/" pyproject.toml
-          # Update uv.lock to reflect new version
-          uv lock
+          # Generates notes for just this release (unreleased commits since last tag)
+          git-cliff --config cliff.toml \
+            --tag "${{ steps.version.outputs.tag }}" \
+            --unreleased --strip all \
+            -o release-notes.md
 
-      - name: Generate changelog
+      - name: Tag and push
         if: steps.version.outputs.skip != 'true'
         run: |
-          TAG="${{ steps.version.outputs.tag }}"
-          # Generate full changelog for CHANGELOG.md
-          git-cliff --config cliff.toml --tag "$TAG" -o CHANGELOG.md
-          # Generate just this release's notes for the GitHub release body
-          git-cliff --config cliff.toml --tag "$TAG" --unreleased --strip all -o release-notes.md
-
-      - name: Commit version bump and changelog
-        if: steps.version.outputs.skip != 'true'
-        run: |
+          # We only push a tag — never a commit to main.
+          # Branch protection covers refs/heads/* but not refs/tags/*,
+          # so this works without any bypass allowances or PATs.
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml CHANGELOG.md uv.lock
-          git commit -m "chore: release ${{ steps.version.outputs.next }} [skip ci]"
           git tag "${{ steps.version.outputs.tag }}"
-          git push origin main --follow-tags
+          git push origin "${{ steps.version.outputs.tag }}"
 
       - name: Create GitHub release
         if: steps.version.outputs.skip != 'true'
@@ -130,8 +118,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ steps.version.outputs.tag }}"
-          NOTES=$(cat release-notes.md)
-          # Mark all beta versions as pre-release
           if echo "$TAG" | grep -q "beta"; then
             PRE="--prerelease"
           else
@@ -139,5 +125,5 @@ jobs:
           fi
           gh release create "$TAG" \
             --title "$TAG" \
-            --notes "$NOTES" \
+            --notes-file release-notes.md \
             $PRE
