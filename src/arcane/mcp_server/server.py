@@ -330,29 +330,30 @@ def _create_server(container: ServiceContainer) -> Server:
         ]
 
     @server.call_tool()
-    async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+    async def call_tool(name: str, arguments: dict[str, object] | None) -> list[TextContent]:
         # All handler functions are synchronous (SQLite + subprocess work).
-        # Run them in a thread so the asyncio event loop is never blocked.
+        # Run them in a worker thread so the asyncio event loop is never blocked.
+        args = arguments or {}
         handlers = {
-            "memory_save": lambda: handle_save(mem_svc, **arguments),
-            "memory_search": lambda: handle_search(mem_svc, **arguments),
-            "memory_context": lambda: handle_context(mem_svc, **arguments),
-            "memory_details": lambda: handle_details(mem_svc, **arguments),
-            "memory_delete": lambda: handle_delete(mem_svc, **arguments),
-            "journey_start": lambda: handle_journey_start(journey_svc, **arguments),
-            "journey_update": lambda: handle_journey_update(journey_svc, **arguments),
-            "journey_complete": lambda: handle_journey_complete(journey_svc, **arguments),
-            "journey_list": lambda: handle_journey_list(journey_svc, **arguments),
-            "ingest_git": lambda: handle_ingest_git(container, **arguments),
-            "ingest_gha": lambda: handle_ingest_gha(container, **arguments),
-            "ingest_linear": lambda: handle_ingest_linear(container, **arguments),
-            "analyze": lambda: handle_analyze(container, **arguments),
-            "link": lambda: handle_link(container, **arguments),
-            "trace": lambda: handle_trace(container, **arguments),
-            "insights": lambda: handle_insights(container, **arguments),
-            "insights_ack": lambda: handle_insights_ack(container, **arguments),
-            "draft_blog": lambda: handle_draft_blog(container, **arguments),
-            "draft_adr": lambda: handle_draft_adr(container, **arguments),
+            "memory_save": lambda: handle_save(mem_svc, **args),
+            "memory_search": lambda: handle_search(mem_svc, **args),
+            "memory_context": lambda: handle_context(mem_svc, **args),
+            "memory_details": lambda: handle_details(mem_svc, **args),
+            "memory_delete": lambda: handle_delete(mem_svc, **args),
+            "journey_start": lambda: handle_journey_start(journey_svc, **args),
+            "journey_update": lambda: handle_journey_update(journey_svc, **args),
+            "journey_complete": lambda: handle_journey_complete(journey_svc, **args),
+            "journey_list": lambda: handle_journey_list(journey_svc, **args),
+            "ingest_git": lambda: handle_ingest_git(container, **args),
+            "ingest_gha": lambda: handle_ingest_gha(container, **args),
+            "ingest_linear": lambda: handle_ingest_linear(container, **args),
+            "analyze": lambda: handle_analyze(container, **args),
+            "link": lambda: handle_link(container, **args),
+            "trace": lambda: handle_trace(container, **args),
+            "insights": lambda: handle_insights(container, **args),
+            "insights_ack": lambda: handle_insights_ack(container, **args),
+            "draft_blog": lambda: handle_draft_blog(container, **args),
+            "draft_adr": lambda: handle_draft_adr(container, **args),
         }
 
         handler = handlers.get(name)

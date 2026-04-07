@@ -1,9 +1,12 @@
 """Tests for MCP tool handler functions."""
 
+import asyncio
 import json
 
 import pytest
+from mcp.types import CallToolRequest, CallToolRequestParams
 
+from arcane.mcp_server.server import _create_server
 from arcane.mcp_server.tools.content_tools import handle_draft_adr, handle_draft_blog
 from arcane.mcp_server.tools.intelligence_tools import handle_insights, handle_insights_ack
 from arcane.mcp_server.tools.journey_tools import (
@@ -82,11 +85,27 @@ class TestMemoryToolHandlers:
         result = json.loads(handle_search(mem_svc, query="nonexistent xyz"))
         assert result == []
 
+    def test_handle_search_none_limit_uses_default(self, mem_svc):
+        handle_save(mem_svc, title="Searchable with None limit", what="Find me", project="test")
+        result = json.loads(handle_search(mem_svc, query="Searchable with None limit", limit=None, project="test"))
+        assert isinstance(result, list)
+        assert len(result) >= 1
+        assert result[0]["title"] == "Searchable with None limit"
+
     def test_handle_context(self, mem_svc):
         handle_save(mem_svc, title="Ctx Test", what="Context item", project="test")
         result = json.loads(handle_context(mem_svc, project="test"))
         assert result["total"] >= 1
         assert len(result["memories"]) >= 1
+
+    def test_handle_context_none_limit_and_detail_fall_back_to_defaults(self, mem_svc):
+        handle_save(mem_svc, title="Ctx None Test", what="Context item", why="Because", project="test")
+        result = json.loads(handle_context(mem_svc, project="test", limit=None, detail=None))
+        assert result["total"] >= 1
+        assert len(result["memories"]) >= 1
+        mem = result["memories"][0]
+        assert "what" in mem
+        assert "why" not in mem
 
     def test_handle_details(self, mem_svc):
         saved = json.loads(
@@ -270,6 +289,43 @@ class TestIntelligenceToolHandlers:
         # Should be empty after acknowledging
         remaining = json.loads(handle_insights(container, project="test"))
         assert len(remaining) == 0
+
+
+class TestMcpServerCallTool:
+    @staticmethod
+    def _call_tool(container, name: str, arguments: dict | None = None):
+        server = _create_server(container)
+        handler = server.request_handlers[CallToolRequest]
+        request = CallToolRequest(params=CallToolRequestParams(name=name, arguments=arguments))
+        return asyncio.run(handler(request)).root
+
+    def test_memory_context_succeeds_via_call_tool(self, container):
+        mem_svc = MemoryService(container)
+        handle_save(mem_svc, title="Context via MCP", what="Context item", project="test")
+        result = self._call_tool(container, "memory_context", {"project": "test", "limit": 5, "detail": "standard"})
+        assert result.isError is False
+        payload = json.loads(result.content[0].text)
+        assert payload["total"] >= 1
+        assert payload["memories"][0]["title"] == "Context via MCP"
+
+    def test_memory_search_succeeds_via_call_tool(self, container):
+        mem_svc = MemoryService(container)
+        handle_save(mem_svc, title="Search via MCP", what="Search content", project="test")
+        result = self._call_tool(container, "memory_search", {"project": "test", "query": "Search via MCP", "limit": 5})
+        assert result.isError is False
+        payload = json.loads(result.content[0].text)
+        assert payload[0]["title"] == "Search via MCP"
+
+    def test_journey_start_succeeds_via_call_tool(self, container):
+        result = self._call_tool(
+            container,
+            "journey_start",
+            {"title": "Journey via MCP", "project": "test", "linear_issue_id": ""},
+        )
+        assert result.isError is False
+        payload = json.loads(result.content[0].text)
+        assert payload["title"] == "Journey via MCP"
+        assert payload["project"] == "test"
 
 
 class TestMemoryContextDetailLevels:
