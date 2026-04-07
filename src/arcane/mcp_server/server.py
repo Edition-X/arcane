@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any, cast
 
 import anyio
 from mcp.server import Server
@@ -333,7 +334,7 @@ def _create_server(container: ServiceContainer) -> Server:
     async def call_tool(name: str, arguments: dict[str, object] | None) -> list[TextContent]:
         # All handler functions are synchronous (SQLite + subprocess work).
         # Run them in a worker thread so the asyncio event loop is never blocked.
-        args = arguments or {}
+        args = cast(dict[str, Any], arguments or {})
         handlers = {
             "memory_save": lambda: handle_save(mem_svc, **args),
             "memory_search": lambda: handle_search(mem_svc, **args),
