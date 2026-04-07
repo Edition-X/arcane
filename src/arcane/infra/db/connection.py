@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 try:
@@ -17,30 +18,38 @@ class Database:
 
     def __init__(self, db_path: str = ":memory:") -> None:
         self.db_path = db_path
-        self.conn = sqlite3.connect(db_path)
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        self._lock = threading.RLock()
 
         self.conn.enable_load_extension(True)
         sqlite_vec.load(self.conn)
         self.conn.enable_load_extension(False)
 
     def execute(self, sql: str, params: tuple | list = ()) -> sqlite3.Cursor:
-        return self.conn.cursor().execute(sql, params)
+        with self._lock:
+            return self.conn.cursor().execute(sql, params)
 
     def executemany(self, sql: str, params: list[tuple]) -> sqlite3.Cursor:
-        return self.conn.cursor().executemany(sql, params)
+        with self._lock:
+            return self.conn.cursor().executemany(sql, params)
 
     def fetchone(self, sql: str, params: tuple | list = ()) -> dict[str, Any] | None:
-        cursor = self.execute(sql, params)
-        row = cursor.fetchone()
+        with self._lock:
+            cursor = self.conn.cursor().execute(sql, params)
+            row = cursor.fetchone()
         return dict(row) if row else None
 
     def fetchall(self, sql: str, params: tuple | list = ()) -> list[dict[str, Any]]:
-        cursor = self.execute(sql, params)
-        return [dict(row) for row in cursor.fetchall()]
+        with self._lock:
+            cursor = self.conn.cursor().execute(sql, params)
+            rows = cursor.fetchall()
+        return [dict(row) for row in rows]
 
     def commit(self) -> None:
-        self.conn.commit()
+        with self._lock:
+            self.conn.commit()
 
     def close(self) -> None:
-        self.conn.close()
+        with self._lock:
+            self.conn.close()

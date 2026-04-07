@@ -75,13 +75,19 @@ def handle_save(
     return json.dumps(result)
 
 
+def _normalize_limit(limit: int | None, default: int) -> int:
+    if limit is None or limit <= 0:
+        return default
+    return limit
+
+
 def handle_search(
     svc: MemoryService,
     query: str,
-    limit: int = 5,
+    limit: int | None = 5,
     project: str | None = None,
 ) -> str:
-    results = svc.search(query, limit=limit, project=project)
+    results = svc.search(query, limit=_normalize_limit(limit, 5), project=project)
 
     clean = []
     for r in results:
@@ -106,14 +112,15 @@ def handle_search(
 def handle_context(
     svc: MemoryService,
     project: str | None = None,
-    limit: int = 10,
-    detail: str = "standard",
+    limit: int | None = 10,
+    detail: str | None = "standard",
 ) -> str:
     project = project or os.path.basename(os.getcwd())
     # Honour the configured semantic mode rather than hardcoding "never"
-    results, total = svc.get_context(limit=limit, project=project)
+    results, total = svc.get_context(limit=_normalize_limit(limit, 10), project=project)
 
     # Normalise detail level — fall back to standard for unknown values
+    detail = detail or "standard"
     if detail not in ("minimal", "standard", "full"):
         detail = "standard"
 
