@@ -96,3 +96,61 @@ Use conventional commits:
 - `test:` test additions/changes
 - `docs:` documentation only
 - `chore:` tooling, deps, config
+
+---
+
+## Arcane — Automatic Engineering Memory
+
+You have access to **Arcane** through MCP tools. Use it automatically as part of normal work — do not wait to be asked.
+
+> **Tool name conventions** differ by agent:
+> - Claude Code: `mcp__arcane__memory_context`, `mcp__arcane__memory_save`, etc.
+> - Forge / Codex: `mcp_arcane_tool_memory_context`, `mcp_arcane_tool_memory_save`, etc.
+> The capability names below (`memory_context`, `memory_save`, …) refer to the same tools regardless of prefix.
+
+### Core Rules
+
+- Retrieve context before doing meaningful work.
+- Search before saving to avoid duplicates.
+- Save before finishing any task that involved a decision, bug fix, non-obvious learning, or milestone.
+- Use journeys for multi-step investigations rather than isolated memories only.
+- Never save secrets, tokens, or credentials.
+- One precise memory is better than a long dump.
+
+### At the start of every session
+1. Call `memory_context` for the current project to load recent decisions and context.
+2. If the request references prior work or "last time", call `memory_search` with task-specific terms.
+3. If the task sounds like an ongoing investigation or spike, call `journey_list` for active journeys.
+
+### Before researching anything
+Call `memory_search` first — the answer may already be stored.
+
+### When to save memories (automatically, without being asked)
+- **Decision**: architecture choice, implementation tradeoff, tooling choice, agreed direction
+- **Bug**: root cause discovered and fix implemented
+- **Pattern**: reusable approach, best practice, or non-obvious gotcha
+- **Learning**: non-obvious technical insight that will help future sessions
+- **Milestone**: significant feature, migration, or project progress point shipped
+
+Save triggers: after a meaningful commit, after resolving a debugging session, after concluding a design discussion.
+
+### Memory save fields — always include
+- `project`: current project name
+- `title`: short and specific, max 60 chars
+- `what`: 1–2 sentence summary
+- `why`: reasoning or motivation
+- `impact`: what changed or why it matters
+- `category`: `decision` | `bug` | `pattern` | `learning` | `context` | `poc` | `milestone`
+- `tags`: 2–5 relevant tags
+- `details`: for decisions and bugs, include context, options considered, decision, tradeoffs, follow-up
+
+### Journeys — for multi-step investigations
+Start `journey_start` for: difficult debugging, architectural evaluations, spikes, migrations, CI investigations.
+
+While active: save related memories with `journey_id` set; call `journey_update` at major turning points.
+
+When done: call `journey_complete` with a concise outcome summary.
+
+### Content generation
+- Use `draft_adr` when the user asks for an ADR and a relevant decision memory exists.
+- Use `draft_blog` when the user asks for a blog post or retrospective and a journey exists.
