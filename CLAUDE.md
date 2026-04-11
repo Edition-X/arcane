@@ -31,14 +31,31 @@ It communicates via stdio (JSON-RPC). For Claude Desktop / Claude Code integrati
 
 ## Arcane Memory Discipline (for Claude Code)
 
-After every `git commit` during development work, save relevant knowledge to Arcane before moving on:
+Arcane is the persistent memory system for this project. Use it automatically — do not wait to be asked.
 
+### At the start of every session
+1. Call `memory_context` for the current project to load recent decisions, bugs, and context.
+2. If the request references prior work, past decisions, or "last time", call `memory_search` with task-specific terms.
+3. If the task sounds like an ongoing investigation or spike, call `journey_list` to find active journeys.
+
+### Before researching anything
+- Call `memory_search` first — the answer may already be stored.
+
+### When to save memories (after every `git commit`)
 - **Decision made** → `memory_save` with `category: "decision"`
 - **Bug fixed** → `memory_save` with `category: "bug"`, including root cause and how to recognise it
 - **Pattern discovered** → `memory_save` with `category: "pattern"` or `"learning"`
 - **Milestone shipped** → `memory_save` with `category: "milestone"`
 
-One focused memory per commit is better than a large dump at session end. This is what keeps Arcane useful across sessions.
+One focused memory per commit is better than a large dump at session end.
+
+### Journeys — for multi-step investigations
+- Start with `journey_start` when work spans multiple steps (debugging, architectural evaluation, spike).
+- Link memories via `journey_id` as the work progresses.
+- Complete with `journey_complete` and an outcome summary when done.
+
+### Memory save fields — always include
+`title` (≤60 chars), `what`, `why`, `impact`, `category`, `tags`, `project`, `details` (for decisions/bugs).
 
 ## Environment Variables
 

@@ -6,6 +6,7 @@ import json
 
 from arcane.services.container import ServiceContainer
 from arcane.services.journey import JourneyService
+from arcane.services.memory import MemoryService
 
 
 def handle_draft_blog(
@@ -22,6 +23,10 @@ def handle_draft_blog(
 
         brief = _build_journey_brief(journey)
         return json.dumps({"brief": brief, "journey_id": journey["id"]})
+
+    if project:
+        brief = _build_project_brief(container, project)
+        return json.dumps({"brief": brief, "project": project})
 
     return json.dumps({"error": "Provide journey_id or project to generate brief"})
 
@@ -56,6 +61,36 @@ Accepted
 {detail_body}
 """
     return json.dumps({"brief": brief, "memory_id": mem["id"]})
+
+
+def _build_project_brief(container: ServiceContainer, project: str) -> str:
+    """Build a blog brief from recent project memories when no journey is available."""
+    svc = MemoryService(container)
+    memories, total = svc.get_context(limit=20, project=project)
+
+    lines = [
+        f"# Blog Brief: {project}",
+        "",
+        f"**Project:** {project}",
+        f"**Total memories:** {total}",
+        "",
+        "## Recent Decisions & Learnings",
+        "",
+    ]
+    if memories:
+        for mem in memories:
+            category = mem.get("category", "note")
+            lines.append(f"### [{category}] {mem['title']}")
+            lines.append(f"**What:** {mem.get('what', '')}")
+            if mem.get("why"):
+                lines.append(f"**Why:** {mem['why']}")
+            if mem.get("impact"):
+                lines.append(f"**Impact:** {mem['impact']}")
+            lines.append("")
+    else:
+        lines.append("*No memories found for this project.*")
+
+    return "\n".join(lines)
 
 
 def _build_journey_brief(journey: dict) -> str:

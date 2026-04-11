@@ -12,6 +12,7 @@ from arcane.mcp_server.tools.intelligence_tools import handle_insights, handle_i
 from arcane.mcp_server.tools.journey_tools import (
     handle_journey_complete,
     handle_journey_list,
+    handle_journey_show,
     handle_journey_start,
     handle_journey_update,
 )
@@ -409,3 +410,172 @@ class TestContentToolHandlers:
     def test_handle_draft_blog_no_journey(self, container):
         result = json.loads(handle_draft_blog(container))
         assert "error" in result
+
+    def test_handle_draft_blog_project_mode(self, container):
+        """draft_blog with project but no journey_id should return a brief from memories."""
+        from tests.conftest import make_memory_dict
+
+        mem = make_memory_dict(title="Blog mem", what="We did a thing", project="blogproj")
+        container.memory_repo.insert(mem)
+        result = json.loads(handle_draft_blog(container, project="blogproj"))
+        assert "brief" in result
+        assert "blogproj" in result["brief"]
+        assert "error" not in result
+
+
+class TestIsError:
+    """Logical errors must set isError=True so MCP clients can distinguish them."""
+
+    @staticmethod
+    def _call_tool(container, name: str, arguments: dict | None = None):
+        server = _create_server(container)
+        handler = server.request_handlers[CallToolRequest]
+        request = CallToolRequest(params=CallToolRequestParams(name=name, arguments=arguments))
+        return asyncio.run(handler(request)).root
+
+    def test_memory_details_not_found_is_error(self, container):
+        result = self._call_tool(container, "memory_details", {"memory_id": "nonexistent"})
+        assert result.isError is True
+
+    def test_memory_delete_not_found_is_error(self, container):
+        result = self._call_tool(container, "memory_delete", {"memory_id": "nonexistent"})
+        assert result.isError is True
+
+    def test_journey_update_not_found_is_error(self, container):
+        result = self._call_tool(container, "journey_update", {"journey_id": "nope"})
+        assert result.isError is True
+
+    def test_journey_complete_not_found_is_error(self, container):
+        result = self._call_tool(container, "journey_complete", {"journey_id": "nope"})
+        assert result.isError is True
+
+    def test_insights_ack_not_found_is_error(self, container):
+        result = self._call_tool(container, "insights_ack", {"insight_id": "nope"})
+        assert result.isError is True
+
+    def test_draft_adr_not_found_is_error(self, container):
+        result = self._call_tool(container, "draft_adr", {"memory_id": "nope"})
+        assert result.isError is True
+
+    def test_link_nonexistent_source_is_error(self, container):
+        result = self._call_tool(
+            container,
+            "link",
+            {
+                "source_type": "memory",
+                "source_id": "nope",
+                "target_type": "journey",
+                "target_id": "nope",
+                "relation": "part_of",
+            },
+        )
+        assert result.isError is True
+
+    def test_success_is_not_error(self, container):
+        """Successful ops must still have isError=False."""
+        svc = MemoryService(container)
+        handle_save(svc, title="IsError OK", what="fine", project="test")
+        result = self._call_tool(container, "memory_search", {"query": "IsError OK", "project": "test"})
+        assert result.isError is False
+
+
+class TestMemoryContextQuery:
+    """memory_context should accept a query param and do semantic-relevant retrieval."""
+
+    def test_context_with_query_via_call_tool(self, container):
+        server = _create_server(container)
+        handler = server.request_handlers[CallToolRequest]
+        svc = MemoryService(container)
+        handle_save(svc, title="SQLite chosen", what="We picked SQLite for simplicity", project="qp")
+        handle_save(svc, title="Redis cache", what="We use Redis for rate limiting", project="qp")
+
+        req = CallToolRequest(
+            params=CallToolRequestParams(
+                name="memory_context",
+                arguments={"project": "qp", "query": "database", "limit": 5},
+            )
+        )
+        result = asyncio.run(handler(req)).root
+        assert result.isError is False
+        payload = json.loads(result.content[0].text)
+        assert "memories" in payload
+
+    def test_context_query_param_accepted(self, container):
+        """handle_context should not raise when query passed."""
+        svc = MemoryService(container)
+        handle_save(svc, title="Query test", what="hello world", project="qtest")
+        result = json.loads(handle_context(svc, project="qtest", query="hello"))
+        assert "memories" in result
+
+
+class TestJourneyShow:
+    def test_journey_show_found(self, container):
+        svc = JourneyService(container)
+        j = json.loads(handle_journey_start(svc, title="Showable", project="test"))
+        result = json.loads(handle_journey_show(container, journey_id=j["id"]))
+        assert result["id"] == j["id"]
+        assert result["title"] == "Showable"
+        assert "linked_memories" in result
+
+    def test_journey_show_not_found(self, container):
+        result = json.loads(handle_journey_show(container, journey_id="nope"))
+        assert "error" in result
+
+    def test_journey_show_via_call_tool(self, container):
+        server = _create_server(container)
+        handler = server.request_handlers[CallToolRequest]
+        svc = JourneyService(container)
+        j = json.loads(handle_journey_start(svc, title="Show via MCP", project="test"))
+
+        req = CallToolRequest(params=CallToolRequestParams(name="journey_show", arguments={"journey_id": j["id"]}))
+        result = asyncio.run(handler(req)).root
+        assert result.isError is False
+        payload = json.loads(result.content[0].text)
+        assert payload["title"] == "Show via MCP"
+
+    def test_journey_show_not_found_is_error(self, container):
+        server = _create_server(container)
+        handler = server.request_handlers[CallToolRequest]
+        req = CallToolRequest(params=CallToolRequestParams(name="journey_show", arguments={"journey_id": "nope"}))
+        result = asyncio.run(handler(req)).root
+        assert result.isError is True
+
+
+class TestCategoryCoercionWarning:
+    def test_invalid_category_includes_warning(self, mem_svc):
+        result = json.loads(
+            handle_save(
+                mem_svc,
+                title="Bad Cat",
+                what="Invalid category",
+                category="invalid_cat",
+                project="test",
+            )
+        )
+        assert result["action"] == "created"
+        # Must warn the caller that category was coerced
+        assert any("invalid_cat" in w for w in result["warnings"])
+
+    def test_valid_category_no_coercion_warning(self, mem_svc):
+        result = json.loads(handle_save(mem_svc, title="Good Cat", what="Valid", category="decision", project="test"))
+        coercion_warnings = [w for w in result["warnings"] if "coerced" in w.lower() or "invalid" in w.lower()]
+        assert coercion_warnings == []
+
+
+class TestSearchTTLConfidence:
+    def test_search_result_includes_ttl_and_confidence(self, mem_svc):
+        handle_save(mem_svc, title="TTL mem", what="expires soon", ttl_days=30, confidence=0.9, project="test")
+        results = json.loads(handle_search(mem_svc, query="TTL mem", project="test"))
+        assert len(results) >= 1
+        r = results[0]
+        assert "ttl_days" in r
+        assert "confidence" in r
+        assert r["ttl_days"] == 30
+        assert r["confidence"] == pytest.approx(0.9, abs=0.01)
+
+    def test_search_result_ttl_none_when_not_set(self, mem_svc):
+        handle_save(mem_svc, title="No TTL mem", what="permanent", project="test")
+        results = json.loads(handle_search(mem_svc, query="No TTL mem", project="test"))
+        assert len(results) >= 1
+        assert results[0]["ttl_days"] is None
+        assert results[0]["confidence"] is None
