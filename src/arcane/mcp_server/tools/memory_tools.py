@@ -53,8 +53,12 @@ def handle_save(
 ) -> str:
     project = project or os.path.basename(os.getcwd())
     # Sanitise category at the handler boundary so the domain model stays strict
+    coercion_warning: str | None = None
     if category and category not in VALID_CATEGORIES:
         logger.debug("Unknown category '%s' received via MCP; coercing to 'context'", category)
+        coercion_warning = (
+            f"Unknown category '{category}' coerced to 'context'. Valid values: {', '.join(sorted(VALID_CATEGORIES))}."
+        )
         category = "context"
 
     raw = RawMemoryInput(
@@ -72,6 +76,8 @@ def handle_save(
         confidence=confidence,
     )
     result = svc.save(raw, project=project)
+    if coercion_warning:
+        result.setdefault("warnings", []).insert(0, coercion_warning)
     return json.dumps(result)
 
 
@@ -104,6 +110,8 @@ def handle_search(
                 "created_at": r.get("created_at", "")[:10],
                 "score": round(r.get("score", 0), 2),
                 "has_details": bool(r.get("has_details")),
+                "ttl_days": r.get("ttl_days"),
+                "confidence": r.get("confidence"),
             }
         )
     return json.dumps(clean)
@@ -114,10 +122,11 @@ def handle_context(
     project: str | None = None,
     limit: int | None = 10,
     detail: str | None = "standard",
+    query: str | None = None,
 ) -> str:
     project = project or os.path.basename(os.getcwd())
     # Honour the configured semantic mode rather than hardcoding "never"
-    results, total = svc.get_context(limit=_normalize_limit(limit, 10), project=project)
+    results, total = svc.get_context(limit=_normalize_limit(limit, 10), project=project, query=query or None)
 
     # Normalise detail level — fall back to standard for unknown values
     detail = detail or "standard"

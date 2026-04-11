@@ -12,6 +12,7 @@ from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.stdio import stdio_server
 from mcp.types import (
     AnyUrl,
+    CallToolResult,
     GetPromptResult,
     Prompt,
     PromptArgument,
@@ -40,6 +41,7 @@ from arcane.mcp_server.tools.intelligence_tools import handle_insights, handle_i
 from arcane.mcp_server.tools.journey_tools import (
     handle_journey_complete,
     handle_journey_list,
+    handle_journey_show,
     handle_journey_start,
     handle_journey_update,
 )
@@ -132,6 +134,13 @@ def _create_server(container: ServiceContainer) -> Server:
                                 "full=all fields."
                             ),
                         },
+                        "query": {
+                            "type": "string",
+                            "description": (
+                                "Optional topic query. When provided, returns semantically relevant "
+                                "memories for this topic instead of most-recent."
+                            ),
+                        },
                     },
                 },
             ),
@@ -201,6 +210,20 @@ def _create_server(container: ServiceContainer) -> Server:
                         "status": {"type": "string", "enum": ["active", "completed", "abandoned"]},
                         "limit": {"type": "integer", "default": 10},
                     },
+                },
+            ),
+            Tool(
+                name="journey_show",
+                description=(
+                    "Get full details for a journey — title, status, summary, and all linked memories "
+                    "and artifacts. Use instead of trace + memory_details loops."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "journey_id": {"type": "string", "description": "Journey ID or prefix."},
+                    },
+                    "required": ["journey_id"],
                 },
             ),
             # ── Relationship tools ──
@@ -331,7 +354,7 @@ def _create_server(container: ServiceContainer) -> Server:
         ]
 
     @server.call_tool()
-    async def call_tool(name: str, arguments: dict[str, object] | None) -> list[TextContent]:
+    async def call_tool(name: str, arguments: dict[str, object] | None) -> CallToolResult:
         # All handler functions are synchronous (SQLite + subprocess work).
         # Run them in a worker thread so the asyncio event loop is never blocked.
         args = cast(dict[str, Any], arguments or {})
@@ -345,6 +368,7 @@ def _create_server(container: ServiceContainer) -> Server:
             "journey_update": lambda: handle_journey_update(journey_svc, **args),
             "journey_complete": lambda: handle_journey_complete(journey_svc, **args),
             "journey_list": lambda: handle_journey_list(journey_svc, **args),
+            "journey_show": lambda: handle_journey_show(container, **args),
             "ingest_git": lambda: handle_ingest_git(container, **args),
             "ingest_gha": lambda: handle_ingest_gha(container, **args),
             "ingest_linear": lambda: handle_ingest_linear(container, **args),
@@ -358,17 +382,29 @@ def _create_server(container: ServiceContainer) -> Server:
         }
 
         handler = handlers.get(name)
+        is_error = False
         if handler:
             try:
                 result = await anyio.to_thread.run_sync(handler)
             except Exception:
                 logger.error("Tool '%s' failed", name, exc_info=True)
                 result = json.dumps({"error": f"Internal error in tool '{name}'. Check server logs."})
+                is_error = True
         else:
             logger.warning("Unknown MCP tool requested: %s", name)
             result = json.dumps({"error": f"Unknown tool: {name}"})
+            is_error = True
 
-        return [TextContent(type="text", text=result)]
+        # Detect logical errors returned as {"error": "..."} JSON payloads
+        if not is_error:
+            try:
+                data = json.loads(result)
+                if isinstance(data, dict) and "error" in data:
+                    is_error = True
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        return CallToolResult(content=[TextContent(type="text", text=result)], isError=is_error)
 
     @server.list_resource_templates()
     async def list_resource_templates() -> list[ResourceTemplate]:

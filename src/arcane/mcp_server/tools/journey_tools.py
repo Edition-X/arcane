@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 
+from arcane.services.container import ServiceContainer
 from arcane.services.journey import JourneyService
 
 
@@ -39,6 +40,46 @@ def handle_journey_complete(
     if not completed:
         return json.dumps({"error": f"Journey not found: {journey_id}"})
     return json.dumps({"completed": True, "journey_id": journey_id})
+
+
+def handle_journey_show(
+    container: ServiceContainer,
+    journey_id: str,
+) -> str:
+    svc = JourneyService(container)
+    journey = svc.show(journey_id)
+    if not journey:
+        return json.dumps({"error": f"Journey not found: {journey_id}"})
+    # Serialise linked entities to plain dicts (already dicts from repo)
+    return json.dumps(
+        {
+            "id": journey["id"],
+            "title": journey["title"],
+            "status": journey["status"],
+            "project": journey["project"],
+            "summary": journey.get("summary"),
+            "started_at": journey["started_at"][:10],
+            "completed_at": (journey.get("completed_at") or "")[:10] or None,
+            "linked_memories": [
+                {
+                    "memory_id": item["memory"]["id"],
+                    "title": item["memory"]["title"],
+                    "category": item["memory"].get("category"),
+                    "relation": item["relation"],
+                }
+                for item in journey.get("linked_memories", [])
+            ],
+            "linked_artifacts": [
+                {
+                    "artifact_id": item["artifact"]["id"],
+                    "title": item["artifact"]["title"],
+                    "artifact_type": item["artifact"]["artifact_type"],
+                    "relation": item["relation"],
+                }
+                for item in journey.get("linked_artifacts", [])
+            ],
+        }
+    )
 
 
 def handle_journey_list(
