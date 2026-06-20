@@ -222,3 +222,52 @@ def test_migrate_adds_ttl_and_confidence_columns(db):
     cols = {r["name"] for r in rows}
     assert "ttl_days" in cols
     assert "confidence" in cols
+
+
+def test_schema_adds_org_column(db):
+    rows = db.fetchall("PRAGMA table_info(memories)")
+    cols = {r["name"] for r in rows}
+    assert "org" in cols
+
+
+class TestBackfillOrg:
+    def _seed(self, memory_repo):
+        from tests.conftest import make_memory_dict
+
+        memory_repo.insert(make_memory_dict(title="A", what="x", project="Sunrise-Robotics/monitoring-config"))
+        memory_repo.insert(make_memory_dict(title="B", what="x", project="monitoring-config"))
+        memory_repo.insert(make_memory_dict(title="C", what="x", project="playground"))
+
+    def test_dry_run_plans_without_writing(self, db, memory_repo):
+        self._seed(memory_repo)
+        svc = MigrationService()
+        result = svc.backfill_org(
+            db,
+            remotes={"Sunrise-Robotics": "sunrise-robotics"},
+            project_org={"monitoring-config": "sunrise-robotics"},
+            default="personal",
+            dry_run=True,
+        )
+        assert result["applied"] is False
+        plan = {p["old_project"]: p for p in result["planned"]}
+        assert plan["Sunrise-Robotics/monitoring-config"]["new_org"] == "sunrise-robotics"
+        assert plan["Sunrise-Robotics/monitoring-config"]["new_project"] == "monitoring-config"
+        assert plan["monitoring-config"]["new_org"] == "sunrise-robotics"
+        assert plan["playground"]["new_org"] == "personal"
+        # Nothing written
+        assert all((r["org"] or "") == "" for r in memory_repo.list_recent(limit=100))
+
+    def test_apply_writes_org(self, db, memory_repo):
+        self._seed(memory_repo)
+        svc = MigrationService()
+        svc.backfill_org(
+            db,
+            remotes={"Sunrise-Robotics": "sunrise-robotics"},
+            project_org={"monitoring-config": "sunrise-robotics"},
+            default="personal",
+            dry_run=False,
+        )
+        rows = memory_repo.list_recent(limit=100, org="sunrise-robotics", project="monitoring-config")
+        titles = {r["title"] for r in rows}
+        assert {"A", "B"} <= titles  # both monitoring-config variants now under the org
+        assert "C" not in titles

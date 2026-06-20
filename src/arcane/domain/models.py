@@ -79,6 +79,7 @@ class Memory(BaseModel):
     tags: list[str] = Field(default_factory=list)
     category: str | None = None
     project: str = ""
+    org: str = ""
     source: str | None = None
     related_files: list[str] = Field(default_factory=list)
     file_path: str = ""
@@ -91,7 +92,7 @@ class Memory(BaseModel):
     confidence: float | None = None
 
     @staticmethod
-    def from_raw(raw: RawMemoryInput, project: str, file_path: str = "") -> Memory:
+    def from_raw(raw: RawMemoryInput, project: str, org: str = "", file_path: str = "") -> Memory:
         anchor = re.sub(r"[^a-z0-9]+", "-", raw.title.lower()).strip("-")
         now = _now_iso()
         return Memory(
@@ -102,6 +103,7 @@ class Memory(BaseModel):
             tags=raw.tags,
             category=raw.category,
             project=project,
+            org=org,
             source=raw.source,
             related_files=raw.related_files,
             file_path=file_path,

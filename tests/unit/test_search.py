@@ -1,6 +1,6 @@
 """Unit tests for search functions."""
 
-from arcane.infra.search import merge_results
+from arcane.infra.search import apply_scope_bonus, merge_results
 
 
 class TestMergeResults:
@@ -46,6 +46,31 @@ class TestMergeResults:
         assert len(result) == 2
         ids = {r["id"] for r in result}
         assert ids == {"a", "b"}
+
+
+class TestScopeBonus:
+    def test_project_bonus_breaks_ties(self):
+        rows = [
+            {"id": "org", "score": 0.9, "scope_rank": 2},
+            {"id": "proj", "score": 0.9, "scope_rank": 3},
+        ]
+        ranked = apply_scope_bonus(rows)
+        assert ranked[0]["id"] == "proj"
+
+    def test_strong_org_hit_beats_weak_project_hit(self):
+        """Bias, not hard gate: a much stronger org hit still wins."""
+        rows = [
+            {"id": "weak_proj", "score": 0.50, "scope_rank": 3},
+            {"id": "strong_org", "score": 1.00, "scope_rank": 2},
+        ]
+        ranked = apply_scope_bonus(rows)
+        assert ranked[0]["id"] == "strong_org"
+
+    def test_no_scope_rank_is_noop(self):
+        rows = [{"id": "a", "score": 0.5}, {"id": "b", "score": 0.9}]
+        ranked = apply_scope_bonus(rows)
+        assert ranked[0]["id"] == "b"
+        assert ranked[0]["score"] == 0.9
 
 
 import pytest

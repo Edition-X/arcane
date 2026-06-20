@@ -32,11 +32,28 @@ class ContextConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+class OrgsConfig(BaseModel):
+    """Org/company scope configuration.
+
+    ``remotes`` maps a git remote owner (e.g. ``Sunrise-Robotics``) to a
+    canonical org slug. ``overrides`` maps a canonicalised project name to an
+    org, for forks/mirrors or edge cases the remote can't disambiguate.
+    ``default`` is the org used when a repo has no git remote.
+    """
+
+    remotes: dict[str, str] = Field(default_factory=dict)
+    overrides: dict[str, str] = Field(default_factory=dict)
+    default: str = "personal"
+
+    model_config = {"extra": "ignore"}
+
+
 class ArcaneConfig(BaseModel):
     """Top-level Arcane configuration."""
 
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     context: ContextConfig = Field(default_factory=ContextConfig)
+    orgs: OrgsConfig = Field(default_factory=OrgsConfig)
 
     model_config = {"extra": "ignore"}
 

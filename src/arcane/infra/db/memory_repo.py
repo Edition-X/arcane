@@ -12,6 +12,10 @@ from arcane.infra.db.connection import Database
 
 logger = logging.getLogger(__name__)
 
+# Reserved org for the "applies everywhere" layer. Mirrors
+# ``arcane.domain.scope.GLOBAL_ORG`` (kept local to avoid an infra→domain import).
+GLOBAL_ORG = "global"
+
 
 def _parse_tags(raw: Any) -> list[str]:
     """Deserialise tags from whatever shape the DB row delivers.
@@ -47,10 +51,10 @@ class MemoryRepository:
         cursor = self.db.execute(
             """
             INSERT INTO memories (
-                id, title, what, why, impact, tags, category, project,
+                id, title, what, why, impact, tags, category, project, org,
                 source, related_files, file_path, section_anchor,
                 created_at, updated_at, metadata, ttl_days, confidence
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 mem["id"],
@@ -61,6 +65,7 @@ class MemoryRepository:
                 json.dumps(mem.get("tags", [])),
                 mem.get("category"),
                 mem["project"],
+                mem.get("org", ""),
                 mem.get("source"),
                 json.dumps(mem.get("related_files", [])),
                 mem.get("file_path", ""),
@@ -202,12 +207,72 @@ class MemoryRepository:
         """SQL fragment that filters out expired memories (lazy expiry)."""
         return "(m.ttl_days IS NULL OR (unixepoch('now') - unixepoch(m.created_at)) < m.ttl_days * 86400)"
 
+    @staticmethod
+    def _scope_where(
+        org: str,
+        project: str | None,
+        include_org: bool,
+        include_global: bool,
+        alias: str = "m",
+    ) -> tuple[str, list[Any]]:
+        """Build the scope WHERE fragment + params for the project ∪ org ∪ global chain."""
+        layers: list[str] = []
+        params: list[Any] = []
+        if project:
+            layers.append(f"({alias}.org = ? AND {alias}.project = ?)")
+            params += [org, project]
+        if include_org:
+            layers.append(f"({alias}.org = ? AND COALESCE({alias}.project, '') = '')")
+            params.append(org)
+        if include_global:
+            layers.append(f"{alias}.org = ?")
+            params.append(GLOBAL_ORG)
+        if not layers:  # degenerate (no project, both layers off) — match exact project layer
+            layers.append(f"({alias}.org = ? AND {alias}.project = ?)")
+            params += [org, project or ""]
+        return "(" + " OR ".join(layers) + ")", params
+
+    @staticmethod
+    def _scope_rank_sql(org: str, project: str | None, alias: str = "m") -> tuple[str, list[Any]]:
+        """A CASE expression ranking rows by specificity: project=3, org=2, global=1."""
+        sql = (
+            f"CASE WHEN {alias}.org = ? AND {alias}.project = ? THEN 3 "
+            f"WHEN {alias}.org = ? AND COALESCE({alias}.project, '') = '' THEN 2 "
+            f"WHEN {alias}.org = ? THEN 1 ELSE 0 END"
+        )
+        return sql, [org, project or "", org, GLOBAL_ORG]
+
+    @staticmethod
+    def _annotate_scope_rank(rows: list[dict[str, Any]], org: str, project: str | None) -> list[dict[str, Any]]:
+        """Tag each row with a ``scope_rank`` (project=3, org=2, global=1, else 0)."""
+        for r in rows:
+            ro = r.get("org", "") or ""
+            rp = r.get("project", "") or ""
+            if project and ro == org and rp == project:
+                r["scope_rank"] = 3
+            elif ro == org and rp == "":
+                r["scope_rank"] = 2
+            elif ro == GLOBAL_ORG:
+                r["scope_rank"] = 1
+            else:
+                r["scope_rank"] = 0
+        return rows
+
+    def list_projects(self) -> list[dict[str, Any]]:
+        """Distinct (project, org) pairs with counts — for backfill and audits."""
+        return self.db.fetchall(
+            "SELECT project, org, COUNT(*) as cnt FROM memories GROUP BY project, org ORDER BY cnt DESC"
+        )
+
     def fts_search(
         self,
         query: str,
         limit: int = 10,
         project: str | None = None,
         source: str | None = None,
+        org: str | None = None,
+        include_org: bool = True,
+        include_global: bool = True,
     ) -> list[dict[str, Any]]:
         terms = query.split()
         if not terms:
@@ -217,7 +282,11 @@ class MemoryRepository:
         where_clauses: list[str] = [MemoryRepository._not_expired_clause()]
         params: list[Any] = [fts_query]
 
-        if project:
+        if org is not None:
+            scope_sql, scope_params = self._scope_where(org, project, include_org, include_global)
+            where_clauses.append(scope_sql)
+            params += scope_params
+        elif project:
             where_clauses.append("m.project = ?")
             params.append(project)
         if source:
@@ -241,7 +310,10 @@ class MemoryRepository:
             """,
             params,
         )
-        return [_process_row(r) for r in rows]
+        processed = [_process_row(r) for r in rows]
+        if org is not None:
+            self._annotate_scope_rank(processed, org, project)
+        return processed
 
     def vector_search(
         self,
@@ -249,26 +321,33 @@ class MemoryRepository:
         limit: int = 10,
         project: str | None = None,
         source: str | None = None,
+        org: str | None = None,
+        include_org: bool = True,
+        include_global: bool = True,
     ) -> list[dict[str, Any]]:
         """Return the nearest-neighbour memories for ``query_embedding``.
 
-        Project/source filters are applied inside SQL (via a JOIN condition)
-        so that the ``limit`` guarantee is meaningful — we never burn our k
-        budget on rows that will be discarded afterwards.
+        Project/source/scope filters are applied inside SQL (via a JOIN
+        condition) so that the ``limit`` guarantee is meaningful — we never burn
+        our k budget on rows that will be discarded afterwards.
         """
         if not self._has_vec_table():
             return []
 
         # Fetch a wider candidate pool when filters are active so the final
         # result still has a chance of reaching ``limit`` rows.
-        fetch_k = limit * 5 if (project or source) else limit
+        fetch_k = limit * 5 if (project or source or org is not None) else limit
 
         vec_bytes = struct.pack(f"{len(query_embedding)}f", *query_embedding)
 
         where_clauses: list[str] = ["v.embedding MATCH ?", "k = ?", MemoryRepository._not_expired_clause()]
         params: list[Any] = [vec_bytes, fetch_k]
 
-        if project:
+        if org is not None:
+            scope_sql, scope_params = self._scope_where(org, project, include_org, include_global)
+            where_clauses.append(scope_sql)
+            params += scope_params
+        elif project:
             where_clauses.append("m.project = ?")
             params.append(project)
         if source:
@@ -295,6 +374,8 @@ class MemoryRepository:
             row["score"] = 1.0 - row.pop("distance")
             results.append(_process_row(row))
 
+        if org is not None:
+            self._annotate_scope_rank(results, org, project)
         return results
 
     def list_recent(
@@ -302,11 +383,25 @@ class MemoryRepository:
         limit: int = 10,
         project: str | None = None,
         source: str | None = None,
+        org: str | None = None,
+        include_org: bool = True,
+        include_global: bool = True,
     ) -> list[dict[str, Any]]:
-        where_clauses: list[str] = [MemoryRepository._not_expired_clause()]
         params: list[Any] = []
+        select_rank = ""
 
-        if project:
+        # SELECT-clause params (scope rank) come first in the SQL text.
+        if org is not None:
+            rank_sql, rank_params = self._scope_rank_sql(org, project)
+            select_rank = f", ({rank_sql}) AS scope_rank"
+            params += rank_params
+
+        where_clauses: list[str] = [MemoryRepository._not_expired_clause()]
+        if org is not None:
+            scope_sql, scope_params = self._scope_where(org, project, include_org, include_global)
+            where_clauses.append(scope_sql)
+            params += scope_params
+        elif project:
             where_clauses.append("m.project = ?")
             params.append(project)
         if source:
@@ -314,15 +409,16 @@ class MemoryRepository:
             params.append(source)
 
         where_clause = "WHERE " + " AND ".join(where_clauses)
+        order_by = "ORDER BY scope_rank DESC, m.created_at DESC" if org is not None else "ORDER BY m.created_at DESC"
 
         params.append(limit)
 
         rows = self.db.fetchall(
             f"""
-            SELECT m.*, EXISTS(SELECT 1 FROM memory_details WHERE memory_id = m.id) as has_details
+            SELECT m.*, EXISTS(SELECT 1 FROM memory_details WHERE memory_id = m.id) as has_details{select_rank}
             FROM memories m
             {where_clause}
-            ORDER BY m.created_at DESC
+            {order_by}
             LIMIT ?
             """,
             params,
@@ -333,11 +429,22 @@ class MemoryRepository:
         rows = self.db.fetchall("SELECT rowid, title, what, why, impact, tags FROM memories ORDER BY rowid")
         return [_process_row(r) for r in rows]
 
-    def count(self, project: str | None = None, source: str | None = None) -> int:
+    def count(
+        self,
+        project: str | None = None,
+        source: str | None = None,
+        org: str | None = None,
+        include_org: bool = True,
+        include_global: bool = True,
+    ) -> int:
         where_clauses: list[str] = [MemoryRepository._not_expired_clause()]
         params: list[Any] = []
 
-        if project:
+        if org is not None:
+            scope_sql, scope_params = self._scope_where(org, project, include_org, include_global)
+            where_clauses.append(scope_sql)
+            params += scope_params
+        elif project:
             where_clauses.append("m.project = ?")
             params.append(project)
         if source:

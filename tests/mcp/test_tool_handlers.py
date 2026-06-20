@@ -77,7 +77,7 @@ class TestMemoryToolHandlers:
 
     def test_handle_search(self, mem_svc):
         handle_save(mem_svc, title="Searchable", what="Find me", project="test")
-        result = json.loads(handle_search(mem_svc, query="Searchable"))
+        result = json.loads(handle_search(mem_svc, query="Searchable", project="test"))
         assert isinstance(result, list)
         assert len(result) >= 1
         assert result[0]["title"] == "Searchable"
