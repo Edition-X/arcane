@@ -89,6 +89,20 @@ def _create_server(container: ServiceContainer) -> Server:
                         "related_files": {"type": "array", "items": {"type": "string"}},
                         "details": {"type": "string", "description": "Full context."},
                         "project": {"type": "string"},
+                        "org": {
+                            "type": "string",
+                            "description": "Company/org slug. Omit to auto-detect from the git remote owner.",
+                        },
+                        "scope": {
+                            "type": "string",
+                            "enum": ["project", "org", "global"],
+                            "default": "project",
+                            "description": (
+                                "Knowledge layer: project = this repo (default); "
+                                "org = company-wide, shared across all the org's repos; "
+                                "global = applies everywhere."
+                            ),
+                        },
                         "journey_id": {"type": "string", "description": "Link to a journey."},
                         "ttl_days": {
                             "type": "integer",
@@ -111,6 +125,9 @@ def _create_server(container: ServiceContainer) -> Server:
                         "query": {"type": "string"},
                         "limit": {"type": "integer", "default": 5},
                         "project": {"type": "string"},
+                        "org": {"type": "string", "description": "Org slug. Omit to auto-detect from the git remote."},
+                        "include_org": {"type": "boolean", "default": True},
+                        "include_global": {"type": "boolean", "default": True},
                     },
                     "required": ["query"],
                 },
@@ -141,6 +158,16 @@ def _create_server(container: ServiceContainer) -> Server:
                                 "memories for this topic instead of most-recent."
                             ),
                         },
+                        "org": {"type": "string", "description": "Org slug. Omit to auto-detect from the git remote."},
+                        "scope": {
+                            "type": "string",
+                            "enum": ["project", "org", "global"],
+                            "description": (
+                                "Narrow retrieval to one layer. Omit for the full project + org + global chain."
+                            ),
+                        },
+                        "include_org": {"type": "boolean", "default": True},
+                        "include_global": {"type": "boolean", "default": True},
                     },
                 },
             ),

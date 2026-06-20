@@ -9,11 +9,13 @@ from datetime import datetime
 
 from arcane.domain.enums import Category
 from arcane.domain.models import RawMemoryInput
+from arcane.domain.scope import GLOBAL_ORG, resolve_scope
 from arcane.services.memory import MemoryService
 
 logger = logging.getLogger(__name__)
 
 VALID_CATEGORIES = tuple(c.value for c in Category)
+VALID_SCOPES = ("project", "org", "global")
 
 SAVE_DESCRIPTION = """Save a memory for future sessions. You MUST call this before ending any session where you made changes, fixed bugs, made decisions, or learned something.
 
@@ -47,19 +49,38 @@ def handle_save(
     related_files: list[str] | None = None,
     details: str | None = None,
     project: str | None = None,
+    org: str | None = None,
+    scope: str | None = "project",
     journey_id: str | None = None,
     ttl_days: int | None = None,
     confidence: float | None = None,
 ) -> str:
-    project = project or os.path.basename(os.getcwd())
+    handler_warnings: list[str] = []
+
     # Sanitise category at the handler boundary so the domain model stays strict
-    coercion_warning: str | None = None
     if category and category not in VALID_CATEGORIES:
         logger.debug("Unknown category '%s' received via MCP; coercing to 'context'", category)
-        coercion_warning = (
+        handler_warnings.append(
             f"Unknown category '{category}' coerced to 'context'. Valid values: {', '.join(sorted(VALID_CATEGORIES))}."
         )
         category = "context"
+
+    # Resolve the (org, project) scope for this save.
+    scope = (scope or "project").lower()
+    if scope not in VALID_SCOPES:
+        handler_warnings.append(
+            f"Unknown scope '{scope}' coerced to 'project'. Valid values: {', '.join(VALID_SCOPES)}."
+        )
+        scope = "project"
+
+    resolved = resolve_scope(os.getcwd(), svc.c.config)
+    if scope == "global":
+        org_final, project_final = GLOBAL_ORG, ""
+    elif scope == "org":
+        org_final, project_final = (org or resolved.org), ""
+    else:
+        org_final = org or resolved.org
+        project_final = project if project is not None else resolved.project
 
     raw = RawMemoryInput(
         title=title[:60],
@@ -75,9 +96,10 @@ def handle_save(
         ttl_days=ttl_days,
         confidence=confidence,
     )
-    result = svc.save(raw, project=project)
-    if coercion_warning:
-        result.setdefault("warnings", []).insert(0, coercion_warning)
+    result = svc.save(raw, project=project_final, org=org_final)
+    result["scope"] = {"org": org_final, "project": project_final}
+    if handler_warnings:
+        result["warnings"] = handler_warnings + result.get("warnings", [])
     return json.dumps(result)
 
 
@@ -92,8 +114,22 @@ def handle_search(
     query: str,
     limit: int | None = 5,
     project: str | None = None,
+    org: str | None = None,
+    include_org: bool = True,
+    include_global: bool = True,
 ) -> str:
-    results = svc.search(query, limit=_normalize_limit(limit, 5), project=project)
+    resolved = resolve_scope(os.getcwd(), svc.c.config)
+    org_final = org or resolved.org
+    project_final = project if project is not None else resolved.project
+
+    results = svc.search(
+        query,
+        limit=_normalize_limit(limit, 5),
+        project=project_final,
+        org=org_final,
+        include_org=include_org,
+        include_global=include_global,
+    )
 
     clean = []
     for r in results:
@@ -107,6 +143,7 @@ def handle_search(
                 "category": r.get("category"),
                 "tags": r.get("tags", []),  # already list[str] from repo
                 "project": r.get("project"),
+                "org": r.get("org", ""),
                 "created_at": r.get("created_at", "")[:10],
                 "score": round(r.get("score", 0), 2),
                 "has_details": bool(r.get("has_details")),
@@ -123,10 +160,34 @@ def handle_context(
     limit: int | None = 10,
     detail: str | None = "standard",
     query: str | None = None,
+    org: str | None = None,
+    scope: str | None = None,
+    include_org: bool = True,
+    include_global: bool = True,
 ) -> str:
-    project = project or os.path.basename(os.getcwd())
+    # Resolve the current (org, project) scope; explicit args win.
+    resolved = resolve_scope(os.getcwd(), svc.c.config)
+    org_final = org or resolved.org
+    project_final = project if project is not None else resolved.project
+
+    # Optional `scope` narrows retrieval to a single layer.
+    inc_org, inc_global = include_org, include_global
+    if scope == "project":
+        inc_org, inc_global = False, False
+    elif scope == "org":
+        project_final, inc_org, inc_global = "", True, False
+    elif scope == "global":
+        org_final, project_final, inc_org, inc_global = GLOBAL_ORG, "", True, False
+
     # Honour the configured semantic mode rather than hardcoding "never"
-    results, total = svc.get_context(limit=_normalize_limit(limit, 10), project=project, query=query or None)
+    results, total = svc.get_context(
+        limit=_normalize_limit(limit, 10),
+        project=project_final,
+        org=org_final,
+        query=query or None,
+        include_org=inc_org,
+        include_global=inc_global,
+    )
 
     # Normalise detail level — fall back to standard for unknown values
     detail = detail or "standard"
@@ -181,6 +242,7 @@ def handle_context(
             "total": total,
             "showing": len(memories),
             "memories": memories,
+            "scope": {"org": org_final, "project": project_final},
             "message": "Use memory_search for specific topics. Save memories before session ends.",
         }
     )

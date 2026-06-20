@@ -78,6 +78,16 @@ class TestMemory:
         mem = Memory.from_raw(raw, project="p")
         assert mem.metadata == {}
 
+    def test_org_defaults_empty(self):
+        m = Memory(title="T", what="W", project="p")
+        assert m.org == ""
+
+    def test_from_raw_sets_org(self):
+        raw = RawMemoryInput(title="T", what="W")
+        mem = Memory.from_raw(raw, project="widget", org="acme")
+        assert mem.org == "acme"
+        assert mem.project == "widget"
+
 
 class TestJourney:
     def test_defaults(self):

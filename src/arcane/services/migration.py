@@ -90,6 +90,70 @@ class MigrationService:
             "errors": errors,
         }
 
+    def backfill_org(
+        self,
+        db: Database,
+        remotes: dict[str, str] | None = None,
+        overrides: dict[str, str] | None = None,
+        project_org: dict[str, str] | None = None,
+        default: str = "personal",
+        dry_run: bool = True,
+    ) -> dict[str, Any]:
+        """Assign an ``org`` to memories that don't have one yet.
+
+        Existing ``owner/repo`` project strings (e.g. ``Sunrise-Robotics/foo``)
+        are the strongest signal: they split into ``org`` + ``project``. Bare
+        names use the optional ``project_org`` map, else fall back to ``default``.
+        Dry-run by default — returns the plan without writing.
+        """
+        from arcane.domain.scope import canonicalize_project, slugify
+
+        remotes = remotes or {}
+        overrides = overrides or {}
+        project_org = project_org or {}
+
+        rows = db.fetchall("SELECT DISTINCT project FROM memories WHERE org IS NULL OR org = ''")
+        planned: list[dict[str, Any]] = []
+        for row in rows:
+            old = row["project"] or ""
+            if "/" in old:
+                owner, repo = old.split("/", 1)
+                new_org = remotes.get(owner) or remotes.get(owner.lower()) or slugify(owner)
+                new_project = canonicalize_project(repo)
+            elif old in project_org:
+                new_org = project_org[old]
+                new_project = canonicalize_project(old)
+            else:
+                new_org = default
+                new_project = canonicalize_project(old)
+            if new_project in overrides:
+                new_org = overrides[new_project]
+
+            cnt = db.fetchone(
+                "SELECT COUNT(*) as c FROM memories WHERE project = ? AND (org IS NULL OR org = '')",
+                (old,),
+            )
+            planned.append(
+                {
+                    "old_project": old,
+                    "new_org": new_org,
+                    "new_project": new_project,
+                    "count": cnt["c"] if cnt else 0,
+                }
+            )
+
+        updated = 0
+        if not dry_run:
+            for p in planned:
+                cursor = db.execute(
+                    "UPDATE memories SET org = ?, project = ? WHERE project = ? AND (org IS NULL OR org = '')",
+                    (p["new_org"], p["new_project"], p["old_project"]),
+                )
+                updated += cursor.rowcount
+            db.commit()
+
+        return {"applied": not dry_run, "planned": planned, "updated": updated}
+
     def verify(self, home: str | None = None) -> dict[str, Any]:
         """Verify migration integrity."""
         from arcane.infra.config import get_home

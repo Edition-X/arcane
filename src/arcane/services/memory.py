@@ -8,6 +8,7 @@ from datetime import date
 from typing import Any
 
 from arcane.domain.models import Memory, RawMemoryInput
+from arcane.domain.scope import GLOBAL_ORG
 from arcane.infra.db.schema import create_vec_table
 from arcane.infra.markdown import write_session_memory
 from arcane.infra.redaction import redact
@@ -98,11 +99,26 @@ class MemoryService:
         if self._ensure_vectors(embedding):
             self.c.memory_repo.insert_vector(rowid, embedding)
 
-    def save(self, raw: RawMemoryInput, project: str | None = None) -> dict[str, Any]:
-        """Save a memory with full pipeline: redact, write markdown, index, embed."""
-        project = project or os.path.basename(os.getcwd())
+    @staticmethod
+    def _scope_dir(org: str, project: str) -> str:
+        """Vault subdirectory for a memory's scope (project / @org / @global)."""
+        if project:
+            return project
+        if org and org != GLOBAL_ORG:
+            return f"@{org}"
+        return "@global"
+
+    def save(self, raw: RawMemoryInput, project: str | None = None, org: str | None = None) -> dict[str, Any]:
+        """Save a memory with full pipeline: redact, write markdown, index, embed.
+
+        ``project``/``org`` together set the scope. An empty ``project`` with an
+        ``org`` is an org-level (company-wide) memory; ``org="global"`` is global.
+        """
+        if project is None:
+            project = os.path.basename(os.getcwd())
+        org = org or ""
         today = date.today().isoformat()
-        vault_project_dir = os.path.join(self.c.vault_dir, project)
+        vault_project_dir = os.path.join(self.c.vault_dir, self._scope_dir(org, project))
         os.makedirs(vault_project_dir, exist_ok=True)
 
         warnings = self._details_warnings(raw)
@@ -116,10 +132,21 @@ class MemoryService:
         if raw.details:
             raw.details = redact(raw.details, self.c.ignore_patterns)
 
-        # Dedup check — FTS search by title + what
+        # Dedup check — FTS search by title + what, confined to the exact scope
+        # layer being written so an org/global write can't merge into a project.
         candidates: list[dict[str, Any]] = []
         try:
-            candidates = self.c.memory_repo.fts_search(f"{raw.title} {raw.what}", limit=5, project=project)
+            if org:
+                candidates = self.c.memory_repo.fts_search(
+                    f"{raw.title} {raw.what}",
+                    limit=5,
+                    project=project,
+                    org=org,
+                    include_org=not project,
+                    include_global=False,
+                )
+            else:
+                candidates = self.c.memory_repo.fts_search(f"{raw.title} {raw.what}", limit=5, project=project)
         except Exception:
             logger.debug("FTS dedup search failed; treating as new memory", exc_info=True)
 
@@ -155,7 +182,7 @@ class MemoryService:
 
         # New memory
         file_path = os.path.join(vault_project_dir, f"{today}-session.md")
-        mem = Memory.from_raw(raw, project=project, file_path=file_path)
+        mem = Memory.from_raw(raw, project=project, org=org, file_path=file_path)
         mem_dict = mem.model_dump()
 
         write_session_memory(vault_project_dir, mem_dict, today, details=raw.details)
@@ -178,9 +205,22 @@ class MemoryService:
         project: str | None = None,
         source: str | None = None,
         use_vectors: bool = True,
+        org: str | None = None,
+        include_org: bool = True,
+        include_global: bool = True,
     ) -> list[dict[str, Any]]:
         if not use_vectors:
-            return hybrid_search(self.c.memory_repo, None, query, limit=limit, project=project, source=source)
+            return hybrid_search(
+                self.c.memory_repo,
+                None,
+                query,
+                limit=limit,
+                project=project,
+                source=source,
+                org=org,
+                include_org=include_org,
+                include_global=include_global,
+            )
 
         if self.vectors_available:
             try:
@@ -191,13 +231,26 @@ class MemoryService:
                     limit=limit,
                     project=project,
                     source=source,
+                    org=org,
+                    include_org=include_org,
+                    include_global=include_global,
                 )
             except DimensionMismatchError:
                 logger.warning("Vector dimension mismatch — falling back to FTS search")
             except Exception:
                 logger.debug("Vector search failed; falling back to FTS", exc_info=True)
 
-        return tiered_search(self.c.memory_repo, None, query, limit=limit, project=project, source=source)
+        return tiered_search(
+            self.c.memory_repo,
+            None,
+            query,
+            limit=limit,
+            project=project,
+            source=source,
+            org=org,
+            include_org=include_org,
+            include_global=include_global,
+        )
 
     def _ollama_warm(self) -> bool:
         base_url = self.c.config.embedding.base_url or "http://localhost:11434"
@@ -218,6 +271,21 @@ class MemoryService:
             return self._ollama_warm()
         return True
 
+    @staticmethod
+    def _apply_global_cap(results: list[dict[str, Any]], cap: int | None) -> list[dict[str, Any]]:
+        """Trim global-layer (scope_rank==1) entries to ``cap``, preserving order."""
+        if cap is None:
+            return results
+        out: list[dict[str, Any]] = []
+        seen_global = 0
+        for r in results:
+            if r.get("scope_rank") == 1:
+                if seen_global >= cap:
+                    continue
+                seen_global += 1
+            out.append(r)
+        return out
+
     def get_context(
         self,
         limit: int = 10,
@@ -226,8 +294,14 @@ class MemoryService:
         query: str | None = None,
         semantic_mode: str | None = None,
         topup_recent: bool | None = None,
+        org: str | None = None,
+        include_org: bool = True,
+        include_global: bool = True,
+        global_cap: int | None = 2,
     ) -> tuple[list[dict[str, Any]], int]:
-        total = self.c.memory_repo.count(project=project, source=source)
+        total = self.c.memory_repo.count(
+            project=project, source=source, org=org, include_org=include_org, include_global=include_global
+        )
 
         if semantic_mode is None:
             semantic_mode = self.c.config.context.semantic
@@ -239,9 +313,25 @@ class MemoryService:
         results: list[dict[str, Any]]
         if query:
             use_vectors = self._should_use_semantic(semantic_mode)
-            results = self.search(query, limit=limit, project=project, source=source, use_vectors=use_vectors)
+            results = self.search(
+                query,
+                limit=limit,
+                project=project,
+                source=source,
+                use_vectors=use_vectors,
+                org=org,
+                include_org=include_org,
+                include_global=include_global,
+            )
             if topup_recent and len(results) < limit:
-                recent = self.c.memory_repo.list_recent(limit=limit, project=project, source=source)
+                recent = self.c.memory_repo.list_recent(
+                    limit=limit,
+                    project=project,
+                    source=source,
+                    org=org,
+                    include_org=include_org,
+                    include_global=include_global,
+                )
                 seen = {r["id"] for r in results}
                 for r in recent:
                     if r["id"] not in seen:
@@ -249,7 +339,17 @@ class MemoryService:
                         if len(results) >= limit:
                             break
         else:
-            results = self.c.memory_repo.list_recent(limit=limit, project=project, source=source)
+            results = self.c.memory_repo.list_recent(
+                limit=limit,
+                project=project,
+                source=source,
+                org=org,
+                include_org=include_org,
+                include_global=include_global,
+            )
+
+        if org is not None:
+            results = self._apply_global_cap(results, global_cap)
 
         return results, total
 
