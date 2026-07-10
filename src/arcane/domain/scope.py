@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+from collections.abc import Mapping
 
 from pydantic import BaseModel
 
@@ -36,12 +37,22 @@ def slugify(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", (name or "").strip().lower()).strip("-")
 
 
-def canonicalize_project(name: str) -> str:
-    """Normalise a project name. ``owner/repo`` collapses to the repo slug."""
+def canonicalize_project(name: str, aliases: Mapping[str, str] | None = None) -> str:
+    """Normalise a project name. ``owner/repo`` collapses to the repo slug.
+
+    When *aliases* is given, the normalised slug is mapped through it (keys
+    are matched after normalisation, values are normalised on application) so
+    genuinely different names for the same work resolve to one canonical name.
+    """
     name = (name or "").strip()
     if "/" in name:
         name = name.rsplit("/", 1)[-1]
-    return slugify(name)
+    slug = slugify(name)
+    if slug and aliases:
+        lookup = {slugify(k): v for k, v in aliases.items()}
+        if slug in lookup:
+            slug = slugify(lookup[slug])
+    return slug
 
 
 def _parse_remote_url(url: str) -> tuple[str | None, str | None]:
@@ -88,10 +99,11 @@ def resolve_scope(
     """
     owner, repo = _remote if _remote is not None else git_remote_info(cwd)
 
+    aliases = config.projects.aliases
     if repo:
-        project = canonicalize_project(repo)
+        project = canonicalize_project(repo, aliases)
     else:
-        project = slugify(os.path.basename(os.path.normpath(cwd))) if cwd else ""
+        project = canonicalize_project(os.path.basename(os.path.normpath(cwd)), aliases) if cwd else ""
 
     if owner:
         org = config.orgs.remotes.get(owner) or config.orgs.remotes.get(owner.lower()) or slugify(owner)

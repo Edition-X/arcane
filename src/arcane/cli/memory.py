@@ -189,6 +189,52 @@ def context(project: bool, source: str | None, limit: int, query: str | None) ->
     click.echo("Use `arcane search <query>` for full details on any memory.")
 
 
+@click.command(name="projects")
+def projects() -> None:
+    """List distinct projects with memory counts."""
+    with create_container() as container:
+        rows = container.memory_repo.list_projects()
+
+    if not rows:
+        click.echo("No projects found.")
+        return
+
+    click.echo("\nProjects:")
+    for r in rows:
+        org_part = f" ({r['org']})" if r.get("org") else ""
+        click.echo(f"  {r['cnt']:5d}  {r['project'] or '<no project>'}{org_part}")
+
+
+@click.command(name="merge-projects")
+@click.argument("src")
+@click.argument("dest")
+@click.option("--apply", "apply_", is_flag=True, default=False, help="Write the change (default: dry run).")
+def merge_projects(src: str, dest: str, apply_: bool) -> None:
+    """Merge all memories from project SRC into DEST.
+
+    SRC must match the stored project string exactly; DEST is canonicalized
+    (normalised, aliases applied) so merges always heal towards the canonical
+    name. Dry-run by default — pass --apply to commit.
+    """
+    from arcane.domain.scope import canonicalize_project
+
+    with create_container() as container:
+        dest_canon = canonicalize_project(dest, container.config.projects.aliases)
+        if src == dest_canon:
+            raise click.UsageError("Source and destination are the same project — nothing to merge.")
+        if dest_canon != dest:
+            click.echo(f"Destination canonicalized: '{dest}' → '{dest_canon}'")
+
+        if apply_:
+            moved = container.memory_repo.reassign_project(src, dest_canon)
+            click.echo(f"Moved {moved} memories from '{src}' into '{dest_canon}'.")
+        else:
+            count = sum(r["cnt"] for r in container.memory_repo.list_projects() if r["project"] == src)
+            click.echo(
+                f"Dry run: would move {count} memories from '{src}' into '{dest_canon}'. Pass --apply to commit."
+            )
+
+
 @click.command()
 def reindex() -> None:
     """Rebuild vector index."""

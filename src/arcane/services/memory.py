@@ -8,7 +8,7 @@ from datetime import date
 from typing import Any
 
 from arcane.domain.models import Memory, RawMemoryInput
-from arcane.domain.scope import GLOBAL_ORG
+from arcane.domain.scope import GLOBAL_ORG, canonicalize_project
 from arcane.infra.db.schema import create_vec_table
 from arcane.infra.markdown import write_session_memory
 from arcane.infra.redaction import redact
@@ -116,6 +116,7 @@ class MemoryService:
         """
         if project is None:
             project = os.path.basename(os.getcwd())
+        project = canonicalize_project(project, self.c.config.projects.aliases)
         org = org or ""
         today = date.today().isoformat()
         vault_project_dir = os.path.join(self.c.vault_dir, self._scope_dir(org, project))
@@ -209,6 +210,8 @@ class MemoryService:
         include_org: bool = True,
         include_global: bool = True,
     ) -> list[dict[str, Any]]:
+        if project:
+            project = canonicalize_project(project, self.c.config.projects.aliases)
         if not use_vectors:
             return hybrid_search(
                 self.c.memory_repo,
@@ -299,6 +302,8 @@ class MemoryService:
         include_global: bool = True,
         global_cap: int | None = 2,
     ) -> tuple[list[dict[str, Any]], int]:
+        if project:
+            project = canonicalize_project(project, self.c.config.projects.aliases)
         total = self.c.memory_repo.count(
             project=project, source=source, org=org, include_org=include_org, include_global=include_global
         )

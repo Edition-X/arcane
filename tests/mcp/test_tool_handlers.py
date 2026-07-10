@@ -579,3 +579,20 @@ class TestSearchTTLConfidence:
         assert len(results) >= 1
         assert results[0]["ttl_days"] is None
         assert results[0]["confidence"] is None
+
+
+class TestInsightsProjectCanonicalization:
+    def test_handle_insights_canonicalizes_explicit_project(self, container):
+        from arcane.domain.models import Insight
+
+        insight = Insight(
+            insight_type="ci_flake",
+            title="Flake in canonical project",
+            body="details",
+            project="edition-x",
+        )
+        container.insight_repo.insert(insight.model_dump())
+
+        result = json.loads(handle_insights(container, project="Edition X"))
+        assert len(result) == 1
+        assert result[0]["title"] == "Flake in canonical project"

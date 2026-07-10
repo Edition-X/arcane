@@ -220,3 +220,37 @@ class TestMemoryTTL:
         memory_repo.insert(mem)
         fetched = memory_repo.get(mem["id"])
         assert fetched is not None
+
+
+class TestMemoryRepoReassignProject:
+    def test_moves_all_rows_and_returns_count(self, memory_repo):
+        m1 = make_memory_dict(title="First", project="old-name")
+        m2 = make_memory_dict(title="Second", project="old-name")
+        m3 = make_memory_dict(title="Other", project="other-project")
+        for m in (m1, m2, m3):
+            memory_repo.insert(m)
+
+        moved = memory_repo.reassign_project("old-name", "new-name")
+
+        assert moved == 2
+        assert memory_repo.get(m1["id"])["project"] == "new-name"
+        assert memory_repo.get(m2["id"])["project"] == "new-name"
+        assert memory_repo.get(m3["id"])["project"] == "other-project"
+
+    def test_fts_index_stays_in_sync(self, memory_repo):
+        mem = make_memory_dict(title="ReassignFTS", what="UniqueReassignBody", project="old-name")
+        memory_repo.insert(mem)
+
+        memory_repo.reassign_project("old-name", "new-name")
+
+        hits_new = memory_repo.fts_search("UniqueReassignBody", project="new-name")
+        hits_old = memory_repo.fts_search("UniqueReassignBody", project="old-name")
+        assert any(r["id"] == mem["id"] for r in hits_new)
+        assert not hits_old
+
+    def test_unknown_project_is_noop(self, memory_repo):
+        mem = make_memory_dict(project="keep-me")
+        memory_repo.insert(mem)
+
+        assert memory_repo.reassign_project("does-not-exist", "new-name") == 0
+        assert memory_repo.get(mem["id"])["project"] == "keep-me"

@@ -163,6 +163,21 @@ embedding:
 context:
   semantic: auto             # "auto" | "always" | "never"
   topup_recent: true         # Supplement semantic results with recent memories
+
+projects:
+  aliases:                   # Merge different names for the same work into one
+    grafana-usage-report: grafana-usage-automation
+```
+
+Project names are canonicalized on every save and lookup: trimmed, lowercased,
+separators collapsed (`Edition X` → `edition-x`), `owner/repo` reduced to the
+repo name, then mapped through `projects.aliases`. To heal an existing split,
+list the silos and merge them:
+
+```bash
+arcane projects                                  # distinct projects with counts
+arcane merge-projects grafana-usage-report grafana-usage-automation          # dry run
+arcane merge-projects grafana-usage-report grafana-usage-automation --apply  # commit
 ```
 
 ### Environment Variables
