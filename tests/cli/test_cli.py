@@ -140,3 +140,74 @@ class TestAnalyzeCLI:
     def test_analyze_velocity(self, runner, mock_container):
         result = runner.invoke(main, ["analyze", "velocity"])
         assert result.exit_code == 0, result.output
+
+
+class TestProjectsCLI:
+    def test_projects_lists_counts(self, runner, mock_container):
+        from arcane.domain.models import RawMemoryInput
+        from arcane.services.memory import MemoryService
+
+        svc = MemoryService(mock_container)
+        svc.save(RawMemoryInput(title="One", what="first"), project="proj-a")
+        svc.save(RawMemoryInput(title="Two", what="second"), project="proj-a")
+        svc.save(RawMemoryInput(title="Three", what="third"), project="proj-b")
+
+        result = runner.invoke(main, ["projects"])
+        assert result.exit_code == 0, result.output
+        assert "proj-a" in result.output
+        assert "proj-b" in result.output
+        assert "2" in result.output
+
+    def test_projects_empty(self, runner, mock_container):
+        result = runner.invoke(main, ["projects"])
+        assert result.exit_code == 0, result.output
+        assert "No projects" in result.output
+
+
+class TestMergeProjectsCLI:
+    def _seed(self, container, project, title="Seed"):
+        from arcane.domain.models import RawMemoryInput
+        from arcane.services.memory import MemoryService
+
+        MemoryService(container).save(RawMemoryInput(title=title, what="body"), project=project)
+
+    def test_dry_run_by_default(self, runner, mock_container):
+        self._seed(mock_container, "old-name")
+
+        result = runner.invoke(main, ["merge-projects", "old-name", "new-name"])
+        assert result.exit_code == 0, result.output
+        assert "dry run" in result.output.lower()
+        # Nothing moved
+        rows = mock_container.memory_repo.list_projects()
+        assert any(r["project"] == "old-name" for r in rows)
+        assert not any(r["project"] == "new-name" for r in rows)
+
+    def test_apply_moves_memories(self, runner, mock_container):
+        self._seed(mock_container, "old-name", title="Moved A")
+        self._seed(mock_container, "old-name", title="Moved B")
+
+        result = runner.invoke(main, ["merge-projects", "old-name", "new-name", "--apply"])
+        assert result.exit_code == 0, result.output
+        assert "2" in result.output
+
+        rows = mock_container.memory_repo.list_projects()
+        assert not any(r["project"] == "old-name" for r in rows)
+        assert any(r["project"] == "new-name" and r["cnt"] == 2 for r in rows)
+
+    def test_destination_is_canonicalized(self, runner, mock_container):
+        self._seed(mock_container, "old-name")
+
+        result = runner.invoke(main, ["merge-projects", "old-name", "New Name", "--apply"])
+        assert result.exit_code == 0, result.output
+        rows = mock_container.memory_repo.list_projects()
+        assert any(r["project"] == "new-name" for r in rows)
+
+    def test_same_source_and_destination_errors(self, runner, mock_container):
+        result = runner.invoke(main, ["merge-projects", "same-name", "Same Name"])
+        assert result.exit_code != 0
+        assert "same" in result.output.lower()
+
+    def test_unknown_source_reports_zero(self, runner, mock_container):
+        result = runner.invoke(main, ["merge-projects", "ghost", "new-name"])
+        assert result.exit_code == 0, result.output
+        assert "0" in result.output

@@ -168,3 +168,53 @@ class TestJourneyServiceIntegration:
 
         rels = container.relationship_repo.get_all_for("journey", j["id"])
         assert len(rels) == 1
+
+
+class TestServiceProjectCanonicalization:
+    def test_save_canonicalizes_explicit_project(self, container):
+        svc = MemoryService(container)
+        raw = RawMemoryInput(title="Canon Save", what="Body text")
+        result = svc.save(raw, project="Edition X")
+
+        assert container.memory_repo.get(result["id"])["project"] == "edition-x"
+
+    def test_save_applies_alias(self, container):
+        container.config.projects.aliases["grafana-usage-report"] = "grafana-usage-automation"
+        svc = MemoryService(container)
+        raw = RawMemoryInput(title="Alias Save", what="Body text")
+        result = svc.save(raw, project="grafana-usage-report")
+
+        assert container.memory_repo.get(result["id"])["project"] == "grafana-usage-automation"
+
+    def test_save_preserves_empty_project_for_org_scope(self, container):
+        svc = MemoryService(container)
+        raw = RawMemoryInput(title="Org Level", what="Company-wide fact")
+        result = svc.save(raw, project="", org="acme")
+
+        assert container.memory_repo.get(result["id"])["project"] == ""
+
+    def test_search_canonicalizes_project_filter(self, container):
+        svc = MemoryService(container)
+        svc.save(RawMemoryInput(title="Findable", what="UniqueCanonSearch"), project="edition-x")
+
+        results = svc.search("UniqueCanonSearch", project="Edition X", use_vectors=False)
+        assert any(r["title"] == "Findable" for r in results)
+
+    def test_context_canonicalizes_project_filter(self, container):
+        svc = MemoryService(container)
+        svc.save(RawMemoryInput(title="Ctx Mem", what="Context body"), project="edition-x")
+
+        results, total = svc.get_context(project="Edition X")
+        assert total >= 1
+        assert any(r["title"] == "Ctx Mem" for r in results)
+
+    def test_journey_start_canonicalizes_project(self, container):
+        js = JourneyService(container)
+        j = js.start("Canon Journey", project="Edition X")
+        assert j["project"] == "edition-x"
+
+    def test_journey_start_applies_alias(self, container):
+        container.config.projects.aliases["grafana-usage-report"] = "grafana-usage-automation"
+        js = JourneyService(container)
+        j = js.start("Alias Journey", project="grafana-usage-report")
+        assert j["project"] == "grafana-usage-automation"

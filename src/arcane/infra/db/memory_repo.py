@@ -264,6 +264,15 @@ class MemoryRepository:
             "SELECT project, org, COUNT(*) as cnt FROM memories GROUP BY project, org ORDER BY cnt DESC"
         )
 
+    def reassign_project(self, old: str, new: str) -> int:
+        """Move every memory in project *old* to *new*; return rows updated.
+
+        The FTS index follows via the ``memories_au`` trigger.
+        """
+        cursor = self.db.execute("UPDATE memories SET project = ? WHERE project = ?", (new, old))
+        self.db.commit()
+        return int(cursor.rowcount)
+
     def fts_search(
         self,
         query: str,

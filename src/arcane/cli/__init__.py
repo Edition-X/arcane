@@ -9,7 +9,19 @@ from arcane.cli.config import config
 from arcane.cli.draft import draft
 from arcane.cli.ingest import ingest
 from arcane.cli.journey import journey
-from arcane.cli.memory import context, delete, details, init, reindex, save, search, sessions, stats
+from arcane.cli.memory import (
+    context,
+    delete,
+    details,
+    init,
+    merge_projects,
+    projects,
+    reindex,
+    save,
+    search,
+    sessions,
+    stats,
+)
 from arcane.cli.migrate import migrate
 from arcane.cli.relationship import link, trace
 
@@ -35,6 +47,8 @@ main.add_command(context)
 main.add_command(reindex)
 main.add_command(stats)
 main.add_command(sessions)
+main.add_command(projects)
+main.add_command(merge_projects)
 main.add_command(journey)
 main.add_command(link)
 main.add_command(trace)

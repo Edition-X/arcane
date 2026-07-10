@@ -7,6 +7,7 @@ from typing import Any
 
 from arcane.domain.enums import RelationType
 from arcane.domain.models import Journey, Relationship
+from arcane.domain.scope import canonicalize_project
 from arcane.services.container import ServiceContainer
 
 
@@ -22,7 +23,7 @@ class JourneyService:
         project: str | None = None,
         linear_issue_id: str | None = None,
     ) -> dict[str, Any]:
-        project = project or os.path.basename(os.getcwd())
+        project = canonicalize_project(project or os.path.basename(os.getcwd()), self.c.config.projects.aliases)
         journey = Journey(title=title, project=project, linear_issue_id=linear_issue_id)
         self.c.journey_repo.insert(journey.model_dump())
         return {"id": journey.id, "title": journey.title, "project": journey.project}

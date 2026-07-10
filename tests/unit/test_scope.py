@@ -10,7 +10,7 @@ from arcane.domain.scope import (
     resolve_scope,
     slugify,
 )
-from arcane.infra.config import ArcaneConfig, OrgsConfig
+from arcane.infra.config import ArcaneConfig, OrgsConfig, ProjectsConfig
 
 
 class TestSlugify:
@@ -36,6 +36,33 @@ class TestCanonicalizeProject:
 
     def test_slugifies(self):
         assert canonicalize_project("Edition X") == "edition-x"
+
+
+class TestCanonicalizeProjectAliases:
+    def test_alias_applied(self):
+        aliases = {"grafana-usage-report": "grafana-usage-automation"}
+        assert canonicalize_project("grafana-usage-report", aliases) == "grafana-usage-automation"
+
+    def test_alias_key_matched_after_normalisation(self):
+        aliases = {"Grafana Usage Report": "grafana-usage-automation"}
+        assert canonicalize_project("grafana-usage-report", aliases) == "grafana-usage-automation"
+
+    def test_alias_value_normalised(self):
+        aliases = {"foo": "Foo Bar"}
+        assert canonicalize_project("foo", aliases) == "foo-bar"
+
+    def test_owner_prefix_stripped_before_alias_lookup(self):
+        aliases = {"monitoring-config": "monitoring"}
+        assert canonicalize_project("Sunrise-Robotics/monitoring-config", aliases) == "monitoring"
+
+    def test_unaliased_name_passes_through(self):
+        aliases = {"other": "something"}
+        assert canonicalize_project("monitoring-config", aliases) == "monitoring-config"
+
+    def test_none_and_empty_aliases_are_noops(self):
+        assert canonicalize_project("Edition X", None) == "edition-x"
+        assert canonicalize_project("Edition X", {}) == "edition-x"
+        assert canonicalize_project("", {"a": "b"}) == ""
 
 
 def _config(**orgs) -> ArcaneConfig:
@@ -74,6 +101,28 @@ class TestResolveScope:
     def test_global_is_reserved(self):
         assert GLOBAL_ORG == "global"
 
+    def test_applies_project_alias_from_remote_repo(self):
+        cfg = ArcaneConfig(projects=ProjectsConfig(aliases={"grafana-usage-report": "grafana-usage-automation"}))
+        sc = resolve_scope("/x", cfg, _remote=("Edition-X", "grafana-usage-report"))
+        assert sc.project == "grafana-usage-automation"
+
+    def test_applies_project_alias_from_cwd_basename(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("arcane.domain.scope.git_remote_info", lambda cwd: (None, None))
+        d = tmp_path / "grafana-usage-report"
+        d.mkdir()
+        cfg = ArcaneConfig(projects=ProjectsConfig(aliases={"grafana-usage-report": "grafana-usage-automation"}))
+        sc = resolve_scope(str(d), cfg)
+        assert sc.project == "grafana-usage-automation"
+
+    def test_org_override_matches_aliased_project(self):
+        cfg = ArcaneConfig(
+            orgs=OrgsConfig(overrides={"grafana-usage-automation": "personal"}),
+            projects=ProjectsConfig(aliases={"grafana-usage-report": "grafana-usage-automation"}),
+        )
+        sc = resolve_scope("/x", cfg, _remote=("Sunrise-Robotics", "grafana-usage-report"))
+        assert sc.org == "personal"
+        assert sc.project == "grafana-usage-automation"
+
 
 class TestOrgsConfig:
     def test_defaults(self):
@@ -85,3 +134,18 @@ class TestOrgsConfig:
     def test_loaded_into_arcane_config(self):
         cfg = ArcaneConfig.model_validate({"orgs": {"remotes": {"Acme": "acme"}, "default": "personal"}})
         assert cfg.orgs.remotes["Acme"] == "acme"
+
+
+class TestProjectsConfig:
+    def test_defaults(self):
+        c = ProjectsConfig()
+        assert c.aliases == {}
+
+    def test_default_on_arcane_config(self):
+        assert ArcaneConfig().projects.aliases == {}
+
+    def test_loaded_into_arcane_config(self):
+        cfg = ArcaneConfig.model_validate(
+            {"projects": {"aliases": {"grafana-usage-report": "grafana-usage-automation"}}}
+        )
+        assert cfg.projects.aliases["grafana-usage-report"] == "grafana-usage-automation"

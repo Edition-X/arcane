@@ -48,12 +48,28 @@ class OrgsConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+class ProjectsConfig(BaseModel):
+    """Project canonicalization configuration.
+
+    ``aliases`` maps a project name to its canonical name, merging genuinely
+    different strings for the same work (e.g. ``grafana-usage-report`` →
+    ``grafana-usage-automation``). Keys are matched after normalisation, so
+    any casing/spelling of the same name hits the same alias; values should
+    be the canonical name and are normalised on application.
+    """
+
+    aliases: dict[str, str] = Field(default_factory=dict)
+
+    model_config = {"extra": "ignore"}
+
+
 class ArcaneConfig(BaseModel):
     """Top-level Arcane configuration."""
 
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     context: ContextConfig = Field(default_factory=ContextConfig)
     orgs: OrgsConfig = Field(default_factory=OrgsConfig)
+    projects: ProjectsConfig = Field(default_factory=ProjectsConfig)
 
     model_config = {"extra": "ignore"}
 
