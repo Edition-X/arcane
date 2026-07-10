@@ -32,6 +32,29 @@ def analyze_flakes(project: str | None) -> None:
         click.echo("No CI flakes detected.")
 
 
+@analyze.command("health")
+@click.option("--project", default=None, help="Project to attach the insights to")
+def analyze_health(project: str | None) -> None:
+    """Audit store health — fragmentation, orphans, duplicates, journey hygiene."""
+    from arcane.plugins.builtin.health_audit import HealthAuditor
+
+    project = project or os.path.basename(os.getcwd())
+    with create_container() as container:
+        plugin = HealthAuditor(
+            memory_repo=container.memory_repo,
+            journey_repo=container.journey_repo,
+            aliases=container.config.projects.aliases,
+        )
+        insights = plugin.analyze(project=project)
+        for insight in insights:
+            container.insight_repo.insert(insight)
+
+    for insight in insights:
+        marker = "!" if insight["severity"] != "info" else "-"
+        click.echo(f"\n{marker} [{insight['severity']}] {insight['title']}")
+        click.echo(insight["body"])
+
+
 @analyze.command("velocity")
 @click.option("--project", default=None, help="Project name")
 def analyze_velocity(project: str | None) -> None:

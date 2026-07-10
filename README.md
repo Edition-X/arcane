@@ -83,15 +83,18 @@ Once connected, Claude has access to these tools:
 | `memory_search` | Semantic + keyword search across all memories |
 | `memory_context` | Load relevant memories for the current project |
 | `memory_details` | Fetch full details for a specific memory |
+| `memory_update` | Update a memory in place (use when a save warns `near_duplicate`) |
 | `memory_delete` | Remove a memory by ID |
 | `journey_start` | Begin tracking a multi-step investigation |
 | `journey_update` | Add a progress update to a journey |
 | `journey_complete` | Mark a journey done with an outcome summary |
-| `journey_list` | List active or recent journeys |
+| `journey_abandon` | Mark a journey abandoned (dead end or superseded) |
+| `journey_delete` | Delete a journey and its relationships |
+| `journey_list` | List active or recent journeys (stale ones are flagged) |
 | `ingest_git` | Import commits from a git repository |
 | `ingest_gha` | Import CI runs from GitHub Actions |
 | `ingest_linear` | Import tickets from Linear |
-| `analyze` | Run intelligence plugins (flakes, velocity) |
+| `analyze` | Run intelligence plugins (flakes, velocity, health) |
 | `insights` / `insights_ack` | View and acknowledge derived insights |
 | `link` | Create a relationship between two entities |
 | `trace` | Walk the relationship graph from an entity |
@@ -128,6 +131,7 @@ arcane ingest linear            # Ingest Linear tickets
 # Intelligence
 arcane analyze flakes           # Detect CI flakes
 arcane analyze velocity         # Engineering velocity summary
+arcane analyze health           # Store health audit — fragmentation, orphans, journey hygiene
 
 # Content
 arcane draft blog               # Blog brief from memories

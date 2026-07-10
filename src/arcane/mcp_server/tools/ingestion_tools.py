@@ -84,6 +84,14 @@ def handle_analyze(
             memory_repo=container.memory_repo,
             journey_repo=container.journey_repo,
         )
+    elif plugin_name == "health":
+        from arcane.plugins.builtin.health_audit import HealthAuditor
+
+        plugin = HealthAuditor(
+            memory_repo=container.memory_repo,
+            journey_repo=container.journey_repo,
+            aliases=container.config.projects.aliases,
+        )
     else:
         return json.dumps({"error": f"Unknown analysis plugin: {plugin_name}"})
 

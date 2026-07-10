@@ -596,3 +596,156 @@ class TestInsightsProjectCanonicalization:
         result = json.loads(handle_insights(container, project="Edition X"))
         assert len(result) == 1
         assert result[0]["title"] == "Flake in canonical project"
+
+
+class TestMemoryUpdateHandler:
+    def test_update_memory(self, container):
+        from arcane.mcp_server.tools.memory_tools import handle_update
+
+        svc = MemoryService(container)
+        r = json.loads(handle_save(svc, title="To update", what="Old", project="p"))
+
+        result = json.loads(handle_update(svc, memory_id=r["id"], what="New", tags=["t1"]))
+
+        assert result["updated"] is True
+        mem = container.memory_repo.get(r["id"])
+        assert mem["what"] == "New"
+        assert mem["tags"] == ["t1"]
+
+    def test_update_missing_is_error(self, container):
+        from arcane.mcp_server.tools.memory_tools import handle_update
+
+        svc = MemoryService(container)
+        result = json.loads(handle_update(svc, memory_id="no-such-id", what="x"))
+        assert "error" in result
+
+
+class TestJourneyLifecycleHandlers:
+    def test_abandon(self, container):
+        from arcane.mcp_server.tools.journey_tools import handle_journey_abandon
+
+        js = JourneyService(container)
+        j = js.start("Stuck test journey", project="p")
+
+        result = json.loads(handle_journey_abandon(js, journey_id=j["id"], reason="test junk"))
+
+        assert result["abandoned"] is True
+        assert js.get(j["id"])["status"] == "abandoned"
+
+    def test_abandon_missing_is_error(self, container):
+        from arcane.mcp_server.tools.journey_tools import handle_journey_abandon
+
+        result = json.loads(handle_journey_abandon(JourneyService(container), journey_id="nope"))
+        assert "error" in result
+
+    def test_delete(self, container):
+        from arcane.mcp_server.tools.journey_tools import handle_journey_delete
+
+        js = JourneyService(container)
+        j = js.start("Delete via MCP", project="p")
+
+        result = json.loads(handle_journey_delete(js, journey_id=j["id"]))
+
+        assert result["deleted"] is True
+        assert js.get(j["id"]) is None
+
+    def test_journey_list_annotates_stale(self, container):
+        from datetime import datetime, timedelta, timezone
+
+        from arcane.mcp_server.tools.journey_tools import handle_journey_list
+
+        js = JourneyService(container)
+        old = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
+        container.journey_repo.insert(
+            {
+                "id": "j-stale-mcp",
+                "title": "Old spike",
+                "project": "p",
+                "status": "active",
+                "started_at": old,
+                "created_at": old,
+                "updated_at": old,
+            }
+        )
+        js.start("Fresh journey", project="p")
+
+        result = json.loads(handle_journey_list(js, project="p"))
+
+        by_id = {j["id"]: j for j in result}
+        assert by_id["j-stale-mcp"]["stale"] is True
+        fresh = [j for j in result if j["id"] != "j-stale-mcp"]
+        assert all(not j.get("stale") for j in fresh)
+
+
+class TestContextSurfacesInsights:
+    def _insight(self, container, title="Needs attention"):
+        from arcane.domain.models import Insight
+
+        insight = Insight(insight_type="health", title=title, body="b", severity="warning", project="p")
+        container.insight_repo.insert(insight.model_dump())
+        return insight
+
+    def test_standard_detail_includes_unacked_insights(self, container):
+        self._insight(container)
+        svc = MemoryService(container)
+        handle_save(svc, title="A memory", what="Body", project="p")
+
+        result = json.loads(handle_context(svc, project="p", detail="standard"))
+
+        assert "insights" in result
+        assert result["insights"][0]["title"] == "Needs attention"
+
+    def test_minimal_detail_omits_insights(self, container):
+        self._insight(container)
+        svc = MemoryService(container)
+
+        result = json.loads(handle_context(svc, project="p", detail="minimal"))
+        assert "insights" not in result
+
+    def test_no_insights_key_when_none_pending(self, container):
+        svc = MemoryService(container)
+        result = json.loads(handle_context(svc, project="p", detail="standard"))
+        assert "insights" not in result
+
+    def test_acknowledged_insights_not_surfaced(self, container):
+        insight = self._insight(container)
+        container.insight_repo.acknowledge(insight.id)
+        svc = MemoryService(container)
+
+        result = json.loads(handle_context(svc, project="p", detail="standard"))
+        assert "insights" not in result
+
+
+class TestEmptyProjectGuard:
+    def test_save_with_blank_project_warns(self, container):
+        svc = MemoryService(container)
+        result = json.loads(handle_save(svc, title="Orphan", what="Body", project="   "))
+
+        assert any("empty_project" in w for w in result.get("warnings", []))
+
+    def test_org_scope_save_does_not_warn(self, container):
+        svc = MemoryService(container)
+        result = json.loads(handle_save(svc, title="Org fact", what="Body", scope="org", org="acme"))
+
+        assert not any("empty_project" in w for w in result.get("warnings", []))
+
+    def test_normal_save_does_not_warn(self, container):
+        svc = MemoryService(container)
+        result = json.loads(handle_save(svc, title="Normal", what="Body", project="p"))
+
+        assert not any("empty_project" in w for w in result.get("warnings", []))
+
+
+class TestAnalyzeHealth:
+    def test_analyze_health_creates_insights(self, container):
+        from arcane.mcp_server.tools.ingestion_tools import handle_analyze
+        from tests.conftest import make_memory_dict
+
+        container.memory_repo.insert(make_memory_dict(project="p"))
+
+        result = json.loads(handle_analyze(container, plugin_name="health", project="p"))
+
+        assert result["plugin"] == "health"
+        assert result["insights_created"] >= 1
+        stored = container.insight_repo.list_all(project="p")
+        assert any(i["insight_type"] == "health" for i in stored)

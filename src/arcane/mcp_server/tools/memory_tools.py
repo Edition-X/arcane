@@ -81,6 +81,12 @@ def handle_save(
     else:
         org_final = org or resolved.org
         project_final = project if project is not None else resolved.project
+        if not project_final.strip():
+            handler_warnings.append(
+                "empty_project: no project resolved for this save — it will be invisible to "
+                "project-scoped recall. Pass `project` explicitly, or use scope='org'/'global' "
+                "if this is intentionally broader knowledge."
+            )
 
     raw = RawMemoryInput(
         title=title[:60],
@@ -237,15 +243,31 @@ def handle_context(
                 }
             )
 
-    return json.dumps(
-        {
-            "total": total,
-            "showing": len(memories),
-            "memories": memories,
-            "scope": {"org": org_final, "project": project_final},
-            "message": "Use memory_search for specific topics. Save memories before session ends.",
-        }
-    )
+    payload: dict = {
+        "total": total,
+        "showing": len(memories),
+        "memories": memories,
+        "scope": {"org": org_final, "project": project_final},
+        "message": "Use memory_search for specific topics. Save memories before session ends.",
+    }
+
+    # Surface pending intelligence at session start (not in minimal mode —
+    # that's the token-pinching path).
+    if detail != "minimal" and project_final:
+        pending = svc.c.insight_repo.list_all(project=project_final, unacknowledged_only=True, limit=3)
+        if pending:
+            payload["insights"] = [
+                {
+                    "id": i["id"],
+                    "type": i["insight_type"],
+                    "title": i["title"],
+                    "severity": i["severity"],
+                    "created_at": i["created_at"][:10],
+                }
+                for i in pending
+            ]
+
+    return json.dumps(payload)
 
 
 def handle_details(svc: MemoryService, memory_id: str) -> str:
@@ -253,6 +275,28 @@ def handle_details(svc: MemoryService, memory_id: str) -> str:
     if not detail:
         return json.dumps({"error": f"No details found for {memory_id}"})
     return json.dumps({"memory_id": detail["memory_id"], "body": detail["body"]})
+
+
+def handle_update(
+    svc: MemoryService,
+    memory_id: str,
+    what: str | None = None,
+    why: str | None = None,
+    impact: str | None = None,
+    tags: list[str] | None = None,
+    details_append: str | None = None,
+) -> str:
+    updated = svc.update(
+        memory_id,
+        what=what,
+        why=why,
+        impact=impact,
+        tags=tags,
+        details_append=details_append,
+    )
+    if not updated:
+        return json.dumps({"error": f"Memory not found: {memory_id}"})
+    return json.dumps({"updated": True, "memory_id": memory_id})
 
 
 def handle_delete(svc: MemoryService, memory_id: str) -> str:

@@ -442,6 +442,39 @@ class MemoryService:
 
         return results, total
 
+    def update(
+        self,
+        memory_id: str,
+        what: str | None = None,
+        why: str | None = None,
+        impact: str | None = None,
+        tags: list[str] | None = None,
+        details_append: str | None = None,
+    ) -> bool:
+        """Update an existing memory (by ID or prefix) and refresh its embedding."""
+        full_id = self.c.memory_repo.resolve_prefix(memory_id)
+        if full_id is None:
+            return False
+
+        updated = self.c.memory_repo.update(
+            memory_id=full_id,
+            what=what,
+            why=why,
+            impact=impact,
+            tags=tags,
+            details_append=details_append,
+        )
+        if not updated:
+            return False
+
+        mem = self.c.memory_repo.get(full_id)
+        rowid = self.c.memory_repo.get_rowid(full_id)
+        if mem and rowid is not None:
+            self._embed_and_store(
+                rowid, mem["title"], mem["what"], mem.get("why"), mem.get("impact"), mem.get("tags") or []
+            )
+        return True
+
     def get_details(self, memory_id: str) -> dict[str, Any] | None:
         return self.c.memory_repo.get_details(memory_id)
 

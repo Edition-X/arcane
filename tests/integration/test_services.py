@@ -355,3 +355,65 @@ class TestNearDuplicateDetection:
         result = svc.save(RawMemoryInput(title="Org-wide fact", what="Body"), project="", org="acme")
 
         assert not [w for w in result["warnings"] if "near_duplicate" in w]
+
+
+class TestMemoryServiceUpdate:
+    def test_update_fields(self, container):
+        svc = MemoryService(container)
+        r = svc.save(RawMemoryInput(title="Updatable", what="Old body"), project="p")
+
+        ok = svc.update(r["id"], what="New body", why="New reason", tags=["fresh"])
+
+        assert ok is True
+        mem = container.memory_repo.get(r["id"])
+        assert mem["what"] == "New body"
+        assert mem["why"] == "New reason"
+        assert mem["tags"] == ["fresh"]
+
+    def test_update_reembeds(self, container, fake_embedder):
+        svc = MemoryService(container)
+        r = svc.save(RawMemoryInput(title="Reembed", what="Original"), project="p")
+        calls_before = fake_embedder.call_count
+
+        svc.update(r["id"], what="Changed content entirely")
+
+        assert fake_embedder.call_count > calls_before
+
+    def test_update_details_append(self, container):
+        svc = MemoryService(container)
+        r = svc.save(RawMemoryInput(title="With details", what="Body", details="First"), project="p")
+
+        svc.update(r["id"], details_append="Second")
+
+        detail = svc.get_details(r["id"])
+        assert "First" in detail["body"]
+        assert "Second" in detail["body"]
+
+    def test_update_missing_returns_false(self, container):
+        assert MemoryService(container).update("no-such-id", what="x") is False
+
+
+class TestJourneyServiceLifecycle:
+    def test_abandon(self, container):
+        js = JourneyService(container)
+        j = js.start("Doomed spike", project="p")
+
+        assert js.abandon(j["id"], reason="superseded") is True
+        got = js.get(j["id"])
+        assert got["status"] == "abandoned"
+        assert "superseded" in (got.get("summary") or "")
+
+    def test_abandon_missing_returns_false(self, container):
+        assert JourneyService(container).abandon("nope") is False
+
+    def test_delete_removes_journey_and_relationships(self, container):
+        js = JourneyService(container)
+        j = js.start("Delete me", project="p")
+        svc = MemoryService(container)
+        m = svc.save(RawMemoryInput(title="Linked", what="Body", journey_id=j["id"]), project="p")
+
+        assert js.delete(j["id"]) is True
+        assert js.get(j["id"]) is None
+        assert container.relationship_repo.get_all_for("journey", j["id"]) == []
+        # The linked memory itself survives
+        assert container.memory_repo.get(m["id"]) is not None

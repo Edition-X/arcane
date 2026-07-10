@@ -108,3 +108,51 @@ class TestJourneyRepoList:
 
         results = journey_repo.list_all(limit=3)
         assert len(results) == 3
+
+
+class TestJourneyRepoLifecycle:
+    @staticmethod
+    def _journey(journey_id, status="active", days_old=0, title="J", project="p"):
+        from datetime import datetime, timedelta, timezone
+
+        ts = (datetime.now(timezone.utc) - timedelta(days=days_old)).isoformat()
+        return {
+            "id": journey_id,
+            "title": title,
+            "project": project,
+            "status": status,
+            "started_at": ts,
+            "created_at": ts,
+            "updated_at": ts,
+        }
+
+    def test_list_stale_active(self, journey_repo):
+        journey_repo.insert(self._journey("j-old", days_old=45))
+        journey_repo.insert(self._journey("j-new", days_old=2))
+        journey_repo.insert(self._journey("j-done", status="completed", days_old=90))
+
+        stale = journey_repo.list_stale_active(days=30)
+
+        assert [j["id"] for j in stale] == ["j-old"]
+
+    def test_list_stale_active_project_filter(self, journey_repo):
+        journey_repo.insert(self._journey("j-a", days_old=45, project="a"))
+        journey_repo.insert(self._journey("j-b", days_old=45, project="b"))
+
+        stale = journey_repo.list_stale_active(days=30, project="a")
+        assert [j["id"] for j in stale] == ["j-a"]
+
+    def test_delete_by_id(self, journey_repo):
+        journey_repo.insert(self._journey("j-doomed-123"))
+
+        assert journey_repo.delete("j-doomed-123") is True
+        assert journey_repo.get("j-doomed-123") is None
+
+    def test_delete_by_prefix(self, journey_repo):
+        journey_repo.insert(self._journey("j-doomed-456"))
+
+        assert journey_repo.delete("j-doomed") is True
+        assert journey_repo.get("j-doomed-456") is None
+
+    def test_delete_missing_returns_false(self, journey_repo):
+        assert journey_repo.delete("nope") is False
