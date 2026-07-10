@@ -218,3 +218,140 @@ class TestServiceProjectCanonicalization:
         js = JourneyService(container)
         j = js.start("Alias Journey", project="grafana-usage-report")
         assert j["project"] == "grafana-usage-automation"
+
+
+class _ConstantEmbedder:
+    """Every text embeds to the same vector — everything is a perfect match."""
+
+    def __init__(self, dim: int = 64) -> None:
+        self.dim = dim
+
+    def embed(self, text: str) -> list[float]:
+        return [0.5] * self.dim
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return [self.embed(t) for t in texts]
+
+
+class _BrokenEmbedder:
+    """Embedding backend that is down."""
+
+    def embed(self, text: str) -> list[float]:
+        raise RuntimeError("embedding service unavailable")
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        raise RuntimeError("embedding service unavailable")
+
+
+class _TopicEmbedder:
+    """Orthogonal vector per topic keyword — cosine 0 between topics.
+
+    Vectors are deliberately unnormalised (norm 2.0) to mirror real backends
+    like nomic-embed-text, so a check that relied on L2-derived scores would
+    fail these tests.
+    """
+
+    def __init__(self, dim: int = 64) -> None:
+        self.dim = dim
+
+    def embed(self, text: str) -> list[float]:
+        vec = [0.0] * self.dim
+        vec[0 if "pgbouncer" in text.lower() else 1] = 2.0
+        return vec
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return [self.embed(t) for t in texts]
+
+
+class TestNearDuplicateDetection:
+    def test_warns_on_semantically_close_memory(self, container):
+        container._embedding_provider = _ConstantEmbedder()
+        svc = MemoryService(container)
+
+        first = svc.save(RawMemoryInput(title="Use pgbouncer for pooling", what="Connection pooling"), project="p")
+        result = svc.save(
+            RawMemoryInput(title="Adopt pgbouncer connection pool", what="Pool DB connections"), project="p"
+        )
+
+        assert result["action"] == "created"
+        near = [w for w in result["warnings"] if "near_duplicate" in w]
+        assert len(near) == 1
+        assert first["id"] in near[0]
+        assert "Use pgbouncer for pooling" in near[0]
+
+    def test_save_is_never_blocked(self, container):
+        container._embedding_provider = _ConstantEmbedder()
+        svc = MemoryService(container)
+
+        svc.save(RawMemoryInput(title="Original memory", what="Some body"), project="p")
+        result = svc.save(RawMemoryInput(title="Paraphrased memory", what="Some text"), project="p")
+
+        assert result["action"] == "created"
+        assert container.memory_repo.get(result["id"]) is not None
+
+    def test_no_warning_when_dissimilar(self, container):
+        container._embedding_provider = _TopicEmbedder()
+        svc = MemoryService(container)
+
+        svc.save(RawMemoryInput(title="Use pgbouncer", what="Tuned pgbouncer pooling"), project="p")
+        result = svc.save(RawMemoryInput(title="CI cache strategy", what="Cache node_modules"), project="p")
+
+        assert not [w for w in result["warnings"] if "near_duplicate" in w]
+
+    def test_warns_on_unnormalised_vectors(self, container):
+        """Real backends return unnormalised vectors — similarity must be cosine-based."""
+        container._embedding_provider = _TopicEmbedder()
+        svc = MemoryService(container)
+
+        first = svc.save(RawMemoryInput(title="Use pgbouncer for pooling", what="pgbouncer pools"), project="p")
+        result = svc.save(RawMemoryInput(title="Adopt pgbouncer", what="pgbouncer for connections"), project="p")
+
+        near = [w for w in result["warnings"] if "near_duplicate" in w]
+        assert len(near) == 1
+        assert first["id"] in near[0]
+
+    def test_threshold_is_configurable(self, container):
+        container._embedding_provider = _ConstantEmbedder()
+        container.config.dedup.threshold = 1.01  # unreachable — disables the warning
+        svc = MemoryService(container)
+
+        svc.save(RawMemoryInput(title="First entry", what="Body one"), project="p")
+        result = svc.save(RawMemoryInput(title="Second entry", what="Body two"), project="p")
+
+        assert not [w for w in result["warnings"] if "near_duplicate" in w]
+
+    def test_scoped_to_project_layer(self, container):
+        container._embedding_provider = _ConstantEmbedder()
+        svc = MemoryService(container)
+
+        svc.save(RawMemoryInput(title="Other project memory", what="Body"), project="other")
+        result = svc.save(RawMemoryInput(title="This project memory", what="Body"), project="p")
+
+        assert not [w for w in result["warnings"] if "near_duplicate" in w]
+
+    def test_broken_embeddings_fall_back_to_normalised_title(self, container):
+        svc = MemoryService(container)
+        svc.save(RawMemoryInput(title="fix auth bug", what="Race in token refresh"), project="p")
+
+        container._embedding_provider = _BrokenEmbedder()
+        result = svc.save(RawMemoryInput(title="Fix Auth Bug!", what="Different body entirely"), project="p")
+
+        assert result["action"] == "created"
+        assert [w for w in result["warnings"] if "near_duplicate" in w]
+
+    def test_broken_embeddings_never_block_save(self, container):
+        container._embedding_provider = _BrokenEmbedder()
+        svc = MemoryService(container)
+
+        result = svc.save(RawMemoryInput(title="Fresh memory", what="Body"), project="p")
+        assert result["action"] == "created"
+        assert not [w for w in result["warnings"] if "near_duplicate" in w]
+
+    def test_org_level_save_does_not_match_project_memories(self, container):
+        container._embedding_provider = _ConstantEmbedder()
+        svc = MemoryService(container)
+
+        svc.save(RawMemoryInput(title="Project fact", what="Body"), project="p", org="acme")
+        result = svc.save(RawMemoryInput(title="Org-wide fact", what="Body"), project="", org="acme")
+
+        assert not [w for w in result["warnings"] if "near_duplicate" in w]

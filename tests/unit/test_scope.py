@@ -149,3 +149,17 @@ class TestProjectsConfig:
             {"projects": {"aliases": {"grafana-usage-report": "grafana-usage-automation"}}}
         )
         assert cfg.projects.aliases["grafana-usage-report"] == "grafana-usage-automation"
+
+
+class TestDedupConfig:
+    def test_defaults(self):
+        from arcane.infra.config import DedupConfig
+
+        assert DedupConfig().threshold == 0.92
+
+    def test_loaded_into_arcane_config(self):
+        cfg = ArcaneConfig.model_validate({"dedup": {"threshold": 0.85}})
+        assert cfg.dedup.threshold == 0.85
+
+    def test_default_on_arcane_config(self):
+        assert ArcaneConfig().dedup.threshold == 0.92

@@ -167,6 +167,10 @@ context:
 projects:
   aliases:                   # Merge different names for the same work into one
     grafana-usage-report: grafana-usage-automation
+
+dedup:
+  threshold: 0.92            # Cosine similarity that triggers a near_duplicate
+                             # warning on save (warn-only, never blocks)
 ```
 
 Project names are canonicalized on every save and lookup: trimmed, lowercased,
