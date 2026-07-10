@@ -465,6 +465,16 @@ class MemoryRepository:
         row = self.db.fetchone(f"SELECT COUNT(*) as cnt FROM memories m {where_clause}", params)
         return row["cnt"] if row else 0
 
+    def get_vector(self, rowid: int) -> list[float] | None:
+        """Return the stored embedding for *rowid*, or ``None``."""
+        if not self._has_vec_table():
+            return None
+        row = self.db.fetchone("SELECT embedding FROM memories_vec WHERE rowid = ?", (rowid,))
+        if not row:
+            return None
+        blob = row["embedding"]
+        return list(struct.unpack(f"{len(blob) // 4}f", blob))
+
     def insert_vector(self, rowid: int, embedding: list[float]) -> None:
         """Upsert a vector for *rowid* into the vec0 table.
 

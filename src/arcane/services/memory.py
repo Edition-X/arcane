@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 from datetime import date
 from typing import Any
 
 from arcane.domain.models import Memory, RawMemoryInput
-from arcane.domain.scope import GLOBAL_ORG, canonicalize_project
+from arcane.domain.scope import GLOBAL_ORG, canonicalize_project, slugify
 from arcane.infra.db.schema import create_vec_table
 from arcane.infra.markdown import write_session_memory
 from arcane.infra.redaction import redact
@@ -31,6 +32,18 @@ class DimensionMismatchError(Exception):
 def _embedding_text(title: str, what: str, why: str | None, impact: str | None, tags: list[str]) -> str:
     """Build the text string that is fed to the embedding model."""
     return f"{title} {what} {why or ''} {impact or ''} {' '.join(tags)}"
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Cosine similarity, 0.0 when either vector is degenerate."""
+    if len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(x * x for x in b))
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return dot / (norm_a * norm_b)
 
 
 class MemoryService:
@@ -85,6 +98,72 @@ class MemoryService:
                 "Capture context, options considered, decision, tradeoffs, and follow-up."
             ]
         return []
+
+    @staticmethod
+    def _near_duplicate_message(title: str, memory_id: str, score: float | None) -> str:
+        score_part = f", similarity {score:.2f}" if score is not None else ""
+        return (
+            f"near_duplicate: existing memory '{title}' (id {memory_id}{score_part}) "
+            "covers similar ground. Consider updating it instead of creating a new one."
+        )
+
+    def _near_duplicate_warning(
+        self,
+        raw: RawMemoryInput,
+        project: str,
+        org: str,
+        fts_candidates: list[dict[str, Any]],
+    ) -> str | None:
+        """Return a warning when the new memory is semantically close to an existing one.
+
+        Advisory only — a false positive must never lose a save, so every
+        failure path degrades to ``None`` (or to a normalised-title match when
+        embeddings are down). The search is confined to the exact scope layer
+        being written, mirroring the exact-title dedup above.
+        """
+        try:
+            embedding = self.c.embedding_provider.embed(f"{raw.title}\n{raw.what}")
+        except Exception:
+            # Embeddings unavailable — fall back to a normalised-title match
+            # over the FTS candidates so the check still does something.
+            norm_title = slugify(raw.title)
+            for cand in fts_candidates:
+                if slugify(cand["title"]) == norm_title:
+                    return self._near_duplicate_message(cand["title"], cand["id"], None)
+            return None
+
+        try:
+            if org:
+                hits = self.c.memory_repo.vector_search(
+                    embedding,
+                    limit=3,
+                    project=project,
+                    org=org,
+                    include_org=not project,
+                    include_global=False,
+                )
+            else:
+                hits = self.c.memory_repo.vector_search(embedding, limit=3, project=project)
+
+            # Re-score with true cosine similarity: backends like nomic return
+            # unnormalised vectors, so the L2-derived `score` from vector_search
+            # ranks fine but is meaningless as an absolute threshold.
+            best: tuple[float, dict[str, Any]] | None = None
+            for hit in hits:
+                rowid = self.c.memory_repo.get_rowid(hit["id"])
+                stored = self.c.memory_repo.get_vector(rowid) if rowid is not None else None
+                if stored is None:
+                    continue
+                sim = _cosine_similarity(embedding, stored)
+                if best is None or sim > best[0]:
+                    best = (sim, hit)
+        except Exception:
+            logger.debug("Near-duplicate vector search failed; skipping check", exc_info=True)
+            return None
+
+        if best is not None and best[0] >= self.c.config.dedup.threshold:
+            return self._near_duplicate_message(best[1]["title"], best[1]["id"], best[0])
+        return None
 
     def _embed_and_store(
         self, rowid: int, title: str, what: str, why: str | None, impact: str | None, tags: list[str]
@@ -181,7 +260,12 @@ class MemoryService:
                     "warnings": warnings,
                 }
 
-        # New memory
+        # New memory — warn (never block) when it looks semantically close to
+        # an existing one the exact-title check above missed.
+        near_dup = self._near_duplicate_warning(raw, project, org, candidates)
+        if near_dup:
+            warnings.append(near_dup)
+
         file_path = os.path.join(vault_project_dir, f"{today}-session.md")
         mem = Memory.from_raw(raw, project=project, org=org, file_path=file_path)
         mem_dict = mem.model_dump()

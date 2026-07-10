@@ -63,6 +63,20 @@ class ProjectsConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+class DedupConfig(BaseModel):
+    """Near-duplicate detection on save.
+
+    ``threshold`` is the minimum vector-similarity score (``1 - distance``)
+    at which a new memory triggers a ``near_duplicate`` warning against an
+    existing one. Raise it towards 1.0 to warn less. Warnings never block
+    a save.
+    """
+
+    threshold: float = 0.92
+
+    model_config = {"extra": "ignore"}
+
+
 class ArcaneConfig(BaseModel):
     """Top-level Arcane configuration."""
 
@@ -70,6 +84,7 @@ class ArcaneConfig(BaseModel):
     context: ContextConfig = Field(default_factory=ContextConfig)
     orgs: OrgsConfig = Field(default_factory=OrgsConfig)
     projects: ProjectsConfig = Field(default_factory=ProjectsConfig)
+    dedup: DedupConfig = Field(default_factory=DedupConfig)
 
     model_config = {"extra": "ignore"}
 
