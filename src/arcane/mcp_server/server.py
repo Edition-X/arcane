@@ -39,7 +39,9 @@ from arcane.mcp_server.tools.ingestion_tools import (
 )
 from arcane.mcp_server.tools.intelligence_tools import handle_insights, handle_insights_ack
 from arcane.mcp_server.tools.journey_tools import (
+    handle_journey_abandon,
     handle_journey_complete,
+    handle_journey_delete,
     handle_journey_list,
     handle_journey_show,
     handle_journey_start,
@@ -55,6 +57,7 @@ from arcane.mcp_server.tools.memory_tools import (
     handle_details,
     handle_save,
     handle_search,
+    handle_update,
 )
 from arcane.mcp_server.tools.relationship_tools import handle_link, handle_trace
 from arcane.services.container import ServiceContainer, create_container
@@ -181,6 +184,26 @@ def _create_server(container: ServiceContainer) -> Server:
                 },
             ),
             Tool(
+                name="memory_update",
+                description=(
+                    "Update an existing memory in place — what, why, impact, tags, or appended "
+                    "details. Prefer this over memory_save when a near_duplicate warning points "
+                    "at an existing memory."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "memory_id": {"type": "string", "description": "Memory ID or prefix."},
+                        "what": {"type": "string"},
+                        "why": {"type": "string"},
+                        "impact": {"type": "string"},
+                        "tags": {"type": "array", "items": {"type": "string"}},
+                        "details_append": {"type": "string", "description": "Text appended to details."},
+                    },
+                    "required": ["memory_id"],
+                },
+            ),
+            Tool(
                 name="memory_delete",
                 description="Delete a memory by ID or prefix.",
                 inputSchema={
@@ -224,6 +247,27 @@ def _create_server(container: ServiceContainer) -> Server:
                         "journey_id": {"type": "string"},
                         "summary": {"type": "string"},
                     },
+                    "required": ["journey_id"],
+                },
+            ),
+            Tool(
+                name="journey_abandon",
+                description="Mark a journey as abandoned (dead end, superseded, or test junk).",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "journey_id": {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["journey_id"],
+                },
+            ),
+            Tool(
+                name="journey_delete",
+                description="Delete a journey and its relationships. Linked memories survive.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {"journey_id": {"type": "string"}},
                     "required": ["journey_id"],
                 },
             ),
@@ -347,11 +391,11 @@ def _create_server(container: ServiceContainer) -> Server:
             # ── Analysis tools ──
             Tool(
                 name="analyze",
-                description="Run an intelligence analysis plugin (ci_flakes, velocity).",
+                description="Run an intelligence analysis plugin (ci_flakes, velocity, health).",
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "plugin_name": {"type": "string", "enum": ["ci_flakes", "velocity"]},
+                        "plugin_name": {"type": "string", "enum": ["ci_flakes", "velocity", "health"]},
                         "project": {"type": "string"},
                     },
                     "required": ["plugin_name"],
@@ -390,10 +434,13 @@ def _create_server(container: ServiceContainer) -> Server:
             "memory_search": lambda: handle_search(mem_svc, **args),
             "memory_context": lambda: handle_context(mem_svc, **args),
             "memory_details": lambda: handle_details(mem_svc, **args),
+            "memory_update": lambda: handle_update(mem_svc, **args),
             "memory_delete": lambda: handle_delete(mem_svc, **args),
             "journey_start": lambda: handle_journey_start(journey_svc, **args),
             "journey_update": lambda: handle_journey_update(journey_svc, **args),
             "journey_complete": lambda: handle_journey_complete(journey_svc, **args),
+            "journey_abandon": lambda: handle_journey_abandon(journey_svc, **args),
+            "journey_delete": lambda: handle_journey_delete(journey_svc, **args),
             "journey_list": lambda: handle_journey_list(journey_svc, **args),
             "journey_show": lambda: handle_journey_show(container, **args),
             "ingest_git": lambda: handle_ingest_git(container, **args),

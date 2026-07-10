@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 
 from arcane.services.container import ServiceContainer
 from arcane.services.journey import JourneyService
+
+STALE_JOURNEY_DAYS = 30
 
 
 def handle_journey_start(
@@ -40,6 +43,39 @@ def handle_journey_complete(
     if not completed:
         return json.dumps({"error": f"Journey not found: {journey_id}"})
     return json.dumps({"completed": True, "journey_id": journey_id})
+
+
+def handle_journey_abandon(
+    svc: JourneyService,
+    journey_id: str,
+    reason: str | None = None,
+) -> str:
+    abandoned = svc.abandon(journey_id, reason=reason)
+    if not abandoned:
+        return json.dumps({"error": f"Journey not found: {journey_id}"})
+    return json.dumps({"abandoned": True, "journey_id": journey_id})
+
+
+def handle_journey_delete(
+    svc: JourneyService,
+    journey_id: str,
+) -> str:
+    deleted = svc.delete(journey_id)
+    if not deleted:
+        return json.dumps({"error": f"Journey not found: {journey_id}"})
+    return json.dumps({"deleted": True, "journey_id": journey_id})
+
+
+def _is_stale(journey: dict, days: int = STALE_JOURNEY_DAYS) -> bool:
+    if journey.get("status") != "active":
+        return False
+    try:
+        started = datetime.fromisoformat(journey["started_at"])
+    except (KeyError, ValueError, TypeError):
+        return False
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - started).days > days
 
 
 def handle_journey_show(
@@ -99,6 +135,7 @@ def handle_journey_list(
                 "project": j["project"],
                 "started_at": j["started_at"][:10],
                 "completed_at": (j.get("completed_at") or "")[:10] or None,
+                **({"stale": True} if _is_stale(j) else {}),
             }
             for j in journeys
         ]

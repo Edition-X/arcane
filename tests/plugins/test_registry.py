@@ -46,11 +46,9 @@ class TestPluginRegistry:
             assert isinstance(instance, IngestionPlugin), f"{name} doesn't implement IngestionPlugin"
 
         for name, cls in discover_plugins("arcane.plugins.intelligence").items():
-            instance = (
-                cls(artifact_repo=None)
-                if name == "ci_flakes"
-                else cls(artifact_repo=None, memory_repo=None, journey_repo=None)
-            )
+            # Every intelligence plugin must be constructible with no args so
+            # discovery never depends on plugin-specific wiring.
+            instance = cls()
             assert isinstance(instance, IntelligencePlugin), f"{name} doesn't implement IntelligencePlugin"
 
         for name, cls in discover_plugins("arcane.plugins.content").items():

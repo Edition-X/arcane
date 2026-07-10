@@ -264,6 +264,30 @@ class MemoryRepository:
             "SELECT project, org, COUNT(*) as cnt FROM memories GROUP BY project, org ORDER BY cnt DESC"
         )
 
+    def stats(self) -> dict[str, Any]:
+        """Store-wide aggregates for health auditing and stats displays."""
+        total_row = self.db.fetchone("SELECT COUNT(*) as cnt FROM memories")
+        empty_row = self.db.fetchone("SELECT COUNT(*) as cnt FROM memories WHERE COALESCE(project, '') = ''")
+        ttl_row = self.db.fetchone("SELECT COUNT(*) as cnt FROM memories WHERE ttl_days IS NOT NULL")
+        conf_row = self.db.fetchone("SELECT COUNT(*) as cnt FROM memories WHERE confidence IS NOT NULL")
+        categories = self.db.fetchall(
+            "SELECT COALESCE(category, '') as category, COUNT(*) as cnt FROM memories "
+            "GROUP BY COALESCE(category, '') ORDER BY cnt DESC"
+        )
+        duplicate_titles = self.db.fetchall(
+            "SELECT title, COUNT(*) as cnt FROM memories "
+            "GROUP BY lower(trim(title)) HAVING COUNT(*) > 1 ORDER BY cnt DESC LIMIT 20"
+        )
+        return {
+            "total": total_row["cnt"] if total_row else 0,
+            "empty_project": empty_row["cnt"] if empty_row else 0,
+            "ttl_set": ttl_row["cnt"] if ttl_row else 0,
+            "confidence_set": conf_row["cnt"] if conf_row else 0,
+            "categories": categories,
+            "projects": self.list_projects(),
+            "duplicate_titles": duplicate_titles,
+        }
+
     def reassign_project(self, old: str, new: str) -> int:
         """Move every memory in project *old* to *new*; return rows updated.
 

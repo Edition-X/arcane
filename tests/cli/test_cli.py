@@ -211,3 +211,23 @@ class TestMergeProjectsCLI:
         result = runner.invoke(main, ["merge-projects", "ghost", "new-name"])
         assert result.exit_code == 0, result.output
         assert "0" in result.output
+
+
+class TestAnalyzeHealthCLI:
+    def test_health_reports_findings(self, runner, mock_container):
+        from tests.conftest import make_memory_dict
+
+        mock_container.memory_repo.insert(make_memory_dict(project="Edition X"))
+        mock_container.memory_repo.insert(make_memory_dict(project="edition-x"))
+
+        result = runner.invoke(main, ["analyze", "health", "--project", "p"])
+        assert result.exit_code == 0, result.output
+        assert "fragmented" in result.output.lower()
+        # Insights persisted for later `insights` calls
+        stored = mock_container.insight_repo.list_all(project="p")
+        assert any(i["insight_type"] == "health_fragmentation" for i in stored)
+
+    def test_health_on_healthy_store(self, runner, mock_container):
+        result = runner.invoke(main, ["analyze", "health", "--project", "p"])
+        assert result.exit_code == 0, result.output
+        assert "Health:" in result.output

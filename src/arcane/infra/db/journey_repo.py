@@ -89,6 +89,29 @@ class JourneyRepository:
             params,
         )
 
+    def list_stale_active(self, days: int, project: str | None = None) -> list[dict[str, Any]]:
+        """Active journeys whose ``started_at`` is more than *days* days ago."""
+        where_clauses = ["status = 'active'", "(unixepoch('now') - unixepoch(started_at)) > ? * 86400"]
+        params: list[Any] = [days]
+        if project:
+            where_clauses.append("project = ?")
+            params.append(project)
+        return self.db.fetchall(
+            f"SELECT * FROM journeys WHERE {' AND '.join(where_clauses)} ORDER BY started_at",
+            params,
+        )
+
+    def delete(self, journey_id: str) -> bool:
+        """Delete a journey by exact ID or prefix. Relationships are the caller's job."""
+        row = self.db.fetchone("SELECT id FROM journeys WHERE id = ?", (journey_id,))
+        if not row:
+            row = self.db.fetchone("SELECT id FROM journeys WHERE id LIKE ?", (journey_id + "%",))
+        if not row:
+            return False
+        self.db.execute("DELETE FROM journeys WHERE id = ?", (row["id"],))
+        self.db.commit()
+        return True
+
     def count(self, project: str | None = None) -> int:
         if project:
             row = self.db.fetchone("SELECT COUNT(*) as cnt FROM journeys WHERE project = ?", (project,))
