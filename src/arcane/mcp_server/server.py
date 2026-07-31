@@ -391,11 +391,11 @@ def _create_server(container: ServiceContainer) -> Server:
             # ── Analysis tools ──
             Tool(
                 name="analyze",
-                description="Run an intelligence analysis plugin (ci_flakes, velocity, health).",
+                description="Run an intelligence analysis plugin (velocity, health).",
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "plugin_name": {"type": "string", "enum": ["ci_flakes", "velocity", "health"]},
+                        "plugin_name": {"type": "string", "enum": ["velocity", "health"]},
                         "project": {"type": "string"},
                     },
                     "required": ["plugin_name"],

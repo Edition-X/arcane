@@ -18,7 +18,7 @@ Arcane runs as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io
 - **Journeys** — track multi-step investigations from problem to exploration to decision to outcome
 - **Artifacts** — ingest CI runs, git commits, and Linear tickets as searchable references
 - **Relationships** — link any entities (memory to memory, journey to artifact) into a knowledge graph
-- **Insights** — detect CI flake patterns and summarise engineering velocity
+- **Insights** — summarise engineering velocity
 - **Content generation** — draft blog posts and Architecture Decision Records from your stored knowledge
 
 ---

@@ -72,11 +72,7 @@ def handle_analyze(
     svc = IntelligenceService(container)
 
     plugin: IntelligencePlugin
-    if plugin_name == "ci_flakes":
-        from arcane.plugins.builtin.ci_flakes import CIFlakeDetector
-
-        plugin = CIFlakeDetector(artifact_repo=container.artifact_repo)
-    elif plugin_name == "velocity":
+    if plugin_name == "velocity":
         from arcane.plugins.builtin.velocity import VelocityTracker
 
         plugin = VelocityTracker(

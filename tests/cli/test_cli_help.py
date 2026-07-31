@@ -47,7 +47,6 @@ class TestCLIHelp:
         ["ingest", "gha", "--help"],
         ["ingest", "linear", "--help"],
         ["analyze", "--help"],
-        ["analyze", "flakes", "--help"],
         ["analyze", "velocity", "--help"],
         ["draft", "--help"],
         ["draft", "blog", "--help"],
