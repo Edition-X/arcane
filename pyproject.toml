@@ -49,7 +49,6 @@ github_actions = "arcane.plugins.builtin.gha_ingest:GHAIngestionPlugin"
 linear = "arcane.plugins.builtin.linear_ingest:LinearIngestionPlugin"
 
 [project.entry-points."arcane.plugins.intelligence"]
-ci_flakes = "arcane.plugins.builtin.ci_flakes:CIFlakeDetector"
 velocity = "arcane.plugins.builtin.velocity:VelocityTracker"
 health = "arcane.plugins.builtin.health_audit:HealthAuditor"
 

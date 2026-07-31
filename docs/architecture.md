@@ -58,7 +58,7 @@ A typed directed edge between any two entities. Relationship types include `caus
 
 ### Insight
 
-A derived observation produced by an intelligence plugin — for example, a detected CI flake pattern or an engineering velocity summary. Insights have an `acknowledged` flag so they surface once and then stay out of the way.
+A derived observation produced by an intelligence plugin — for example, an engineering velocity summary. Insights have an `acknowledged` flag so they surface once and then stay out of the way.
 
 ---
 

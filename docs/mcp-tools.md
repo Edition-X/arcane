@@ -177,7 +177,7 @@ Walk the relationship graph outward from an entity to find connected knowledge.
 
 ### `insights`
 
-Get recent unacknowledged insights for a project (e.g. detected CI flakes, velocity summaries).
+Get recent unacknowledged insights for a project (e.g. velocity summaries).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -248,11 +248,11 @@ Run an intelligence analysis plugin against stored data.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `plugin_name` | string | yes | `ci_flakes` or `velocity` |
+| `plugin_name` | string | yes | `velocity` or `health` |
 | `project` | string | no | Project to analyse |
 
-- **`ci_flakes`** — detects flaky CI tests by examining GHA artifact history
 - **`velocity`** — summarises engineering output rate from commits and closed tickets
+- **`health`** — audits store health: fragmentation, orphans, duplicates, journey hygiene
 
 Results are stored as Insights and returned in the response.
 

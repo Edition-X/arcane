@@ -14,7 +14,6 @@ class TestPluginRegistry:
 
     def test_discover_intelligence_plugins(self):
         plugins = discover_plugins("arcane.plugins.intelligence")
-        assert "ci_flakes" in plugins
         assert "velocity" in plugins
 
     def test_discover_content_plugins(self):

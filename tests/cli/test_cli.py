@@ -133,10 +133,6 @@ class TestAnalyzeCLI:
         result = runner.invoke(main, ["analyze", "--help"])
         assert result.exit_code == 0, result.output
 
-    def test_analyze_flakes(self, runner, mock_container):
-        result = runner.invoke(main, ["analyze", "flakes"])
-        assert result.exit_code == 0, result.output
-
     def test_analyze_velocity(self, runner, mock_container):
         result = runner.invoke(main, ["analyze", "velocity"])
         assert result.exit_code == 0, result.output

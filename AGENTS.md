@@ -18,7 +18,7 @@ src/arcane/
 ├── mcp_server/     # MCP stdio server + tool handlers
 │   └── tools/      # One file per tool group (memory, journey, artifact…)
 ├── plugins/        # Plugin system (ingestion, intelligence, content)
-│   └── builtin/    # Built-in plugins: git, GHA, Linear, CI flakes, velocity, blog, ADR
+│   └── builtin/    # Built-in plugins: git, GHA, Linear, velocity, blog, ADR
 └── services/       # Business logic: MemoryService, JourneyService, ArtifactService…
 ```
 

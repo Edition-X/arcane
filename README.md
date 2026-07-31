@@ -15,7 +15,7 @@ Arcane runs as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io
 - **Artifacts** — ingest CI runs, git commits, and Linear tickets as searchable references
 - **Relationships** — link any entities (memory → memory, journey → artifact, etc.) into a knowledge graph
 - **Content generation** — draft blog posts and Architecture Decision Records from your stored knowledge
-- **Intelligence** — detect CI flake patterns and summarise engineering velocity
+- **Intelligence** — summarise engineering velocity
 
 ---
 
@@ -94,7 +94,7 @@ Once connected, Claude has access to these tools:
 | `ingest_git` | Import commits from a git repository |
 | `ingest_gha` | Import CI runs from GitHub Actions |
 | `ingest_linear` | Import tickets from Linear |
-| `analyze` | Run intelligence plugins (flakes, velocity, health) |
+| `analyze` | Run intelligence plugins (velocity, health) |
 | `insights` / `insights_ack` | View and acknowledge derived insights |
 | `link` | Create a relationship between two entities |
 | `trace` | Walk the relationship graph from an entity |
@@ -129,7 +129,6 @@ arcane ingest gha               # Ingest GitHub Actions runs
 arcane ingest linear            # Ingest Linear tickets
 
 # Intelligence
-arcane analyze flakes           # Detect CI flakes
 arcane analyze velocity         # Engineering velocity summary
 arcane analyze health           # Store health audit — fragmentation, orphans, journey hygiene
 
