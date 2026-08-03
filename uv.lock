@@ -54,7 +54,7 @@ pysqlite3 = [
 requires-dist = [
     { name = "click", specifier = ">=8.0" },
     { name = "httpx", specifier = ">=0.24" },
-    { name = "mcp", specifier = ">=1.0" },
+    { name = "mcp", specifier = ">=1.0,<2" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.7" },
     { name = "pydantic", specifier = ">=2.0" },
