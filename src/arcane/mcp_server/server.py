@@ -22,6 +22,7 @@ from mcp.types import (
 )
 from pydantic import AnyUrl
 
+from arcane import __version__
 from arcane.domain.enums import RelationType
 from arcane.mcp_server.prompts import (
     PROMPTS,
@@ -69,7 +70,7 @@ logger = logging.getLogger(__name__)
 
 def _create_server(container: ServiceContainer) -> Server:
     """Create and configure the MCP server with all tools."""
-    server = Server("arcane")
+    server = Server("arcane", version=__version__)
     mem_svc = MemoryService(container)
     journey_svc = JourneyService(container)
 

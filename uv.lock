@@ -25,8 +25,7 @@ wheels = [
 ]
 
 [[package]]
-name = "arcane"
-version = "0.1.0b1"
+name = "arcane-mcp"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -66,7 +65,7 @@ requires-dist = [
     { name = "sqlite-vec", specifier = ">=0.1" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0" },
 ]
-provides-extras = ["pysqlite3", "dev"]
+provides-extras = ["dev", "pysqlite3"]
 
 [[package]]
 name = "attrs"

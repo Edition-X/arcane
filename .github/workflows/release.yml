@@ -112,6 +112,18 @@ jobs:
           git tag "${{ steps.version.outputs.tag }}"
           git push origin "${{ steps.version.outputs.tag }}"
 
+      - name: Build release artifacts
+        if: steps.version.outputs.skip != 'true'
+        run: uv build --out-dir dist
+
+      - name: Verify release artifact
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          WHEEL=$(find dist -name '*.whl' -print -quit)
+          EXPECTED=$(echo "${{ steps.version.outputs.next }}" | sed -E 's/-beta\.([0-9]+)/b\1/')
+          ACTUAL=$(uv tool run --from "$WHEEL" arcane --version | awk '{print $3}')
+          test "$ACTUAL" = "$EXPECTED"
+
       - name: Create GitHub release
         if: steps.version.outputs.skip != 'true'
         env:
@@ -126,4 +138,5 @@ jobs:
           gh release create "$TAG" \
             --title "$TAG" \
             --notes-file release-notes.md \
+            dist/* \
             $PRE

@@ -6,6 +6,7 @@ import json
 import pytest
 from mcp.types import CallToolRequest, CallToolRequestParams
 
+from arcane import __version__
 from arcane.mcp_server.server import _create_server
 from arcane.mcp_server.tools.content_tools import handle_draft_adr, handle_draft_blog
 from arcane.mcp_server.tools.intelligence_tools import handle_insights, handle_insights_ack
@@ -299,6 +300,9 @@ class TestMcpServerCallTool:
         handler = server.request_handlers[CallToolRequest]
         request = CallToolRequest(params=CallToolRequestParams(name=name, arguments=arguments))
         return asyncio.run(handler(request)).root
+
+    def test_server_reports_arcane_version(self, container):
+        assert _create_server(container).version == __version__
 
     def test_memory_context_succeeds_via_call_tool(self, container):
         mem_svc = MemoryService(container)

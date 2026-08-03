@@ -24,12 +24,15 @@ Arcane runs as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io
 ### Install
 
 ```bash
-# With uv (recommended)
-uv tool install arcane
+# Install a pinned GitHub release with uv (recommended)
+uv tool install --from "git+https://github.com/Edition-X/arcane.git@v0.2.0-beta.10" arcane-mcp
 
 # Or with pip
-pip install arcane
+pip install "git+https://github.com/Edition-X/arcane.git@v0.2.0-beta.10"
 ```
+
+Replace `v0.2.0-beta.10` with the release tag you want. GitHub releases also
+include wheel and source-distribution assets for offline or controlled installs.
 
 ### Initialise
 
