@@ -11,7 +11,7 @@ from typing import Any
 from arcane.domain.models import Memory, RawMemoryInput
 from arcane.domain.scope import GLOBAL_ORG, canonicalize_project, slugify
 from arcane.infra.db.schema import create_vec_table
-from arcane.infra.markdown import write_session_memory
+from arcane.infra.markdown import remove_session_memory, write_session_memory
 from arcane.infra.redaction import redact
 from arcane.infra.search import hybrid_search, tiered_search
 from arcane.services.container import ServiceContainer
@@ -500,8 +500,17 @@ class MemoryService:
         return self.c.memory_repo.get_details(memory_id)
 
     def delete(self, memory_id: str) -> bool:
+        full_id = self.c.memory_repo.resolve_prefix(memory_id)
+        if full_id is None:
+            return False
+        memory = self.c.memory_repo.get(full_id)
+        if memory is None:
+            return False
         with self.c.db.transaction():
-            return self.c.memory_repo.delete(memory_id)
+            deleted = self.c.memory_repo.delete(full_id)
+            if deleted:
+                remove_session_memory(memory["file_path"], full_id, memory["title"])
+            return deleted
 
     def reindex(self, progress_callback: Any = None) -> dict[str, Any]:
         """Rebuild the vector index from scratch using a crash-safe strategy.

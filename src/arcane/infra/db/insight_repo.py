@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from arcane.infra.db.connection import Database
+from arcane.infra.db.ids import resolve_unique_id
 
 
 class InsightRepository:
@@ -36,10 +37,10 @@ class InsightRepository:
         self.db.commit()
 
     def acknowledge(self, insight_id: str) -> bool:
-        row = self.db.fetchone("SELECT id FROM insights WHERE id LIKE ?", (insight_id + "%",))
-        if not row:
+        full_id = resolve_unique_id(self.db, "insights", insight_id)
+        if full_id is None:
             return False
-        self.db.execute("UPDATE insights SET acknowledged = 1 WHERE id = ?", (row["id"],))
+        self.db.execute("UPDATE insights SET acknowledged = 1 WHERE id = ?", (full_id,))
         self.db.commit()
         return True
 

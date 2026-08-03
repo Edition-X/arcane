@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from arcane.infra.db.connection import Database
+from arcane.infra.db.ids import resolve_unique_id
 
 logger = logging.getLogger(__name__)
 
@@ -120,9 +121,12 @@ class MemoryRepository:
         return row["rowid"] if row else None
 
     def get_details(self, memory_id: str) -> dict[str, Any] | None:
+        full_id = resolve_unique_id(self.db, "memories", memory_id)
+        if full_id is None:
+            return None
         return self.db.fetchone(
-            "SELECT memory_id, body FROM memory_details WHERE memory_id LIKE ?",
-            (memory_id + "%",),
+            "SELECT memory_id, body FROM memory_details WHERE memory_id = ?",
+            (full_id,),
         )
 
     def resolve_prefix(self, id_prefix: str) -> str | None:
@@ -131,8 +135,7 @@ class MemoryRepository:
         Use this in CLI/MCP entry points where users supply short ID prefixes.
         Internal service code should always pass exact IDs.
         """
-        row = self.db.fetchone("SELECT id FROM memories WHERE id LIKE ?", (id_prefix + "%",))
-        return row["id"] if row else None
+        return resolve_unique_id(self.db, "memories", id_prefix)
 
     def update(
         self,
@@ -144,14 +147,9 @@ class MemoryRepository:
         details_append: str | None = None,
     ) -> bool:
         """Update an existing memory by exact ID."""
-        row = self.db.fetchone("SELECT id, rowid FROM memories WHERE id = ?", (memory_id,))
-        if not row:
-            # Fall back to prefix resolution for callers that pass short IDs
-            row = self.db.fetchone("SELECT id, rowid FROM memories WHERE id LIKE ?", (memory_id + "%",))
-        if not row:
+        full_id = resolve_unique_id(self.db, "memories", memory_id)
+        if full_id is None:
             return False
-
-        full_id = row["id"]
         now = datetime.now(timezone.utc).isoformat()
         sets = ["updated_count = updated_count + 1", "updated_at = ?"]
         params: list[Any] = [now]
@@ -190,13 +188,18 @@ class MemoryRepository:
         return True
 
     def delete(self, memory_id: str) -> bool:
-        row = self.db.fetchone("SELECT id FROM memories WHERE id = ?", (memory_id,))
-        if not row:
-            row = self.db.fetchone("SELECT id FROM memories WHERE id LIKE ?", (memory_id + "%",))
-        if not row:
+        full_id = resolve_unique_id(self.db, "memories", memory_id)
+        if full_id is None:
             return False
 
-        full_id = row["id"]
+        rowid = self.get_rowid(full_id)
+        if rowid is not None and self._has_vec_table():
+            self.db.execute("DELETE FROM memories_vec WHERE rowid = ?", (rowid,))
+        self.db.execute(
+            "DELETE FROM relationships WHERE (source_type = 'memory' AND source_id = ?) "
+            "OR (target_type = 'memory' AND target_id = ?)",
+            (full_id, full_id),
+        )
         self.db.execute("DELETE FROM memory_details WHERE memory_id = ?", (full_id,))
         self.db.execute("DELETE FROM memories WHERE id = ?", (full_id,))
         self.db.commit()
