@@ -41,19 +41,19 @@ class IngestionService:
                 skipped += 1
                 continue
 
-            self.c.artifact_repo.insert(art)
+            with self.c.db.transaction():
+                self.c.artifact_repo.insert(art)
+                # Auto-link to journey if specified
+                if journey_id:
+                    rel = Relationship(
+                        source_type="artifact",
+                        source_id=art["id"],
+                        target_type="journey",
+                        target_id=journey_id,
+                        relation=RelationType.PART_OF,
+                    )
+                    self.c.relationship_repo.insert(rel.model_dump())
             ingested += 1
-
-            # Auto-link to journey if specified
-            if journey_id:
-                rel = Relationship(
-                    source_type="artifact",
-                    source_id=art["id"],
-                    target_type="journey",
-                    target_id=journey_id,
-                    relation=RelationType.PART_OF,
-                )
-                self.c.relationship_repo.insert(rel.model_dump())
 
         return {
             "plugin": plugin.name,

@@ -168,13 +168,24 @@ class MemoryService:
     def _embed_and_store(
         self, rowid: int, title: str, what: str, why: str | None, impact: str | None, tags: list[str]
     ) -> None:
-        """Compute embedding and upsert into the vector table.  Logs on failure."""
+        """Compute embedding and upsert into the vector table. Logs on failure."""
+        embedding = self._prepare_embedding(title, what, why, impact, tags)
+        if embedding is not None:
+            self._store_embedding(rowid, embedding)
+
+    def _prepare_embedding(
+        self, title: str, what: str, why: str | None, impact: str | None, tags: list[str]
+    ) -> list[float] | None:
+        """Compute an embedding before entering a database write transaction."""
         text = _embedding_text(title, what, why, impact, tags)
         try:
-            embedding = self.c.embedding_provider.embed(text)
+            return self.c.embedding_provider.embed(text)
         except Exception:
-            logger.warning("Embedding failed for rowid=%d — memory saved without vector.", rowid, exc_info=True)
-            return
+            logger.warning("Embedding failed — memory will be saved without a vector.", exc_info=True)
+            return None
+
+    def _store_embedding(self, rowid: int, embedding: list[float]) -> None:
+        """Store a precomputed embedding inside the caller's transaction."""
         if self._ensure_vectors(embedding):
             self.c.memory_repo.insert_vector(rowid, embedding)
 
@@ -238,20 +249,21 @@ class MemoryService:
                 existing_id = top["id"]
                 merged_tags = self._merge_tags(top.get("tags") or [], raw.tags)
                 details_append = f"--- updated {today} ---\n{raw.details}" if raw.details else None
+                embedding = self._prepare_embedding(top["title"], raw.what, raw.why, raw.impact, merged_tags)
 
-                self.c.memory_repo.update(
-                    memory_id=existing_id,
-                    what=raw.what,
-                    why=raw.why,
-                    impact=raw.impact,
-                    tags=merged_tags,
-                    details_append=details_append,
-                )
+                with self.c.db.transaction():
+                    self.c.memory_repo.update(
+                        memory_id=existing_id,
+                        what=raw.what,
+                        why=raw.why,
+                        impact=raw.impact,
+                        tags=merged_tags,
+                        details_append=details_append,
+                    )
+                    rowid = self.c.memory_repo.get_rowid(existing_id)
+                    if rowid is not None and embedding is not None:
+                        self._store_embedding(rowid, embedding)
                 logger.debug("Merged duplicate memory id=%s", existing_id)
-
-                rowid = self.c.memory_repo.get_rowid(existing_id)
-                if rowid is not None:
-                    self._embed_and_store(rowid, top["title"], raw.what, raw.why, raw.impact, merged_tags)
 
                 return {
                     "id": existing_id,
@@ -269,17 +281,18 @@ class MemoryService:
         file_path = os.path.join(vault_project_dir, f"{today}-session.md")
         mem = Memory.from_raw(raw, project=project, org=org, file_path=file_path)
         mem_dict = mem.model_dump()
+        embedding = self._prepare_embedding(mem.title, mem.what, mem.why, mem.impact, mem.tags)
 
-        write_session_memory(vault_project_dir, mem_dict, today, details=raw.details)
-        rowid = self.c.memory_repo.insert(mem_dict, details=raw.details)
+        with self.c.db.transaction():
+            rowid = self.c.memory_repo.insert(mem_dict, details=raw.details)
+            if raw.journey_id:
+                from arcane.services.journey import JourneyService
+
+                JourneyService(self.c).link_memory(raw.journey_id, mem.id)
+            if embedding is not None:
+                self._store_embedding(rowid, embedding)
+            write_session_memory(vault_project_dir, mem_dict, today, details=raw.details)
         logger.debug("Created memory id=%s project=%s", mem.id, project)
-
-        if raw.journey_id:
-            from arcane.services.journey import JourneyService
-
-            JourneyService(self.c).link_memory(raw.journey_id, mem.id)
-
-        self._embed_and_store(rowid, mem.title, mem.what, mem.why, mem.impact, mem.tags)
 
         return {"id": mem.id, "file_path": file_path, "action": "created", "warnings": warnings}
 
@@ -456,30 +469,39 @@ class MemoryService:
         if full_id is None:
             return False
 
-        updated = self.c.memory_repo.update(
-            memory_id=full_id,
-            what=what,
-            why=why,
-            impact=impact,
-            tags=tags,
-            details_append=details_append,
-        )
-        if not updated:
+        existing = self.c.memory_repo.get(full_id)
+        if not existing:
             return False
+        embedding = self._prepare_embedding(
+            existing["title"],
+            what if what is not None else existing["what"],
+            why if why is not None else existing.get("why"),
+            impact if impact is not None else existing.get("impact"),
+            tags if tags is not None else existing.get("tags") or [],
+        )
 
-        mem = self.c.memory_repo.get(full_id)
-        rowid = self.c.memory_repo.get_rowid(full_id)
-        if mem and rowid is not None:
-            self._embed_and_store(
-                rowid, mem["title"], mem["what"], mem.get("why"), mem.get("impact"), mem.get("tags") or []
+        with self.c.db.transaction():
+            updated = self.c.memory_repo.update(
+                memory_id=full_id,
+                what=what,
+                why=why,
+                impact=impact,
+                tags=tags,
+                details_append=details_append,
             )
+            if not updated:
+                return False
+            rowid = self.c.memory_repo.get_rowid(full_id)
+            if rowid is not None and embedding is not None:
+                self._store_embedding(rowid, embedding)
         return True
 
     def get_details(self, memory_id: str) -> dict[str, Any] | None:
         return self.c.memory_repo.get_details(memory_id)
 
     def delete(self, memory_id: str) -> bool:
-        return self.c.memory_repo.delete(memory_id)
+        with self.c.db.transaction():
+            return self.c.memory_repo.delete(memory_id)
 
     def reindex(self, progress_callback: Any = None) -> dict[str, Any]:
         """Rebuild the vector index from scratch using a crash-safe strategy.
