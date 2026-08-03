@@ -16,6 +16,7 @@ from mcp.types import (
     Prompt,
     PromptArgument,
     PromptMessage,
+    Resource,
     ResourceTemplate,
     TextContent,
     Tool,
@@ -518,6 +519,11 @@ def _create_server(container: ServiceContainer) -> Server:
                 mimeType="application/json",
             )
         ]
+
+    @server.list_resources()
+    async def list_resources() -> list[Resource]:
+        """Arcane exposes dynamic project context through resource templates."""
+        return []
 
     @server.read_resource()
     async def read_resource(uri: AnyUrl) -> list[ReadResourceContents]:
