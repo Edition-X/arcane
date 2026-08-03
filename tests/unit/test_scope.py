@@ -129,9 +129,7 @@ class TestResolveWriteScope:
     def test_explicit_project_keeps_repo_org_and_canonicalizes(self):
         cfg = ArcaneConfig(projects=ProjectsConfig(aliases={"legacy-widget": "widget"}))
 
-        scope = resolve_write_scope(
-            "legacy-widget", cfg, repo_path="/repos/widget", _remote=("Acme", "widget")
-        )
+        scope = resolve_write_scope("legacy-widget", cfg, repo_path="/repos/widget", _remote=("Acme", "widget"))
 
         assert scope == Scope(org="acme", project="widget")
 
