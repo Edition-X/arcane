@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from arcane.infra.db.connection import Database
 from arcane.infra.db.ids import resolve_unique_id
-from arcane.infra.redaction import redact_values
+from arcane.infra.redaction import redact, redact_values
 
 
 class JourneyRepository:
@@ -48,17 +49,31 @@ class JourneyRepository:
             return None
         return self.db.fetchone("SELECT * FROM journeys WHERE id = ?", (full_id,))
 
-    def update(self, journey_id: str, **fields: Any) -> bool:
+    def update(
+        self,
+        journey_id: str,
+        *,
+        event_type: str | None = None,
+        event_summary: str | None = None,
+        **fields: Any,
+    ) -> bool:
         full_id = resolve_unique_id(self.db, "journeys", journey_id)
         if full_id is None:
             return False
         fields = redact_values(fields)
         assert isinstance(fields, dict)
+        event_summary = redact(event_summary) if event_summary is not None else None
         fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+        if event_type is None and "summary" in fields:
+            event_type = "updated"
+            event_summary = fields["summary"]
 
         sets = [f"{k} = ?" for k in fields]
         params = list(fields.values()) + [full_id]
         self.db.execute(f"UPDATE journeys SET {', '.join(sets)} WHERE id = ?", params)
+        if event_type:
+            self._insert_event(full_id, event_type, event_summary)
         self.db.commit()
         return True
 
@@ -67,7 +82,23 @@ class JourneyRepository:
         fields: dict[str, Any] = {"status": "completed", "completed_at": now}
         if summary:
             fields["summary"] = summary
-        return self.update(journey_id, **fields)
+        return self.update(journey_id, event_type="completed", event_summary=summary, **fields)
+
+    def abandon(self, journey_id: str, reason: str | None = None) -> bool:
+        fields: dict[str, Any] = {"status": "abandoned"}
+        summary = f"Abandoned: {reason}" if reason else None
+        if summary:
+            fields["summary"] = summary
+        return self.update(journey_id, event_type="abandoned", event_summary=summary, **fields)
+
+    def list_events(self, journey_id: str) -> list[dict[str, Any]]:
+        full_id = resolve_unique_id(self.db, "journeys", journey_id)
+        if full_id is None:
+            return []
+        return self.db.fetchall(
+            "SELECT * FROM journey_events WHERE journey_id = ? ORDER BY created_at, rowid",
+            (full_id,),
+        )
 
     def list_all(
         self,
@@ -113,6 +144,7 @@ class JourneyRepository:
         full_id = resolve_unique_id(self.db, "journeys", journey_id)
         if full_id is None:
             return False
+        self.db.execute("DELETE FROM journey_events WHERE journey_id = ?", (full_id,))
         self.db.execute("DELETE FROM journeys WHERE id = ?", (full_id,))
         self.db.commit()
         return True
@@ -123,3 +155,9 @@ class JourneyRepository:
         else:
             row = self.db.fetchone("SELECT COUNT(*) as cnt FROM journeys")
         return row["cnt"] if row else 0
+
+    def _insert_event(self, journey_id: str, event_type: str, summary: str | None) -> None:
+        self.db.execute(
+            "INSERT INTO journey_events (id, journey_id, event_type, summary, created_at) VALUES (?, ?, ?, ?, ?)",
+            (str(uuid4()), journey_id, event_type, summary, datetime.now(timezone.utc).isoformat()),
+        )

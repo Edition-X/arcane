@@ -128,3 +128,22 @@ class TestIngestionService:
         rels = container.relationship_repo.get_all_for("journey", journey["id"])
         assert len(rels) == 1
         assert rels[0]["relation"] == "part_of"
+
+    def test_reingestion_links_existing_artifact_to_new_journey_once(self, container):
+        from arcane.services.journey import JourneyService
+
+        journeys = JourneyService(container)
+        first = journeys.start(title="First", project="test-project")
+        second = journeys.start(title="Second", project="test-project")
+        plugin = FakeIngestionPlugin(results=[_make_artifact("Commit", ext_id="sha-123")])
+        service = IngestionService(container)
+
+        service.run_plugin(plugin, project="test-project", journey_id=first["id"])
+        result = service.run_plugin(plugin, project="test-project", journey_id=second["id"])
+        service.run_plugin(plugin, project="test-project", journey_id=second["id"])
+
+        assert result["ingested"] == 0
+        assert result["skipped"] == 1
+        assert len(container.artifact_repo.list_all(project="test-project")) == 1
+        assert len(container.relationship_repo.get_all_for("journey", first["id"])) == 1
+        assert len(container.relationship_repo.get_all_for("journey", second["id"])) == 1

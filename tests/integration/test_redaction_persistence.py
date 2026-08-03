@@ -189,5 +189,6 @@ def test_services_apply_custom_patterns_to_artifacts_journeys_and_insights(conta
     IntelligenceService(container).run_plugin(InsightPlugin(), project="project")
 
     assert CUSTOM_SECRET not in json.dumps(JourneyService(container).get(journey["id"]))
+    assert CUSTOM_SECRET not in json.dumps(JourneyService(container).show(journey["id"]))
     assert CUSTOM_SECRET not in json.dumps(container.artifact_repo.list_all(project="project"))
     assert CUSTOM_SECRET not in json.dumps(container.insight_repo.list_all(project="project"))

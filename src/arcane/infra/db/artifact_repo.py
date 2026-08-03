@@ -51,6 +51,40 @@ class ArtifactRepository:
     def get(self, artifact_id: str) -> dict[str, Any] | None:
         return self.db.fetchone("SELECT * FROM artifacts WHERE id LIKE ?", (artifact_id + "%",))
 
+    def fts_search(
+        self,
+        query: str,
+        project: str | None = None,
+        artifact_type: str | None = None,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Search artifact metadata and ingested raw content with FTS5."""
+        terms = query.split()
+        if not terms:
+            return []
+        fts_query = " OR ".join(f'"{term}"*' for term in terms)
+        clauses: list[str] = []
+        params: list[Any] = [fts_query]
+        if project:
+            clauses.append("a.project = ?")
+            params.append(project)
+        if artifact_type:
+            clauses.append("a.artifact_type = ?")
+            params.append(artifact_type)
+        where = " AND " + " AND ".join(clauses) if clauses else ""
+        params.append(limit)
+        return self.db.fetchall(
+            f"""
+            SELECT a.*, -fts.rank AS score
+            FROM artifacts_fts fts
+            JOIN artifacts a ON a.rowid = fts.rowid
+            WHERE fts.artifacts_fts MATCH ?{where}
+            ORDER BY fts.rank
+            LIMIT ?
+            """,
+            params,
+        )
+
     def find_by_external(self, artifact_type: str, external_id: str, project: str) -> dict[str, Any] | None:
         return self.db.fetchone(
             "SELECT * FROM artifacts WHERE artifact_type = ? AND external_id = ? AND project = ?",

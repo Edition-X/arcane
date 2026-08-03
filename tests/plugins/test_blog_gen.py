@@ -118,6 +118,12 @@ class TestBlogGenerator:
 
         assert "PR-42" in brief or "PostgreSQL migration" in brief
 
+    def test_generate_includes_journey_history(self, container, journey_with_memories):
+        from arcane.services.journey import JourneyService
+
+        journey_data = JourneyService(container).show(journey_with_memories)
+        assert "[completed]" in BlogGenerator().generate(context={"journey": journey_data})
+
     def test_generate_has_structure(self, container, journey_with_memories):
         from arcane.services.journey import JourneyService
 

@@ -6,6 +6,7 @@ import click
 
 from arcane import __version__
 from arcane.cli.analyze import analyze
+from arcane.cli.artifact import artifact
 from arcane.cli.config import config
 from arcane.cli.draft import draft
 from arcane.cli.ingest import ingest
@@ -58,6 +59,7 @@ main.add_command(migrate)
 main.add_command(config)
 main.add_command(ingest)
 main.add_command(analyze)
+main.add_command(artifact)
 main.add_command(draft)
 
 

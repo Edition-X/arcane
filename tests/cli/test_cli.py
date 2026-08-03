@@ -27,6 +27,7 @@ _CLI_MODULES_WITH_CONTAINER = [
     "arcane.cli.memory",
     "arcane.cli.journey",
     "arcane.cli.analyze",
+    "arcane.cli.artifact",
     "arcane.cli.ingest",
     "arcane.cli.relationship",
     "arcane.cli.draft",
@@ -147,6 +148,28 @@ class TestJourneyCLI:
         result = runner.invoke(main, ["journey", "start", "--title", "Test Journey"])
         assert result.exit_code == 0, result.output
         assert "Journey started" in result.output
+
+
+class TestArtifactCLI:
+    def test_search_and_show(self, runner, mock_container):
+        from arcane.domain.models import Artifact
+
+        artifact = Artifact(
+            artifact_type="commit",
+            external_id="abc123",
+            title="Fix retry behavior",
+            project="test",
+            raw_data={"body": "Use exponential backoff"},
+        )
+        mock_container.artifact_repo.insert(artifact.model_dump())
+
+        search = runner.invoke(main, ["artifact", "search", "exponential", "--project", "test"])
+        show = runner.invoke(main, ["artifact", "show", artifact.id])
+
+        assert search.exit_code == 0, search.output
+        assert "Fix retry behavior" in search.output
+        assert show.exit_code == 0, show.output
+        assert "exponential backoff" in show.output
 
     def test_journey_list_empty(self, runner, mock_container):
         result = runner.invoke(main, ["journey", "list"])

@@ -50,6 +50,24 @@ class RelationshipRepository:
         incoming = self.get_to(entity_type, entity_id)
         return outgoing + incoming
 
+    def exists(
+        self,
+        source_type: str,
+        source_id: str,
+        target_type: str,
+        target_id: str,
+        relation: str,
+    ) -> bool:
+        """Return whether an exact relationship already exists."""
+        return (
+            self.db.fetchone(
+                """SELECT 1 FROM relationships
+            WHERE source_type = ? AND source_id = ? AND target_type = ? AND target_id = ? AND relation = ?""",
+                (source_type, source_id, target_type, target_id, relation),
+            )
+            is not None
+        )
+
     def trace(self, entity_type: str, entity_id: str, max_depth: int = 5) -> list[dict[str, Any]]:
         """Walk the relationship graph from an entity, returning all connected edges.
 

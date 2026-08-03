@@ -86,7 +86,7 @@ def build_journey_prompt(args: dict[str, str]) -> dict:
                     "type": "text",
                     "text": (
                         f"Show me the full decision journey for journey ID: {journey_id}\n\n"
-                        "Retrieve the journey details and any linked memories or artifacts. "
+                        "Retrieve the journey details, append-only history, and any linked memories or artifacts. "
                         "Present it as a narrative: what was the problem, what options were explored, "
                         "what was decided, and what was the outcome."
                     ),

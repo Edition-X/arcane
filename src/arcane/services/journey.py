@@ -37,7 +37,12 @@ class JourneyService:
             fields["summary"] = summary
         fields = redact_values(fields, self.c.ignore_patterns)
         assert isinstance(fields, dict)
-        return self.c.journey_repo.update(journey_id, **fields)
+        return self.c.journey_repo.update(
+            journey_id,
+            event_type="updated",
+            event_summary=fields.get("summary"),
+            **fields,
+        )
 
     def complete(self, journey_id: str, summary: str | None = None) -> bool:
         return self.c.journey_repo.complete(
@@ -45,11 +50,11 @@ class JourneyService:
         )
 
     def abandon(self, journey_id: str, reason: str | None = None) -> bool:
-        """Mark a journey abandoned, recording the reason in its summary."""
-        fields: dict[str, Any] = {"status": "abandoned"}
-        if reason:
-            fields["summary"] = f"Abandoned: {reason}"
-        return self.c.journey_repo.update(journey_id, **fields)
+        """Mark a journey abandoned, recording the reason in its history and summary."""
+        return self.c.journey_repo.abandon(
+            journey_id,
+            reason=redact(reason, self.c.ignore_patterns) if reason else None,
+        )
 
     def delete(self, journey_id: str) -> bool:
         """Delete a journey and every relationship that references it."""
@@ -116,6 +121,7 @@ class JourneyService:
 
         journey["linked_memories"] = linked_memories
         journey["linked_artifacts"] = linked_artifacts
+        journey["events"] = self.c.journey_repo.list_events(full_id)
         journey["relationships"] = rels
         return journey
 

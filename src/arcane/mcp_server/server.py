@@ -31,6 +31,7 @@ from arcane.mcp_server.prompts import (
     build_recall_prompt,
 )
 from arcane.mcp_server.resources import RESOURCE_TEMPLATE_URI, _parse_project_from_uri
+from arcane.mcp_server.tools.artifact_tools import handle_artifact_details, handle_artifact_search
 from arcane.mcp_server.tools.content_tools import handle_draft_adr, handle_draft_blog
 from arcane.mcp_server.tools.ingestion_tools import (
     handle_analyze,
@@ -287,8 +288,8 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="journey_show",
                 description=(
-                    "Get full details for a journey — title, status, summary, and all linked memories "
-                    "and artifacts. Use instead of trace + memory_details loops."
+                    "Get full details for a journey — title, status, summary, append-only event history, and "
+                    "all linked memories and artifacts. Use instead of trace + memory_details loops."
                 ),
                 inputSchema={
                     "type": "object",
@@ -296,6 +297,30 @@ def _create_server(container: ServiceContainer) -> Server:
                         "journey_id": {"type": "string", "description": "Journey ID or prefix."},
                     },
                     "required": ["journey_id"],
+                },
+            ),
+            # ── Artifact tools ──
+            Tool(
+                name="artifact_search",
+                description="Search ingested artifact titles, external IDs, and raw content.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "project": {"type": "string"},
+                        "artifact_type": {"type": "string"},
+                        "limit": {"type": "integer", "default": 10},
+                    },
+                    "required": ["query"],
+                },
+            ),
+            Tool(
+                name="artifact_details",
+                description="Get full ingested artifact data by ID or prefix.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {"artifact_id": {"type": "string"}},
+                    "required": ["artifact_id"],
                 },
             ),
             # ── Relationship tools ──
@@ -444,6 +469,8 @@ def _create_server(container: ServiceContainer) -> Server:
             "journey_delete": lambda: handle_journey_delete(journey_svc, **args),
             "journey_list": lambda: handle_journey_list(journey_svc, **args),
             "journey_show": lambda: handle_journey_show(container, **args),
+            "artifact_search": lambda: handle_artifact_search(container, **args),
+            "artifact_details": lambda: handle_artifact_details(container, **args),
             "ingest_git": lambda: handle_ingest_git(container, **args),
             "ingest_gha": lambda: handle_ingest_gha(container, **args),
             "ingest_linear": lambda: handle_ingest_linear(container, **args),
