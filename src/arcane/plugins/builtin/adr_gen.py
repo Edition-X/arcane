@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from arcane.infra.redaction import redact
+
 
 class ADRGenerator:
     name = "adr"
@@ -85,4 +87,4 @@ class ADRGenerator:
                 ]
             )
 
-        return "\n".join(lines)
+        return redact("\n".join(lines))

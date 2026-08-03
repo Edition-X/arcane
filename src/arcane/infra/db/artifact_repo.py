@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from arcane.infra.db.connection import Database
+from arcane.infra.redaction import redact_values
 
 
 class ArtifactRepository:
@@ -15,6 +16,8 @@ class ArtifactRepository:
         self.db = db
 
     def insert(self, artifact: dict[str, Any]) -> int:
+        artifact = redact_values(artifact)
+        assert isinstance(artifact, dict)
         cursor = self.db.execute(
             """
             INSERT OR IGNORE INTO artifacts (

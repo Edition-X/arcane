@@ -7,6 +7,7 @@ from typing import Any
 
 from arcane.infra.db.connection import Database
 from arcane.infra.db.ids import resolve_unique_id
+from arcane.infra.redaction import redact_values
 
 
 class JourneyRepository:
@@ -16,6 +17,8 @@ class JourneyRepository:
         self.db = db
 
     def insert(self, journey: dict[str, Any]) -> int:
+        journey = redact_values(journey)
+        assert isinstance(journey, dict)
         cursor = self.db.execute(
             """
             INSERT INTO journeys (
@@ -49,6 +52,8 @@ class JourneyRepository:
         full_id = resolve_unique_id(self.db, "journeys", journey_id)
         if full_id is None:
             return False
+        fields = redact_values(fields)
+        assert isinstance(fields, dict)
         fields["updated_at"] = datetime.now(timezone.utc).isoformat()
 
         sets = [f"{k} = ?" for k in fields]

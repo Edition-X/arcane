@@ -7,6 +7,7 @@ from typing import Any
 
 from arcane.infra.db.connection import Database
 from arcane.infra.db.ids import resolve_unique_id
+from arcane.infra.redaction import redact_values
 
 
 class InsightRepository:
@@ -16,6 +17,8 @@ class InsightRepository:
         self.db = db
 
     def insert(self, insight: dict[str, Any]) -> None:
+        insight = redact_values(insight)
+        assert isinstance(insight, dict)
         self.db.execute(
             """
             INSERT INTO insights (

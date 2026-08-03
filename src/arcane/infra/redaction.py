@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 # Layer 2: Exact token patterns — entire match is redacted.
 # Compiled once at module level for performance.
 _EXACT_PATTERNS: list[re.Pattern] = [
     re.compile(r"sk_live_[a-zA-Z0-9]+"),
     re.compile(r"sk_test_[a-zA-Z0-9]+"),
-    re.compile(r"ghp_[a-zA-Z0-9]+"),
+    re.compile(r"(?:sk-proj-|sk-svcacct-)[a-zA-Z0-9_-]{20,}"),
+    re.compile(r"github_pat_[a-zA-Z0-9_]{20,}"),
+    re.compile(r"gh[pousr]_[a-zA-Z0-9]{16,}"),
     re.compile(r"AKIA[0-9A-Z]{16}"),
-    re.compile(r"xoxb-[a-zA-Z0-9-]+"),
-    re.compile(r"-----BEGIN (?:RSA )?PRIVATE KEY-----"),
-    re.compile(r"eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+"),
+    re.compile(r"xox(?:a|b|p|r|s)-[a-zA-Z0-9-]+"),
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.DOTALL),
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+    re.compile(r"eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)?"),
 ]
 
 # Layer 3: Key=value patterns — key name is preserved, only value is redacted.
@@ -23,6 +27,13 @@ _VALUE_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"(password\s*[:=]\s*)[\"']?[^\s\"'<>;,]+", re.IGNORECASE), r"\1[REDACTED]"),
     (re.compile(r"(secret\s*[:=]\s*)[\"']?[^\s\"'<>;,]+", re.IGNORECASE), r"\1[REDACTED]"),
     (re.compile(r"(api[_-]?key\s*[:=]\s*)[\"']?[^\s\"'<>;,]+", re.IGNORECASE), r"\1[REDACTED]"),
+    (
+        re.compile(
+            r"((?:access[_-]?token|auth[_-]?token|client[_-]?secret)\s*[:=]\s*)[\"']?[^\s\"'<>;,]+",
+            re.IGNORECASE,
+        ),
+        r"\1[REDACTED]",
+    ),
 ]
 
 _REDACTED_TAG_PATTERN: re.Pattern = re.compile(r"<redacted>.*?</redacted>", re.DOTALL)
@@ -60,6 +71,22 @@ def redact(text: str, extra_patterns: list[str] | None = None) -> str:
             pass
 
     return text
+
+
+def redact_values(value: Any, extra_patterns: list[str] | None = None) -> Any:
+    """Recursively redact strings in JSON-like values before serialisation."""
+    if isinstance(value, str):
+        return redact(value, extra_patterns)
+    if isinstance(value, list):
+        return [redact_values(item, extra_patterns) for item in value]
+    if isinstance(value, tuple):
+        return tuple(redact_values(item, extra_patterns) for item in value)
+    if isinstance(value, dict):
+        return {
+            redact(key, extra_patterns) if isinstance(key, str) else key: redact_values(item, extra_patterns)
+            for key, item in value.items()
+        }
+    return value
 
 
 def load_memoryignore(path: str) -> list[str]:

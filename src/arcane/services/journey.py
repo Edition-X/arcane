@@ -7,6 +7,7 @@ from typing import Any
 from arcane.domain.enums import RelationType
 from arcane.domain.models import Journey, Relationship
 from arcane.domain.scope import canonicalize_project, resolve_write_scope
+from arcane.infra.redaction import redact, redact_values
 from arcane.services.container import ServiceContainer
 
 
@@ -23,17 +24,25 @@ class JourneyService:
         linear_issue_id: str | None = None,
     ) -> dict[str, Any]:
         resolved = resolve_write_scope(project, self.c.config)
-        journey = Journey(title=title, project=resolved.project, linear_issue_id=linear_issue_id)
+        journey = Journey(
+            title=redact(title, self.c.ignore_patterns),
+            project=resolved.project,
+            linear_issue_id=redact(linear_issue_id, self.c.ignore_patterns) if linear_issue_id else None,
+        )
         self.c.journey_repo.insert(journey.model_dump())
         return {"id": journey.id, "title": journey.title, "project": journey.project}
 
     def update(self, journey_id: str, summary: str | None = None, **fields: Any) -> bool:
         if summary:
             fields["summary"] = summary
+        fields = redact_values(fields, self.c.ignore_patterns)
+        assert isinstance(fields, dict)
         return self.c.journey_repo.update(journey_id, **fields)
 
     def complete(self, journey_id: str, summary: str | None = None) -> bool:
-        return self.c.journey_repo.complete(journey_id, summary=summary)
+        return self.c.journey_repo.complete(
+            journey_id, summary=redact(summary, self.c.ignore_patterns) if summary else None
+        )
 
     def abandon(self, journey_id: str, reason: str | None = None) -> bool:
         """Mark a journey abandoned, recording the reason in its summary."""

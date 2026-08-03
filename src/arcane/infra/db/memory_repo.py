@@ -10,6 +10,7 @@ from typing import Any
 
 from arcane.infra.db.connection import Database
 from arcane.infra.db.ids import resolve_unique_id
+from arcane.infra.redaction import redact, redact_values
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,9 @@ class MemoryRepository:
         self._vec_table_exists: bool | None = None
 
     def insert(self, mem: dict[str, Any], details: str | None = None) -> int:
+        mem = redact_values(mem)
+        assert isinstance(mem, dict)
+        details = redact(details) if details else details
         cursor = self.db.execute(
             """
             INSERT INTO memories (
@@ -147,6 +151,11 @@ class MemoryRepository:
         details_append: str | None = None,
     ) -> bool:
         """Update an existing memory by exact ID."""
+        what = redact(what) if what is not None else None
+        why = redact(why) if why is not None else None
+        impact = redact(impact) if impact is not None else None
+        tags = redact_values(tags) if tags is not None else None
+        details_append = redact(details_append) if details_append is not None else None
         full_id = resolve_unique_id(self.db, "memories", memory_id)
         if full_id is None:
             return False

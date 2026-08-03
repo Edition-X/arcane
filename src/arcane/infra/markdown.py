@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from arcane.domain.enums import CATEGORY_HEADINGS, Category
+from arcane.infra.redaction import redact, redact_values
 
 
 def render_section(mem: dict[str, Any], details: str | None = None) -> str:
@@ -46,6 +47,9 @@ def write_session_memory(
     details: str | None = None,
 ) -> str:
     """Create or append to a session file without losing concurrent writes."""
+    mem = redact_values(mem)
+    assert isinstance(mem, dict)
+    details = redact(details) if details else details
     file_path = Path(vault_project_dir) / f"{date_str}-session.md"
     section_content = render_section(mem, details)
 
