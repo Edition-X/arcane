@@ -43,6 +43,13 @@ class BlogGenerator:
         if journey.get("summary"):
             lines.append(f"\n## Summary\n{journey['summary']}")
 
+        events = journey.get("events", [])
+        if events:
+            lines.append("\n## Journey History\n")
+            for event in events:
+                summary = f": {event['summary']}" if event.get("summary") else ""
+                lines.append(f"- {event['created_at'][:10]} [{event['event_type']}]{summary}")
+
         memories = journey.get("linked_memories", [])
         if memories:
             lines.append("\n## Decision Timeline\n")

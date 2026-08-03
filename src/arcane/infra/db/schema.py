@@ -140,6 +140,55 @@ def create_schema(db: Database) -> None:
         )
     """)
 
+    artifact_fts_exists = (
+        db.fetchone("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'artifacts_fts'") is not None
+    )
+    db.execute("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS artifacts_fts USING fts5(
+            title, artifact_type, external_id, project, raw_data,
+            content='artifacts', content_rowid='rowid',
+            tokenize='porter unicode61'
+        )
+    """)
+
+    db.execute("""
+        CREATE TRIGGER IF NOT EXISTS artifacts_ai AFTER INSERT ON artifacts BEGIN
+            INSERT INTO artifacts_fts(rowid, title, artifact_type, external_id, project, raw_data)
+            VALUES (new.rowid, new.title, new.artifact_type, new.external_id, new.project, new.raw_data);
+        END
+    """)
+
+    db.execute("""
+        CREATE TRIGGER IF NOT EXISTS artifacts_au AFTER UPDATE ON artifacts BEGIN
+            INSERT INTO artifacts_fts(artifacts_fts, rowid, title, artifact_type, external_id, project, raw_data)
+            VALUES ('delete', old.rowid, old.title, old.artifact_type, old.external_id, old.project, old.raw_data);
+            INSERT INTO artifacts_fts(rowid, title, artifact_type, external_id, project, raw_data)
+            VALUES (new.rowid, new.title, new.artifact_type, new.external_id, new.project, new.raw_data);
+        END
+    """)
+
+    db.execute("""
+        CREATE TRIGGER IF NOT EXISTS artifacts_ad AFTER DELETE ON artifacts BEGIN
+            INSERT INTO artifacts_fts(artifacts_fts, rowid, title, artifact_type, external_id, project, raw_data)
+            VALUES ('delete', old.rowid, old.title, old.artifact_type, old.external_id, old.project, old.raw_data);
+        END
+    """)
+
+    if not artifact_fts_exists:
+        # Existing databases predate artifact FTS. Rebuild keeps previously
+        # ingested raw content discoverable after an upgrade.
+        db.execute("INSERT INTO artifacts_fts(artifacts_fts) VALUES ('rebuild')")
+
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS journey_events (
+            id TEXT PRIMARY KEY,
+            journey_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            summary TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+
     # ── relationships ───────────────────────────────────────────────────
     db.execute("""
         CREATE TABLE IF NOT EXISTS relationships (
@@ -195,6 +244,8 @@ def create_schema(db: Database) -> None:
     db.execute(
         "CREATE INDEX IF NOT EXISTS idx_artifacts_type_ext_proj ON artifacts(artifact_type, external_id, project)"
     )
+
+    db.execute("CREATE INDEX IF NOT EXISTS idx_journey_events_journey ON journey_events(journey_id, created_at)")
 
     db.execute("CREATE INDEX IF NOT EXISTS idx_insights_project ON insights(project)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_insights_ack ON insights(acknowledged, project)")

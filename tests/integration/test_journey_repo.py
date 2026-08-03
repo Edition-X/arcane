@@ -79,6 +79,29 @@ class TestJourneyRepoUpdate:
         assert fetched["completed_at"] is not None
         assert fetched["summary"] == "Done!"
 
+    def test_events_preserve_updates_and_lifecycle(self, journey_repo):
+        j = make_journey()
+        journey_repo.insert(j)
+
+        journey_repo.update(j["id"], summary="Investigating")
+        journey_repo.complete(j["id"], summary="Resolved")
+
+        events = journey_repo.list_events(j["id"])
+        assert [(event["event_type"], event["summary"]) for event in events] == [
+            ("updated", "Investigating"),
+            ("completed", "Resolved"),
+        ]
+
+    def test_abandon_records_an_event(self, journey_repo):
+        j = make_journey()
+        journey_repo.insert(j)
+
+        assert journey_repo.abandon(j["id"], reason="Superseded")
+
+        assert [(event["event_type"], event["summary"]) for event in journey_repo.list_events(j["id"])] == [
+            ("abandoned", "Abandoned: Superseded"),
+        ]
+
 
 class TestJourneyRepoList:
     def test_list_all(self, journey_repo):

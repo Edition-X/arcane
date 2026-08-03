@@ -37,29 +37,33 @@ class IngestionService:
         for art in artifacts:
             art.update(redact_values(art, self.c.ignore_patterns))
             art["project"] = project
-            # Dedup: check if artifact already exists by type + external_id + project
-            existing = self.c.artifact_repo.find_by_external(
-                art["artifact_type"],
-                art["external_id"],
-                art["project"],
-            )
-            if existing:
-                skipped += 1
-                continue
-
             with self.c.db.transaction():
-                self.c.artifact_repo.insert(art)
+                # Resolve and link inside one transaction so repeated ingestion
+                # cannot create duplicate artifacts or journey relationships.
+                existing = self.c.artifact_repo.find_by_external(
+                    art["artifact_type"],
+                    art["external_id"],
+                    art["project"],
+                )
+                artifact_id = existing["id"] if existing else art["id"]
+                if existing:
+                    skipped += 1
+                else:
+                    self.c.artifact_repo.insert(art)
                 # Auto-link to journey if specified
-                if journey_id:
+                if journey_id and not self.c.relationship_repo.exists(
+                    "artifact", artifact_id, "journey", journey_id, RelationType.PART_OF.value
+                ):
                     rel = Relationship(
                         source_type="artifact",
-                        source_id=art["id"],
+                        source_id=artifact_id,
                         target_type="journey",
                         target_id=journey_id,
                         relation=RelationType.PART_OF,
                     )
                     self.c.relationship_repo.insert(rel.model_dump())
-            ingested += 1
+            if not existing:
+                ingested += 1
 
         return {
             "plugin": plugin.name,

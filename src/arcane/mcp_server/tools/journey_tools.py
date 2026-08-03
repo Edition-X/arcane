@@ -129,6 +129,7 @@ def handle_journey_show(
                 }
                 for item in journey.get("linked_artifacts", [])
             ],
+            "events": journey.get("events", []),
         }
     )
 

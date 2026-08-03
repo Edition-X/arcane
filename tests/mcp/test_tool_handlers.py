@@ -8,6 +8,7 @@ from mcp.types import CallToolRequest, CallToolRequestParams
 
 from arcane import __version__
 from arcane.mcp_server.server import _create_server
+from arcane.mcp_server.tools.artifact_tools import handle_artifact_details, handle_artifact_search
 from arcane.mcp_server.tools.content_tools import handle_draft_adr, handle_draft_blog
 from arcane.mcp_server.tools.intelligence_tools import handle_insights, handle_insights_ack
 from arcane.mcp_server.tools.journey_tools import (
@@ -147,6 +148,34 @@ class TestJourneyToolHandlers:
         j = json.loads(handle_journey_start(journey_svc, title="J", project="test"))
         result = json.loads(handle_journey_complete(journey_svc, journey_id=j["id"], summary="Done"))
         assert result["completed"] is True
+
+    def test_journey_show_includes_event_history(self, container, journey_svc):
+        journey = json.loads(handle_journey_start(journey_svc, title="J", project="test"))
+        handle_journey_update(journey_svc, journey_id=journey["id"], summary="Investigating")
+        handle_journey_complete(journey_svc, journey_id=journey["id"], summary="Resolved")
+
+        result = json.loads(handle_journey_show(container, journey_id=journey["id"]))
+        assert [event["event_type"] for event in result["events"]] == ["updated", "completed"]
+
+
+class TestArtifactToolHandlers:
+    def test_search_and_details(self, container):
+        from arcane.domain.models import Artifact
+
+        artifact = Artifact(
+            artifact_type="commit",
+            external_id="abc123",
+            title="Fix retry behavior",
+            project="test",
+            raw_data={"body": "Use exponential backoff"},
+        )
+        container.artifact_repo.insert(artifact.model_dump())
+
+        results = json.loads(handle_artifact_search(container, query="exponential", project="test"))
+        details = json.loads(handle_artifact_details(container, artifact_id=artifact.id))
+
+        assert results[0]["id"] == artifact.id
+        assert details["raw_data"] == {"body": "Use exponential backoff"}
 
     def test_handle_journey_list(self, journey_svc):
         handle_journey_start(journey_svc, title="J1", project="test")
@@ -320,6 +349,23 @@ class TestMcpServerCallTool:
         assert result.isError is False
         payload = json.loads(result.content[0].text)
         assert payload[0]["title"] == "Search via MCP"
+
+    def test_artifact_search_succeeds_via_call_tool(self, container):
+        from arcane.domain.models import Artifact
+
+        artifact = Artifact(
+            artifact_type="commit",
+            external_id="abc123",
+            title="Fix retry behavior",
+            project="test",
+            raw_data={"body": "Use exponential backoff"},
+        )
+        container.artifact_repo.insert(artifact.model_dump())
+
+        result = self._call_tool(container, "artifact_search", {"query": "exponential", "project": "test"})
+
+        assert result.isError is False
+        assert json.loads(result.content[0].text)[0]["id"] == artifact.id
 
     def test_journey_start_succeeds_via_call_tool(self, container):
         result = self._call_tool(

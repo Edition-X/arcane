@@ -95,6 +95,13 @@ def journey_show(journey_id: str) -> None:
     if journey_data.get("summary"):
         click.echo(f"  Summary: {journey_data['summary']}")
 
+    events = journey_data.get("events", [])
+    if events:
+        click.echo(f"\n  History ({len(events)}):")
+        for event in events:
+            summary = f": {event['summary']}" if event.get("summary") else ""
+            click.echo(f"    - {event['created_at'][:10]} [{event['event_type']}]{summary}")
+
     memories = journey_data.get("linked_memories", [])
     if memories:
         click.echo(f"\n  Linked memories ({len(memories)}):")
