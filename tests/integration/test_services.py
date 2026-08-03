@@ -2,6 +2,8 @@
 
 import os
 
+import pytest
+
 from arcane.domain.models import RawMemoryInput
 from arcane.services.journey import JourneyService
 from arcane.services.memory import MemoryService
@@ -404,7 +406,10 @@ class TestJourneyServiceLifecycle:
         assert "superseded" in (got.get("summary") or "")
 
     def test_abandon_missing_returns_false(self, container):
-        assert JourneyService(container).abandon("nope") is False
+        from arcane.infra.db.ids import IdentifierResolutionError
+
+        with pytest.raises(IdentifierResolutionError, match="at least"):
+            JourneyService(container).abandon("nope")
 
     def test_delete_removes_journey_and_relationships(self, container):
         js = JourneyService(container)

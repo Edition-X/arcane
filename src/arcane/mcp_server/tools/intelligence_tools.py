@@ -6,6 +6,7 @@ import json
 import os
 
 from arcane.domain.scope import canonicalize_project
+from arcane.infra.db.ids import IdentifierResolutionError
 from arcane.services.container import ServiceContainer
 
 
@@ -31,7 +32,10 @@ def handle_insights(
 
 
 def handle_insights_ack(container: ServiceContainer, insight_id: str) -> str:
-    acked = container.insight_repo.acknowledge(insight_id)
+    try:
+        acked = container.insight_repo.acknowledge(insight_id)
+    except IdentifierResolutionError as exc:
+        return json.dumps({"error": str(exc)})
     if not acked:
         return json.dumps({"error": f"Insight not found: {insight_id}"})
     return json.dumps({"acknowledged": True, "insight_id": insight_id})

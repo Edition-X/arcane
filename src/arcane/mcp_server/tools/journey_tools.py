@@ -6,6 +6,7 @@ import json
 import os
 from datetime import datetime, timezone
 
+from arcane.infra.db.ids import IdentifierResolutionError
 from arcane.services.container import ServiceContainer
 from arcane.services.journey import JourneyService
 
@@ -28,7 +29,10 @@ def handle_journey_update(
     journey_id: str,
     summary: str | None = None,
 ) -> str:
-    updated = svc.update(journey_id, summary=summary)
+    try:
+        updated = svc.update(journey_id, summary=summary)
+    except IdentifierResolutionError as exc:
+        return json.dumps({"error": str(exc)})
     if not updated:
         return json.dumps({"error": f"Journey not found: {journey_id}"})
     return json.dumps({"updated": True, "journey_id": journey_id})
@@ -39,7 +43,10 @@ def handle_journey_complete(
     journey_id: str,
     summary: str | None = None,
 ) -> str:
-    completed = svc.complete(journey_id, summary=summary)
+    try:
+        completed = svc.complete(journey_id, summary=summary)
+    except IdentifierResolutionError as exc:
+        return json.dumps({"error": str(exc)})
     if not completed:
         return json.dumps({"error": f"Journey not found: {journey_id}"})
     return json.dumps({"completed": True, "journey_id": journey_id})
@@ -50,7 +57,10 @@ def handle_journey_abandon(
     journey_id: str,
     reason: str | None = None,
 ) -> str:
-    abandoned = svc.abandon(journey_id, reason=reason)
+    try:
+        abandoned = svc.abandon(journey_id, reason=reason)
+    except IdentifierResolutionError as exc:
+        return json.dumps({"error": str(exc)})
     if not abandoned:
         return json.dumps({"error": f"Journey not found: {journey_id}"})
     return json.dumps({"abandoned": True, "journey_id": journey_id})
@@ -60,7 +70,10 @@ def handle_journey_delete(
     svc: JourneyService,
     journey_id: str,
 ) -> str:
-    deleted = svc.delete(journey_id)
+    try:
+        deleted = svc.delete(journey_id)
+    except IdentifierResolutionError as exc:
+        return json.dumps({"error": str(exc)})
     if not deleted:
         return json.dumps({"error": f"Journey not found: {journey_id}"})
     return json.dumps({"deleted": True, "journey_id": journey_id})
@@ -83,7 +96,10 @@ def handle_journey_show(
     journey_id: str,
 ) -> str:
     svc = JourneyService(container)
-    journey = svc.show(journey_id)
+    try:
+        journey = svc.show(journey_id)
+    except IdentifierResolutionError as exc:
+        return json.dumps({"error": str(exc)})
     if not journey:
         return json.dumps({"error": f"Journey not found: {journey_id}"})
     # Serialise linked entities to plain dicts (already dicts from repo)

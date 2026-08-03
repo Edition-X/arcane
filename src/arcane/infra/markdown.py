@@ -17,7 +17,10 @@ from arcane.domain.enums import CATEGORY_HEADINGS, Category
 
 def render_section(mem: dict[str, Any], details: str | None = None) -> str:
     """Render a single H3 section from a memory dict."""
-    lines = [f"### {mem['title']}"]
+    lines = []
+    if mem.get("id"):
+        lines.append(f"<!-- arcane-memory:{mem['id']} -->")
+    lines.append(f"### {mem['title']}")
     lines.append(f"**What:** {mem['what']}")
 
     if mem.get("why"):
@@ -83,6 +86,31 @@ def _atomic_write(file_path: Path, content: str) -> None:
     finally:
         if temp_path and os.path.exists(temp_path):
             os.unlink(temp_path)
+
+
+def remove_session_memory(file_path: str, memory_id: str, title: str) -> bool:
+    """Remove one persisted memory section from its Markdown mirror."""
+    path = Path(file_path)
+    if not path.exists():
+        return False
+
+    with _file_lock(path):
+        content = path.read_text()
+        marker = f"<!-- arcane-memory:{memory_id} -->"
+        start = content.find(marker)
+        if start < 0:
+            # Older session files predate stable memory markers.
+            start = content.find(f"### {title}")
+        if start < 0:
+            return False
+
+        heading = content.find(f"### {title}", start)
+        if heading < 0:
+            return False
+        next_heading = re.search(r"(?m)^(?:### |## )", content[heading + len(f"### {title}") :])
+        end = heading + len(f"### {title}") + next_heading.start() if next_heading else len(content)
+        _atomic_write(path, content[:start].rstrip() + "\n\n" + content[end:].lstrip())
+    return True
 
 
 def _create_new_session_file(mem: dict[str, Any], date_str: str, section_content: str) -> str:

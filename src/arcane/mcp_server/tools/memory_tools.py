@@ -10,6 +10,7 @@ from datetime import datetime
 from arcane.domain.enums import Category
 from arcane.domain.models import RawMemoryInput
 from arcane.domain.scope import GLOBAL_ORG, resolve_scope
+from arcane.infra.db.ids import IdentifierResolutionError
 from arcane.services.memory import MemoryService
 
 logger = logging.getLogger(__name__)
@@ -271,7 +272,10 @@ def handle_context(
 
 
 def handle_details(svc: MemoryService, memory_id: str) -> str:
-    detail = svc.get_details(memory_id)
+    try:
+        detail = svc.get_details(memory_id)
+    except IdentifierResolutionError as exc:
+        return json.dumps({"error": str(exc)})
     if not detail:
         return json.dumps({"error": f"No details found for {memory_id}"})
     return json.dumps({"memory_id": detail["memory_id"], "body": detail["body"]})
@@ -286,21 +290,27 @@ def handle_update(
     tags: list[str] | None = None,
     details_append: str | None = None,
 ) -> str:
-    updated = svc.update(
-        memory_id,
-        what=what,
-        why=why,
-        impact=impact,
-        tags=tags,
-        details_append=details_append,
-    )
+    try:
+        updated = svc.update(
+            memory_id,
+            what=what,
+            why=why,
+            impact=impact,
+            tags=tags,
+            details_append=details_append,
+        )
+    except IdentifierResolutionError as exc:
+        return json.dumps({"error": str(exc)})
     if not updated:
         return json.dumps({"error": f"Memory not found: {memory_id}"})
     return json.dumps({"updated": True, "memory_id": memory_id})
 
 
 def handle_delete(svc: MemoryService, memory_id: str) -> str:
-    deleted = svc.delete(memory_id)
+    try:
+        deleted = svc.delete(memory_id)
+    except IdentifierResolutionError as exc:
+        return json.dumps({"error": str(exc)})
     if not deleted:
         return json.dumps({"error": f"Memory not found: {memory_id}"})
     return json.dumps({"deleted": True, "memory_id": memory_id})

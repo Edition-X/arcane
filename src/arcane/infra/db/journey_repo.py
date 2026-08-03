@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from arcane.infra.db.connection import Database
+from arcane.infra.db.ids import resolve_unique_id
 
 
 class JourneyRepository:
@@ -39,14 +40,15 @@ class JourneyRepository:
         return cursor.lastrowid  # type: ignore[no-any-return]
 
     def get(self, journey_id: str) -> dict[str, Any] | None:
-        return self.db.fetchone("SELECT * FROM journeys WHERE id LIKE ?", (journey_id + "%",))
+        full_id = resolve_unique_id(self.db, "journeys", journey_id)
+        if full_id is None:
+            return None
+        return self.db.fetchone("SELECT * FROM journeys WHERE id = ?", (full_id,))
 
     def update(self, journey_id: str, **fields: Any) -> bool:
-        row = self.db.fetchone("SELECT id FROM journeys WHERE id LIKE ?", (journey_id + "%",))
-        if not row:
+        full_id = resolve_unique_id(self.db, "journeys", journey_id)
+        if full_id is None:
             return False
-
-        full_id = row["id"]
         fields["updated_at"] = datetime.now(timezone.utc).isoformat()
 
         sets = [f"{k} = ?" for k in fields]
@@ -103,12 +105,10 @@ class JourneyRepository:
 
     def delete(self, journey_id: str) -> bool:
         """Delete a journey by exact ID or prefix. Relationships are the caller's job."""
-        row = self.db.fetchone("SELECT id FROM journeys WHERE id = ?", (journey_id,))
-        if not row:
-            row = self.db.fetchone("SELECT id FROM journeys WHERE id LIKE ?", (journey_id + "%",))
-        if not row:
+        full_id = resolve_unique_id(self.db, "journeys", journey_id)
+        if full_id is None:
             return False
-        self.db.execute("DELETE FROM journeys WHERE id = ?", (row["id"],))
+        self.db.execute("DELETE FROM journeys WHERE id = ?", (full_id,))
         self.db.commit()
         return True
 

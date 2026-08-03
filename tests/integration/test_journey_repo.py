@@ -3,6 +3,10 @@
 import uuid
 from datetime import datetime, timezone
 
+import pytest
+
+from arcane.infra.db.ids import IdentifierResolutionError
+
 
 def make_journey(**overrides) -> dict:
     now = datetime.now(timezone.utc).isoformat()
@@ -155,4 +159,5 @@ class TestJourneyRepoLifecycle:
         assert journey_repo.get("j-doomed-456") is None
 
     def test_delete_missing_returns_false(self, journey_repo):
-        assert journey_repo.delete("nope") is False
+        with pytest.raises(IdentifierResolutionError, match="at least"):
+            journey_repo.delete("nope")

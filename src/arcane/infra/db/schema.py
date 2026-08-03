@@ -69,6 +69,13 @@ def create_schema(db: Database) -> None:
         END
     """)
 
+    db.execute("""
+        CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+            INSERT INTO memories_fts(memories_fts, rowid, title, what, why, impact, tags, category, project, source)
+            VALUES ('delete', old.rowid, old.title, old.what, old.why, old.impact, old.tags, old.category, old.project, old.source);
+        END
+    """)
+
     # Migration: add columns if missing
     _add_column_if_missing(db, "memories", "updated_count", "INTEGER DEFAULT 0")
     _add_column_if_missing(db, "memories", "metadata", "TEXT DEFAULT '{}'")
