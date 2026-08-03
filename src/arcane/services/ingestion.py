@@ -7,6 +7,7 @@ from typing import Any
 
 from arcane.domain.enums import RelationType
 from arcane.domain.models import Relationship
+from arcane.domain.scope import resolve_write_scope
 from arcane.plugins.protocols import IngestionPlugin
 from arcane.services.container import ServiceContainer
 
@@ -20,17 +21,20 @@ class IngestionService:
     def run_plugin(
         self,
         plugin: IngestionPlugin,
-        project: str,
+        project: str | None = None,
         since: datetime | None = None,
         journey_id: str | None = None,
+        repo_path: str | None = None,
     ) -> dict[str, Any]:
         """Run a single ingestion plugin and store results."""
+        project = resolve_write_scope(project, self.c.config, repo_path=repo_path).project
         artifacts = plugin.ingest(project=project, since=since)
 
         ingested = 0
         skipped = 0
 
         for art in artifacts:
+            art["project"] = project
             # Dedup: check if artifact already exists by type + external_id + project
             existing = self.c.artifact_repo.find_by_external(
                 art["artifact_type"],
@@ -65,9 +69,13 @@ class IngestionService:
     def run_all(
         self,
         plugins: list[IngestionPlugin],
-        project: str,
+        project: str | None = None,
         since: datetime | None = None,
         journey_id: str | None = None,
+        repo_path: str | None = None,
     ) -> list[dict[str, Any]]:
         """Run multiple ingestion plugins."""
-        return [self.run_plugin(plugin, project=project, since=since, journey_id=journey_id) for plugin in plugins]
+        return [
+            self.run_plugin(plugin, project=project, since=since, journey_id=journey_id, repo_path=repo_path)
+            for plugin in plugins
+        ]

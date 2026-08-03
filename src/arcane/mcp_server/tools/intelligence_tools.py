@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
-import os
 
-from arcane.domain.scope import canonicalize_project
+from arcane.domain.scope import resolve_write_scope
 from arcane.infra.db.ids import IdentifierResolutionError
 from arcane.services.container import ServiceContainer
 
@@ -15,7 +14,7 @@ def handle_insights(
     project: str | None = None,
     limit: int = 10,
 ) -> str:
-    project = canonicalize_project(project or os.path.basename(os.getcwd()), container.config.projects.aliases)
+    project = resolve_write_scope(project, container.config).project
     insights = container.insight_repo.list_all(project=project, unacknowledged_only=True, limit=limit)
     return json.dumps(
         [

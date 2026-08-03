@@ -271,3 +271,24 @@ class TestBackfillOrg:
         titles = {r["title"] for r in rows}
         assert {"A", "B"} <= titles  # both monitoring-config variants now under the org
         assert "C" not in titles
+
+    def test_apply_rolls_back_on_failure(self, db, memory_repo, monkeypatch):
+        self._seed(memory_repo)
+        svc = MigrationService()
+        original_execute = db.execute
+        updates = 0
+
+        def fail_second_update(sql, params=()):
+            nonlocal updates
+            if sql.startswith("UPDATE memories"):
+                updates += 1
+                if updates == 2:
+                    raise RuntimeError("disk full")
+            return original_execute(sql, params)
+
+        monkeypatch.setattr(db, "execute", fail_second_update)
+
+        with pytest.raises(RuntimeError, match="disk full"):
+            svc.backfill_org(db, dry_run=False)
+
+        assert all((row["org"] or "") == "" for row in memory_repo.list_recent(limit=100))

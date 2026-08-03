@@ -24,11 +24,12 @@ def ingest_git(project: str | None, repo_path: str | None, max_count: int, journ
     from arcane.plugins.builtin.git_ingest import GitIngestionPlugin
     from arcane.services.ingestion import IngestionService
 
-    project = project or os.path.basename(os.getcwd())
     plugin = GitIngestionPlugin(repo_path=repo_path or os.getcwd(), max_count=max_count)
 
     with create_container() as container:
-        result = IngestionService(container).run_plugin(plugin, project=project, journey_id=journey_id)
+        result = IngestionService(container).run_plugin(
+            plugin, project=project, journey_id=journey_id, repo_path=repo_path
+        )
 
     click.echo(f"Git ingestion: {result['ingested']} ingested, {result['skipped']} skipped")
 
@@ -43,7 +44,6 @@ def ingest_gha(owner: str, repo: str, project: str | None, journey_id: str | Non
     from arcane.plugins.builtin.gha_ingest import GHAIngestionPlugin
     from arcane.services.ingestion import IngestionService
 
-    project = project or os.path.basename(os.getcwd())
     plugin = GHAIngestionPlugin(owner=owner, repo=repo)
 
     with create_container() as container:
@@ -61,7 +61,6 @@ def ingest_linear(team: str, project: str | None, journey_id: str | None) -> Non
     from arcane.plugins.builtin.linear_ingest import LinearIngestionPlugin
     from arcane.services.ingestion import IngestionService
 
-    project = project or os.path.basename(os.getcwd())
     plugin = LinearIngestionPlugin(team_id=team)
 
     with create_container() as container:

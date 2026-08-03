@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -11,6 +13,13 @@ from click.testing import CliRunner
 
 from arcane import __version__
 from arcane.cli import main
+from arcane.infra.config import ArcaneConfig
+from arcane.infra.db.connection import Database
+from arcane.infra.db.memory_repo import MemoryRepository
+from arcane.infra.db.schema import create_schema
+from arcane.mcp_server.tools.memory_tools import handle_context, handle_search
+from arcane.services.memory import MemoryService
+from tests.conftest import make_memory_dict
 
 # All modules that import create_container from arcane.cli._utils.
 # patch() must target where the name is *used*, not where it is defined.
@@ -96,6 +105,41 @@ class TestSearchCLI:
         result = runner.invoke(main, ["search", "useful"])
         assert result.exit_code == 0, result.output
         assert "Test memory" in result.output
+
+
+class TestCliMcpScope:
+    def test_cli_save_is_recalled_by_scoped_mcp(self, runner, mock_container, monkeypatch):
+        mock_container.config.orgs.remotes["Acme"] = "acme"
+        monkeypatch.setattr("arcane.domain.scope.git_remote_info", lambda _cwd: ("Acme", "widget"))
+
+        result = runner.invoke(main, ["save", "--title", "CLI scoped", "--what", "shared recall"])
+
+        assert result.exit_code == 0, result.output
+        context = json.loads(handle_context(MemoryService(mock_container)))
+        search = json.loads(handle_search(MemoryService(mock_container), query="shared recall"))
+        assert any(memory["title"] == "CLI scoped" for memory in context["memories"])
+        assert search[0]["title"] == "CLI scoped"
+
+
+class TestOrgBackfillCLI:
+    def test_dry_run_and_apply_create_sqlite_backup(self, runner, tmp_path):
+        db_path = tmp_path / "index.db"
+        db = Database(str(db_path))
+        create_schema(db)
+        MemoryRepository(db).insert(make_memory_dict(project="Acme/widget"))
+        container = SimpleNamespace(db=db, config=ArcaneConfig())
+
+        with patch("arcane.cli.migrate.create_container", return_value=nullcontext(container)):
+            dry_run = runner.invoke(main, ["migrate", "org-scope"])
+            applied = runner.invoke(main, ["migrate", "org-scope", "--apply"])
+
+        assert dry_run.exit_code == 0, dry_run.output
+        assert "Dry run" in dry_run.output
+        assert applied.exit_code == 0, applied.output
+        assert "Backup:" in applied.output
+        assert list(tmp_path.glob("index.db.bak-orgscope-*"))
+        assert MemoryRepository(db).list_recent(project="widget", org="acme")
+        db.close()
 
 
 class TestJourneyCLI:

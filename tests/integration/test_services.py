@@ -5,6 +5,7 @@ import os
 import pytest
 
 from arcane.domain.models import RawMemoryInput
+from arcane.domain.scope import Scope
 from arcane.services.journey import JourneyService
 from arcane.services.memory import MemoryService
 
@@ -173,6 +174,17 @@ class TestJourneyServiceIntegration:
 
 
 class TestServiceProjectCanonicalization:
+    def test_default_save_resolves_project_and_org(self, container, monkeypatch):
+        monkeypatch.setattr(
+            "arcane.services.memory.resolve_write_scope", lambda *_args: Scope(org="acme", project="widget")
+        )
+
+        result = MemoryService(container).save(RawMemoryInput(title="Scoped", what="Body"))
+
+        memory = container.memory_repo.get(result["id"])
+        assert memory["project"] == "widget"
+        assert memory["org"] == "acme"
+
     def test_save_canonicalizes_explicit_project(self, container):
         svc = MemoryService(container)
         raw = RawMemoryInput(title="Canon Save", what="Body text")
@@ -220,6 +232,15 @@ class TestServiceProjectCanonicalization:
         js = JourneyService(container)
         j = js.start("Alias Journey", project="grafana-usage-report")
         assert j["project"] == "grafana-usage-automation"
+
+    def test_default_journey_resolves_project(self, container, monkeypatch):
+        monkeypatch.setattr(
+            "arcane.services.journey.resolve_write_scope", lambda *_args: Scope(org="acme", project="widget")
+        )
+
+        journey = JourneyService(container).start("Scoped journey")
+
+        assert journey["project"] == "widget"
 
 
 class _ConstantEmbedder:

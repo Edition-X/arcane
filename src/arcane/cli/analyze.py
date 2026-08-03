@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 import click
 
 from arcane.cli._utils import create_container
@@ -20,16 +18,16 @@ def analyze_health(project: str | None) -> None:
     """Audit store health — fragmentation, orphans, duplicates, journey hygiene."""
     from arcane.plugins.builtin.health_audit import HealthAuditor
 
-    project = project or os.path.basename(os.getcwd())
     with create_container() as container:
         plugin = HealthAuditor(
             memory_repo=container.memory_repo,
             journey_repo=container.journey_repo,
             aliases=container.config.projects.aliases,
         )
-        insights = plugin.analyze(project=project)
-        for insight in insights:
-            container.insight_repo.insert(insight)
+        from arcane.services.intelligence import IntelligenceService
+
+        result = IntelligenceService(container).run_plugin(plugin, project=project)
+        insights = container.insight_repo.list_all(project=result["project"], limit=result["insights_created"])
 
     for insight in insights:
         marker = "!" if insight["severity"] != "info" else "-"
@@ -44,7 +42,6 @@ def analyze_velocity(project: str | None) -> None:
     from arcane.plugins.builtin.velocity import VelocityTracker
     from arcane.services.intelligence import IntelligenceService
 
-    project = project or os.path.basename(os.getcwd())
     with create_container() as container:
         plugin = VelocityTracker(
             artifact_repo=container.artifact_repo,

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 import click
 
 from arcane.cli._utils import create_container
@@ -59,8 +57,13 @@ def journey_list(project: bool, status: str | None, limit: int) -> None:
     """List journeys."""
     from arcane.services.journey import JourneyService
 
-    project_name = os.path.basename(os.getcwd()) if project else None
     with create_container() as container:
+        if project:
+            from arcane.domain.scope import resolve_write_scope
+
+            project_name = resolve_write_scope(None, container.config).project
+        else:
+            project_name = None
         journeys = JourneyService(container).list(project=project_name, status=status, limit=limit)
 
     if not journeys:

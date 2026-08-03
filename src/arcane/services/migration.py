@@ -96,6 +96,7 @@ class MigrationService:
         remotes: dict[str, str] | None = None,
         overrides: dict[str, str] | None = None,
         project_org: dict[str, str] | None = None,
+        aliases: dict[str, str] | None = None,
         default: str = "personal",
         dry_run: bool = True,
     ) -> dict[str, Any]:
@@ -119,13 +120,13 @@ class MigrationService:
             if "/" in old:
                 owner, repo = old.split("/", 1)
                 new_org = remotes.get(owner) or remotes.get(owner.lower()) or slugify(owner)
-                new_project = canonicalize_project(repo)
-            elif old in project_org:
-                new_org = project_org[old]
-                new_project = canonicalize_project(old)
+                new_project = canonicalize_project(repo, aliases)
+            elif old in project_org or canonicalize_project(old, aliases) in project_org:
+                new_project = canonicalize_project(old, aliases)
+                new_org = project_org.get(old) or project_org[new_project]
             else:
                 new_org = default
-                new_project = canonicalize_project(old)
+                new_project = canonicalize_project(old, aliases)
             if new_project in overrides:
                 new_org = overrides[new_project]
 
@@ -144,13 +145,13 @@ class MigrationService:
 
         updated = 0
         if not dry_run:
-            for p in planned:
-                cursor = db.execute(
-                    "UPDATE memories SET org = ?, project = ? WHERE project = ? AND (org IS NULL OR org = '')",
-                    (p["new_org"], p["new_project"], p["old_project"]),
-                )
-                updated += cursor.rowcount
-            db.commit()
+            with db.transaction():
+                for p in planned:
+                    cursor = db.execute(
+                        "UPDATE memories SET org = ?, project = ? WHERE project = ? AND (org IS NULL OR org = '')",
+                        (p["new_org"], p["new_project"], p["old_project"]),
+                    )
+                    updated += cursor.rowcount
 
         return {"applied": not dry_run, "planned": planned, "updated": updated}
 

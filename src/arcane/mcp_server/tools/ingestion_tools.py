@@ -20,10 +20,9 @@ def handle_ingest_git(
     """Ingest commits from a git repository."""
     from arcane.plugins.builtin.git_ingest import GitIngestionPlugin
 
-    project = project or os.path.basename(os.getcwd())
     plugin = GitIngestionPlugin(repo_path=repo_path or os.getcwd(), max_count=max_count)
     svc = IngestionService(container)
-    result = svc.run_plugin(plugin, project=project, journey_id=journey_id)
+    result = svc.run_plugin(plugin, project=project, journey_id=journey_id, repo_path=repo_path)
     return json.dumps(result)
 
 
@@ -37,7 +36,6 @@ def handle_ingest_gha(
     """Ingest CI runs from GitHub Actions."""
     from arcane.plugins.builtin.gha_ingest import GHAIngestionPlugin
 
-    project = project or os.path.basename(os.getcwd())
     plugin = GHAIngestionPlugin(owner=owner, repo=repo)
     svc = IngestionService(container)
     result = svc.run_plugin(plugin, project=project, journey_id=journey_id)
@@ -53,7 +51,6 @@ def handle_ingest_linear(
     """Ingest tickets from Linear."""
     from arcane.plugins.builtin.linear_ingest import LinearIngestionPlugin
 
-    project = project or os.path.basename(os.getcwd())
     plugin = LinearIngestionPlugin(team_id=team_id)
     svc = IngestionService(container)
     result = svc.run_plugin(plugin, project=project, journey_id=journey_id)
@@ -68,7 +65,6 @@ def handle_analyze(
     """Run an intelligence analysis plugin."""
     from arcane.services.intelligence import IntelligenceService
 
-    project = project or os.path.basename(os.getcwd())
     svc = IntelligenceService(container)
 
     plugin: IntelligencePlugin

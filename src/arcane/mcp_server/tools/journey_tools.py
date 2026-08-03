@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime, timezone
 
+from arcane.domain.scope import resolve_write_scope
 from arcane.infra.db.ids import IdentifierResolutionError
 from arcane.services.container import ServiceContainer
 from arcane.services.journey import JourneyService
@@ -19,7 +19,6 @@ def handle_journey_start(
     project: str | None = None,
     linear_issue_id: str | None = None,
 ) -> str:
-    project = project or os.path.basename(os.getcwd())
     result = svc.start(title=title, project=project, linear_issue_id=linear_issue_id)
     return json.dumps(result)
 
@@ -140,7 +139,7 @@ def handle_journey_list(
     status: str | None = None,
     limit: int = 10,
 ) -> str:
-    project = project or os.path.basename(os.getcwd())
+    project = resolve_write_scope(project, svc.c.config).project
     journeys = svc.list(project=project, status=status, limit=limit)
     return json.dumps(
         [

@@ -51,7 +51,6 @@ def save(
     """Save a memory to the current session."""
     from arcane.services.memory import MemoryService
 
-    project = project or os.path.basename(os.getcwd())
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
     file_list = [f.strip() for f in related_files.split(",") if f.strip()] if related_files else []
 
@@ -97,10 +96,16 @@ def search(query: str, limit: int, project: bool, source: str | None) -> None:
     """Search memories."""
     from arcane.services.memory import MemoryService
 
-    project_name = os.path.basename(os.getcwd()) if project else None
-
     with create_container() as container:
-        results = MemoryService(container).search(query, limit=limit, project=project_name, source=source)
+        if project:
+            from arcane.domain.scope import resolve_write_scope
+
+            resolved = resolve_write_scope(None, container.config)
+            results = MemoryService(container).search(
+                query, limit=limit, project=resolved.project, source=source, org=resolved.org
+            )
+        else:
+            results = MemoryService(container).search(query, limit=limit, source=source)
 
     if not results:
         click.echo("No results found.")
@@ -156,11 +161,16 @@ def context(project: bool, source: str | None, limit: int, query: str | None) ->
     """Output memory context for agent injection."""
     from arcane.services.memory import MemoryService
 
-    project_name = os.path.basename(os.getcwd()) if project else None
-
     with create_container() as container:
+        if project:
+            from arcane.domain.scope import resolve_write_scope
+
+            resolved = resolve_write_scope(None, container.config)
+            project_name, org = resolved.project, resolved.org
+        else:
+            project_name, org = None, None
         results, total = MemoryService(container).get_context(
-            limit=limit, project=project_name, source=source, query=query
+            limit=limit, project=project_name, source=source, query=query, org=org
         )
 
     if not results:
