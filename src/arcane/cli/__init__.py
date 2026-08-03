@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import click
 
+from arcane import __version__
 from arcane.cli.analyze import analyze
 from arcane.cli.config import config
 from arcane.cli.draft import draft
@@ -27,6 +28,7 @@ from arcane.cli.relationship import link, trace
 
 
 @click.group()
+@click.version_option(__version__, prog_name="arcane")
 @click.option("--verbose", "-v", is_flag=True, default=False, help="Enable debug logging.")
 @click.pass_context
 def main(ctx: click.Context, verbose: bool) -> None:

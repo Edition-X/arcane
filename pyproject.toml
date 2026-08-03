@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
-name = "arcane"
-version = "0.1.0-beta.1"
+name = "arcane-mcp"
+dynamic = ["version"]
 description = "Unified engineering intelligence platform — agent memory, decision journeys, and knowledge capture"
 readme = "README.md"
 license = "MIT"
@@ -42,6 +42,9 @@ dev = [
 [project.scripts]
 arcane = "arcane.cli:main"
 memory = "arcane.cli:main"
+
+[tool.hatch.version]
+source = "vcs"
 
 [project.entry-points."arcane.plugins.ingestion"]
 git = "arcane.plugins.builtin.git_ingest:GitIngestionPlugin"

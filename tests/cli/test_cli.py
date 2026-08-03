@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 from click.testing import CliRunner
 
+from arcane import __version__
 from arcane.cli import main
 
 # All modules that import create_container from arcane.cli._utils.
@@ -57,6 +58,14 @@ class TestStatsCLI:
     def test_stats_shows_zero_counts(self, runner, mock_container):
         result = runner.invoke(main, ["stats"])
         assert "0" in result.output
+
+
+class TestVersionCLI:
+    def test_version_command_reports_runtime_version(self, runner):
+        result = runner.invoke(main, ["--version"])
+
+        assert result.exit_code == 0, result.output
+        assert __version__ in result.output
 
 
 class TestInitCLI:

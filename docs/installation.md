@@ -13,14 +13,17 @@
 ### With uv (recommended)
 
 ```bash
-uv tool install arcane
+uv tool install --from "git+https://github.com/Edition-X/arcane.git@v0.2.0-beta.10" arcane-mcp
 ```
 
 ### With pip
 
 ```bash
-pip install arcane
+pip install "git+https://github.com/Edition-X/arcane.git@v0.2.0-beta.10"
 ```
+
+Replace `v0.2.0-beta.10` with the release tag you want. Each GitHub release
+also contains wheel and source-distribution assets for controlled installs.
 
 ---
 
