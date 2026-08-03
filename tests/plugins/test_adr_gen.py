@@ -43,6 +43,13 @@ def decision_memory(container):
 
 
 class TestADRGenerator:
+    def test_redacts_secrets_in_generated_output(self):
+        result = ADRGenerator().generate(
+            {"memory": {"title": "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789", "what": "body"}}
+        )
+
+        assert "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789" not in result
+
     def test_implements_protocol(self):
         from arcane.plugins.protocols import ContentPlugin
 

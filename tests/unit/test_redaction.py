@@ -19,6 +19,14 @@ class TestRedact:
         result = redact("Token: ghp_abcdef1234567890")
         assert "ghp_abcdef1234567890" not in result
 
+    def test_auto_pattern_openai_project_key(self):
+        token = "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789"
+        assert token not in redact(f"Token: {token}")
+
+    def test_auto_pattern_github_fine_grained_token(self):
+        token = "github_pat_abcdefghijklmnopqrstuvwxyz0123456789"
+        assert token not in redact(f"Token: {token}")
+
     def test_auto_pattern_aws_key(self):
         result = redact("Key: AKIAIOSFODNN7EXAMPLE")
         assert "AKIAIOSFODNN7EXAMPLE" not in result

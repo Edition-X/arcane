@@ -12,7 +12,7 @@ from arcane.domain.models import Memory, RawMemoryInput
 from arcane.domain.scope import GLOBAL_ORG, canonicalize_project, resolve_write_scope, slugify
 from arcane.infra.db.schema import create_vec_table
 from arcane.infra.markdown import remove_session_memory, write_session_memory
-from arcane.infra.redaction import redact
+from arcane.infra.redaction import redact, redact_values
 from arcane.infra.search import hybrid_search, tiered_search
 from arcane.services.container import ServiceContainer
 
@@ -29,9 +29,16 @@ class DimensionMismatchError(Exception):
         )
 
 
-def _embedding_text(title: str, what: str, why: str | None, impact: str | None, tags: list[str]) -> str:
+def _embedding_text(
+    title: str,
+    what: str,
+    why: str | None,
+    impact: str | None,
+    tags: list[str],
+    extra_patterns: list[str] | None = None,
+) -> str:
     """Build the text string that is fed to the embedding model."""
-    return f"{title} {what} {why or ''} {impact or ''} {' '.join(tags)}"
+    return redact(f"{title} {what} {why or ''} {impact or ''} {' '.join(tags)}", extra_patterns)
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -122,7 +129,7 @@ class MemoryService:
         being written, mirroring the exact-title dedup above.
         """
         try:
-            embedding = self.c.embedding_provider.embed(f"{raw.title}\n{raw.what}")
+            embedding = self.c.embedding_provider.embed(redact(f"{raw.title}\n{raw.what}", self.c.ignore_patterns))
         except Exception:
             # Embeddings unavailable — fall back to a normalised-title match
             # over the FTS candidates so the check still does something.
@@ -177,7 +184,7 @@ class MemoryService:
         self, title: str, what: str, why: str | None, impact: str | None, tags: list[str]
     ) -> list[float] | None:
         """Compute an embedding before entering a database write transaction."""
-        text = _embedding_text(title, what, why, impact, tags)
+        text = _embedding_text(title, what, why, impact, tags, self.c.ignore_patterns)
         try:
             return self.c.embedding_provider.embed(text)
         except Exception:
@@ -211,16 +218,10 @@ class MemoryService:
         vault_project_dir = os.path.join(self.c.vault_dir, self._scope_dir(org, project))
         os.makedirs(vault_project_dir, exist_ok=True)
 
+        raw_data = redact_values(raw.model_dump(), self.c.ignore_patterns)
+        assert isinstance(raw_data, dict)
+        raw = RawMemoryInput.model_validate(raw_data)
         warnings = self._details_warnings(raw)
-
-        # Redact before any persistence
-        raw.what = redact(raw.what, self.c.ignore_patterns)
-        if raw.why:
-            raw.why = redact(raw.why, self.c.ignore_patterns)
-        if raw.impact:
-            raw.impact = redact(raw.impact, self.c.ignore_patterns)
-        if raw.details:
-            raw.details = redact(raw.details, self.c.ignore_patterns)
 
         # Dedup check — FTS search by title + what, confined to the exact scope
         # layer being written so an org/global write can't merge into a project.
@@ -471,6 +472,13 @@ class MemoryService:
         existing = self.c.memory_repo.get(full_id)
         if not existing:
             return False
+        what = redact(what, self.c.ignore_patterns) if what is not None else None
+        why = redact(why, self.c.ignore_patterns) if why is not None else None
+        impact = redact(impact, self.c.ignore_patterns) if impact is not None else None
+        sanitized_tags = redact_values(tags, self.c.ignore_patterns) if tags is not None else None
+        assert sanitized_tags is None or isinstance(sanitized_tags, list)
+        tags = sanitized_tags
+        details_append = redact(details_append, self.c.ignore_patterns) if details_append is not None else None
         embedding = self._prepare_embedding(
             existing["title"],
             what if what is not None else existing["what"],
@@ -540,7 +548,9 @@ class MemoryService:
 
         for i, mem in enumerate(memories):
             tags = mem.get("tags") or []  # already deserialized by _process_row
-            text = _embedding_text(mem["title"], mem["what"], mem.get("why"), mem.get("impact"), tags)
+            text = _embedding_text(
+                mem["title"], mem["what"], mem.get("why"), mem.get("impact"), tags, self.c.ignore_patterns
+            )
             embedding = self.c.embedding_provider.embed(text)
             vec_bytes = struct.pack(f"{dim}f", *embedding)
             self.c.db.execute(

@@ -8,6 +8,7 @@ from typing import Any
 from arcane.domain.enums import RelationType
 from arcane.domain.models import Relationship
 from arcane.domain.scope import resolve_write_scope
+from arcane.infra.redaction import redact_values
 from arcane.plugins.protocols import IngestionPlugin
 from arcane.services.container import ServiceContainer
 
@@ -34,6 +35,7 @@ class IngestionService:
         skipped = 0
 
         for art in artifacts:
+            art.update(redact_values(art, self.c.ignore_patterns))
             art["project"] = project
             # Dedup: check if artifact already exists by type + external_id + project
             existing = self.c.artifact_repo.find_by_external(

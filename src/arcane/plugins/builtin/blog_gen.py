@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from arcane.infra.redaction import redact
+
 
 class BlogGenerator:
     name = "blog"
@@ -17,12 +19,12 @@ class BlogGenerator:
     def generate(self, context: dict[str, Any]) -> str:
         journey = context.get("journey")
         if journey:
-            return self._from_journey(journey)
+            return redact(self._from_journey(journey))
 
         memories = context.get("memories")
         if memories:
             project = context.get("project", "unknown")
-            return self._from_memories(memories, project)
+            return redact(self._from_memories(memories, project))
 
         return ""
 

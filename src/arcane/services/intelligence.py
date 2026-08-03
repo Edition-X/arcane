@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from arcane.domain.scope import resolve_write_scope
+from arcane.infra.redaction import redact_values
 from arcane.plugins.protocols import IntelligencePlugin
 from arcane.services.container import ServiceContainer
 
@@ -25,6 +26,7 @@ class IntelligenceService:
         insights = plugin.analyze(project=project)
 
         for insight in insights:
+            insight.update(redact_values(insight, self.c.ignore_patterns))
             insight["project"] = project
             self.c.insight_repo.insert(insight)
 

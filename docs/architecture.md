@@ -96,6 +96,6 @@ Install any package that declares the right entry point and Arcane will discover
 
 ---
 
-## PII and secret redaction
+## Secret redaction
 
-Before any content is persisted, it passes through `src/arcane/infra/redaction.py`, which scrubs common secret patterns (API keys, tokens, connection strings) and PII (email addresses, phone numbers). Redacted spans are replaced with placeholder tokens so the structure of the text is preserved without leaking sensitive data.
+Before content is persisted or embedded, `src/arcane/infra/redaction.py` removes known secret formats (API keys, tokens, private keys, JWTs, and credential assignments). User-defined regexes in `.memoryignore` are also applied by Arcane services. This is not generic PII redaction: email addresses, phone numbers, and other personal data are retained unless a user-defined pattern matches them. Redacted spans are replaced with `[REDACTED]`.

@@ -72,6 +72,16 @@ def journey_with_memories(container):
 
 
 class TestBlogGenerator:
+    def test_redacts_secrets_in_generated_output(self):
+        result = BlogGenerator().generate(
+            {
+                "memories": [{"title": "github_pat_abcdefghijklmnopqrstuvwxyz0123456789", "what": "body"}],
+                "project": "project",
+            }
+        )
+
+        assert "github_pat_abcdefghijklmnopqrstuvwxyz0123456789" not in result
+
     def test_implements_protocol(self):
         from arcane.plugins.protocols import ContentPlugin
 

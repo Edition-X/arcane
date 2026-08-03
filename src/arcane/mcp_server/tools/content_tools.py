@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from arcane.infra.redaction import redact
 from arcane.services.container import ServiceContainer
 from arcane.services.journey import JourneyService
 from arcane.services.memory import MemoryService
@@ -22,11 +23,11 @@ def handle_draft_blog(
             return json.dumps({"error": f"Journey {journey_id} not found"})
 
         brief = _build_journey_brief(journey)
-        return json.dumps({"brief": brief, "journey_id": journey["id"]})
+        return json.dumps({"brief": redact(brief, container.ignore_patterns), "journey_id": journey["id"]})
 
     if project:
         brief = _build_project_brief(container, project)
-        return json.dumps({"brief": brief, "project": project})
+        return json.dumps({"brief": redact(brief, container.ignore_patterns), "project": project})
 
     return json.dumps({"error": "Provide journey_id or project to generate brief"})
 
@@ -60,7 +61,7 @@ Accepted
 ## Details
 {detail_body}
 """
-    return json.dumps({"brief": brief, "memory_id": mem["id"]})
+    return json.dumps({"brief": redact(brief, container.ignore_patterns), "memory_id": mem["id"]})
 
 
 def _build_project_brief(container: ServiceContainer, project: str) -> str:
