@@ -96,3 +96,12 @@ class Database:
     def close(self) -> None:
         with self._lock:
             self.conn.close()
+
+    def backup(self, destination: str) -> None:
+        """Write a consistent SQLite backup, including pending WAL changes."""
+        with self._lock:
+            target = sqlite3.connect(destination)
+            try:
+                self.conn.backup(target)
+            finally:
+                target.close()

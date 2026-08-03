@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from arcane.domain.enums import RelationType
 from arcane.domain.models import Journey, Relationship
-from arcane.domain.scope import canonicalize_project
+from arcane.domain.scope import canonicalize_project, resolve_write_scope
 from arcane.services.container import ServiceContainer
 
 
@@ -23,8 +22,8 @@ class JourneyService:
         project: str | None = None,
         linear_issue_id: str | None = None,
     ) -> dict[str, Any]:
-        project = canonicalize_project(project or os.path.basename(os.getcwd()), self.c.config.projects.aliases)
-        journey = Journey(title=title, project=project, linear_issue_id=linear_issue_id)
+        resolved = resolve_write_scope(project, self.c.config)
+        journey = Journey(title=title, project=resolved.project, linear_issue_id=linear_issue_id)
         self.c.journey_repo.insert(journey.model_dump())
         return {"id": journey.id, "title": journey.title, "project": journey.project}
 
@@ -63,6 +62,8 @@ class JourneyService:
         status: str | None = None,
         limit: int = 20,
     ) -> list[dict[str, Any]]:
+        if project:
+            project = canonicalize_project(project, self.c.config.projects.aliases)
         return self.c.journey_repo.list_all(project=project, status=status, limit=limit)
 
     def show(self, journey_id: str) -> dict[str, Any] | None:

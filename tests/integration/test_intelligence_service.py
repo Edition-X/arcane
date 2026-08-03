@@ -46,6 +46,15 @@ class TestIntelligenceService:
         stored = container.insight_repo.list_all(project="test-project")
         assert len(stored) == 2
 
+    def test_run_plugin_canonicalizes_insight_project(self, container):
+        container.config.projects.aliases["legacy-project"] = "canonical-project"
+        insights = [_make_insight("Finding")]
+
+        IntelligenceService(container).run_plugin(FakeAnalyzer(insights=insights), project="legacy-project")
+
+        assert insights[0]["project"] == "canonical-project"
+        assert container.insight_repo.list_all(project="canonical-project")
+
     def test_run_all_plugins(self, container):
         p1 = FakeAnalyzer(insights=[_make_insight("A")])
         p2 = FakeAnalyzer(insights=[_make_insight("B")])

@@ -8,6 +8,7 @@ from arcane.domain.scope import (
     Scope,
     canonicalize_project,
     resolve_scope,
+    resolve_write_scope,
     slugify,
 )
 from arcane.infra.config import ArcaneConfig, OrgsConfig, ProjectsConfig
@@ -122,6 +123,20 @@ class TestResolveScope:
         sc = resolve_scope("/x", cfg, _remote=("Sunrise-Robotics", "grafana-usage-report"))
         assert sc.org == "personal"
         assert sc.project == "grafana-usage-automation"
+
+
+class TestResolveWriteScope:
+    def test_explicit_project_keeps_repo_org_and_canonicalizes(self):
+        cfg = ArcaneConfig(projects=ProjectsConfig(aliases={"legacy-widget": "widget"}))
+
+        scope = resolve_write_scope("legacy-widget", cfg, repo_path="/repos/widget", _remote=("Acme", "widget"))
+
+        assert scope == Scope(org="acme", project="widget")
+
+    def test_repo_path_supplies_default_project_and_org(self):
+        scope = resolve_write_scope(None, _config(), repo_path="/repos/widget", _remote=("Acme", "widget"))
+
+        assert scope == Scope(org="acme", project="widget")
 
 
 class TestOrgsConfig:

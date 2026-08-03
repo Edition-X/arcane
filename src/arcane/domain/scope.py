@@ -114,3 +114,17 @@ def resolve_scope(
         org = config.orgs.overrides[project]
 
     return Scope(org=org or DEFAULT_ORG, project=project)
+
+
+def resolve_write_scope(
+    project: str | None,
+    config: ArcaneConfig,
+    *,
+    repo_path: str | None = None,
+    _remote: tuple[str | None, str | None] | None = None,
+) -> Scope:
+    """Resolve write scope, preserving explicit project names over repo defaults."""
+    resolved = resolve_scope(repo_path or os.getcwd(), config, _remote=_remote)
+    if project is None:
+        return resolved
+    return Scope(org=resolved.org, project=canonicalize_project(project, config.projects.aliases))

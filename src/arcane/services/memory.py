@@ -9,7 +9,7 @@ from datetime import date
 from typing import Any
 
 from arcane.domain.models import Memory, RawMemoryInput
-from arcane.domain.scope import GLOBAL_ORG, canonicalize_project, slugify
+from arcane.domain.scope import GLOBAL_ORG, canonicalize_project, resolve_write_scope, slugify
 from arcane.infra.db.schema import create_vec_table
 from arcane.infra.markdown import remove_session_memory, write_session_memory
 from arcane.infra.redaction import redact
@@ -204,10 +204,9 @@ class MemoryService:
         ``project``/``org`` together set the scope. An empty ``project`` with an
         ``org`` is an org-level (company-wide) memory; ``org="global"`` is global.
         """
-        if project is None:
-            project = os.path.basename(os.getcwd())
-        project = canonicalize_project(project, self.c.config.projects.aliases)
-        org = org or ""
+        resolved = resolve_write_scope(project, self.c.config)
+        project = resolved.project
+        org = org if org is not None else resolved.org
         today = date.today().isoformat()
         vault_project_dir = os.path.join(self.c.vault_dir, self._scope_dir(org, project))
         os.makedirs(vault_project_dir, exist_ok=True)

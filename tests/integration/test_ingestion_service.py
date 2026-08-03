@@ -14,8 +14,10 @@ class FakeIngestionPlugin:
 
     def __init__(self, results: list[dict[str, Any]] | None = None):
         self._results = results or []
+        self.project: str | None = None
 
     def ingest(self, project: str, since: datetime | None = None) -> list[dict[str, Any]]:
+        self.project = project
         return self._results
 
     def supports_incremental(self) -> bool:
@@ -50,6 +52,24 @@ class TestIngestionService:
         # Verify stored in DB
         stored = container.artifact_repo.list_all(project="test-project")
         assert len(stored) == 2
+
+    def test_run_plugin_canonicalizes_artifact_project(self, container):
+        container.config.projects.aliases["legacy-project"] = "canonical-project"
+        artifacts = [_make_artifact("Commit")]
+
+        IngestionService(container).run_plugin(FakeIngestionPlugin(results=artifacts), project="legacy-project")
+
+        assert artifacts[0]["project"] == "canonical-project"
+        assert container.artifact_repo.list_all(project="canonical-project")
+
+    def test_run_plugin_uses_explicit_repo_path_for_default_scope(self, container, monkeypatch, tmp_path):
+        monkeypatch.setattr("arcane.domain.scope.git_remote_info", lambda _path: ("Acme", "widget"))
+        plugin = FakeIngestionPlugin(results=[_make_artifact("Commit")])
+
+        IngestionService(container).run_plugin(plugin, repo_path=str(tmp_path))
+
+        assert plugin.project == "widget"
+        assert container.artifact_repo.list_all(project="widget")
 
     def test_run_plugin_deduplicates(self, container):
         ext_id = "sha-123"

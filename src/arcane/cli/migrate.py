@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import click
+
+from arcane.cli._utils import create_container
 
 
 @click.group()
@@ -49,3 +53,49 @@ def migrate_check() -> None:
     else:
         for err in result.get("errors", []):
             click.echo(f"Error: {err}")
+
+
+@migrate.command("org-scope")
+@click.option("--apply", "apply_", is_flag=True, default=False, help="Write the backfill (default: dry run).")
+def migrate_org_scope(apply_: bool) -> None:
+    """Backfill empty memory orgs and canonical project names."""
+    from arcane.services.migration import MigrationService
+
+    with create_container() as container:
+        service = MigrationService()
+        plan = service.backfill_org(
+            container.db,
+            remotes=container.config.orgs.remotes,
+            overrides=container.config.orgs.overrides,
+            aliases=container.config.projects.aliases,
+            default=container.config.orgs.default,
+            dry_run=True,
+        )
+        if not plan["planned"]:
+            click.echo("No empty-org memories found.")
+            return
+
+        if not apply_:
+            click.echo(f"Dry run: {sum(item['count'] for item in plan['planned'])} memories would be backfilled.")
+            for item in plan["planned"]:
+                click.echo(
+                    f"  {item['count']:5d}  {item['old_project'] or '<no project>'} "
+                    f"-> {item['new_org']}/{item['new_project']}"
+                )
+            click.echo("Pass --apply to write a SQLite-backed, transactional migration.")
+            return
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        backup = f"{container.db.db_path}.bak-orgscope-{timestamp}"
+        container.db.backup(backup)
+        result = service.backfill_org(
+            container.db,
+            remotes=container.config.orgs.remotes,
+            overrides=container.config.orgs.overrides,
+            aliases=container.config.projects.aliases,
+            default=container.config.orgs.default,
+            dry_run=False,
+        )
+
+    click.echo(f"Backfilled {result['updated']} memories.")
+    click.echo(f"Backup: {backup}")
