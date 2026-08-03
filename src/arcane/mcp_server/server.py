@@ -11,7 +11,6 @@ from mcp.server import Server
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.stdio import stdio_server
 from mcp.types import (
-    AnyUrl,
     CallToolResult,
     GetPromptResult,
     Prompt,
@@ -21,6 +20,7 @@ from mcp.types import (
     TextContent,
     Tool,
 )
+from pydantic import AnyUrl
 
 from arcane.domain.enums import RelationType
 from arcane.mcp_server.prompts import (
