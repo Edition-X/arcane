@@ -45,13 +45,14 @@ class JourneyService:
 
     def delete(self, journey_id: str) -> bool:
         """Delete a journey and every relationship that references it."""
-        journey = self.c.journey_repo.get(journey_id)
-        if not journey:
-            return False
-        full_id = journey["id"]
-        for rel in self.c.relationship_repo.get_all_for("journey", full_id):
-            self.c.relationship_repo.delete(rel["id"])
-        return self.c.journey_repo.delete(full_id)
+        with self.c.db.transaction():
+            journey = self.c.journey_repo.get(journey_id)
+            if not journey:
+                return False
+            full_id = journey["id"]
+            for rel in self.c.relationship_repo.get_all_for("journey", full_id):
+                self.c.relationship_repo.delete(rel["id"])
+            return self.c.journey_repo.delete(full_id)
 
     def get(self, journey_id: str) -> dict[str, Any] | None:
         return self.c.journey_repo.get(journey_id)
@@ -117,5 +118,6 @@ class JourneyService:
             target_id=journey_id,
             relation=RelationType.PART_OF,
         )
-        self.c.relationship_repo.insert(rel.model_dump())
+        with self.c.db.transaction():
+            self.c.relationship_repo.insert(rel.model_dump())
         return rel.id

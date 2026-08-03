@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import fcntl
+import os
 import re
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -37,19 +42,47 @@ def write_session_memory(
     date_str: str,
     details: str | None = None,
 ) -> str:
-    """Create or append to a session file."""
+    """Create or append to a session file without losing concurrent writes."""
     file_path = Path(vault_project_dir) / f"{date_str}-session.md"
     section_content = render_section(mem, details)
 
-    if not file_path.exists():
-        content = _create_new_session_file(mem, date_str, section_content)
-        file_path.write_text(content)
-    else:
-        content = file_path.read_text()
-        updated_content = _append_to_session_file(content, mem, section_content)
-        file_path.write_text(updated_content)
+    with _file_lock(file_path):
+        if not file_path.exists():
+            content = _create_new_session_file(mem, date_str, section_content)
+        else:
+            content = file_path.read_text()
+            content = _append_to_session_file(content, mem, section_content)
+        _atomic_write(file_path, content)
 
     return str(file_path)
+
+
+@contextmanager
+def _file_lock(file_path: Path) -> Iterator[None]:
+    """Use a sibling lock file so independent MCP processes serialize writes."""
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = file_path.with_suffix(file_path.suffix + ".lock")
+    with lock_path.open("a+") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _atomic_write(file_path: Path, content: str) -> None:
+    """Replace the session file only after the complete new content is durable."""
+    temp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=file_path.parent, delete=False) as temp_file:
+            temp_file.write(content)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+            temp_path = temp_file.name
+        os.replace(temp_path, file_path)
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.unlink(temp_path)
 
 
 def _create_new_session_file(mem: dict[str, Any], date_str: str, section_content: str) -> str:
