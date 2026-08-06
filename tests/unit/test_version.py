@@ -15,8 +15,7 @@ def test_distribution_version_matches_runtime_version():
 def test_install_docs_do_not_reference_unrelated_pypi_package():
     root = Path(__file__).parents[2]
     expected_uv_command = (
-        'uv tool install --from "git+https://github.com/Edition-X/arcane.git@v0.2.0-beta.11" '
-        'arcane-mcp'
+        'uv tool install --from "git+https://github.com/Edition-X/arcane.git@v0.2.0-beta.11" arcane-mcp'
     )
     for path in (root / "README.md", root / "docs" / "README.md", root / "docs" / "installation.md"):
         content = path.read_text()
