@@ -13,17 +13,19 @@
 ### With uv (recommended)
 
 ```bash
-uv tool install --from "git+https://github.com/Edition-X/arcane.git@v0.2.0-beta.10" arcane-mcp
+uv tool install --from "git+https://github.com/Edition-X/arcane.git@v0.2.0-beta.11" arcane-mcp
 ```
 
 ### With pip
 
 ```bash
-pip install "git+https://github.com/Edition-X/arcane.git@v0.2.0-beta.10"
+pip install "git+https://github.com/Edition-X/arcane.git@v0.2.0-beta.11"
 ```
 
-Replace `v0.2.0-beta.10` with the release tag you want. Each GitHub release
-also contains wheel and source-distribution assets for controlled installs.
+beta.10 is incompatible with `arcane-mcp` because its distribution metadata is
+`arcane`. Use `v0.2.0-beta.11` or newer, then replace that tag with the later
+release you want. Each GitHub release also contains wheel and source-distribution
+assets for controlled installs.
 
 ---
 

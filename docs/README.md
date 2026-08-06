@@ -27,11 +27,15 @@ Arcane runs as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io
 
 ```bash
 # Install a pinned GitHub release with uv (recommended)
-uv tool install --from "git+https://github.com/Edition-X/arcane.git@v0.2.0-beta.10" arcane-mcp
+uv tool install --from "git+https://github.com/Edition-X/arcane.git@v0.2.0-beta.11" arcane-mcp
 
 # Or with pip
-pip install "git+https://github.com/Edition-X/arcane.git@v0.2.0-beta.10"
+pip install "git+https://github.com/Edition-X/arcane.git@v0.2.0-beta.11"
 ```
+
+beta.10 is incompatible with `arcane-mcp` because its distribution metadata is
+`arcane`. Use `v0.2.0-beta.11` or newer, then replace that tag with the later
+release you want.
 
 Then initialise your data directory and connect to your AI agent:
 
