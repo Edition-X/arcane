@@ -146,17 +146,3 @@ jobs:
             --notes-file release-notes.md \
             dist/* \
             $PRE
-
-      - name: Notify macbook-pro to bump the Brewfile pin
-        if: steps.version.outputs.skip != 'true' && env.DISPATCH_TOKEN != ''
-        env:
-          DISPATCH_TOKEN: ${{ secrets.MACBOOK_PRO_DISPATCH_TOKEN }}
-          GH_TOKEN: ${{ secrets.MACBOOK_PRO_DISPATCH_TOKEN }}
-          TAG: ${{ steps.version.outputs.tag }}
-        run: |
-          # Fine-grained PAT scoped to Edition-X/macbook-pro, Contents: read/write.
-          # Skipped (not failed) when the secret is missing so releases never block on it.
-          # gh needs GH_TOKEN to run inside Actions; the same PAT serves as that token.
-          gh api --method POST repos/Edition-X/macbook-pro/dispatches \
-            -f event_type=arcane-released \
-            -f "client_payload[tag]=${TAG}"
