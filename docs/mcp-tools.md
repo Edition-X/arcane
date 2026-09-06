@@ -1,12 +1,14 @@
 # MCP Tools Reference
 
-Arcane exposes 19 tools, 1 resource template, and 3 prompts to MCP-compatible agents.
+Arcane exposes 25 tools, 1 resource template, and 3 prompts to MCP-compatible agents. 13 are in the default `core` tool profile; the rest require `ARCANE_TOOL_PROFILE=full` (see `ARCANE_TOOL_PROFILE` in the environment variable table).
 
 ---
 
 ## Memory tools
 
 ### `memory_save`
+
+**Profile:** `core`
 
 Save a memory for future sessions. Call this before ending any session where you made changes, fixed bugs, made decisions, or learned something.
 
@@ -43,6 +45,8 @@ Save a memory for future sessions. Call this before ending any session where you
 
 ### `memory_search`
 
+**Profile:** `core`
+
 Search memories using keyword and vector search. Call at session start and whenever the user's request relates to a topic with prior context.
 
 | Parameter | Type | Required | Description |
@@ -54,6 +58,8 @@ Search memories using keyword and vector search. Call at session start and whene
 ---
 
 ### `memory_context`
+
+**Profile:** `core`
 
 Get memory context for the current project. Call at session start to load prior decisions, bugs, and context.
 
@@ -83,6 +89,8 @@ The key is omitted entirely when no journeys are stale.
 
 ### `memory_details`
 
+**Profile:** `core`
+
 Get full details for a single memory, including the extended `details` field.
 
 | Parameter | Type | Required | Description |
@@ -92,6 +100,8 @@ Get full details for a single memory, including the extended `details` field.
 ---
 
 ### `memory_delete`
+
+**Profile:** `full`
 
 Delete a memory permanently.
 
@@ -107,6 +117,8 @@ Journeys are decision narrative arcs — use them for multi-step investigations,
 
 ### `journey_start`
 
+**Profile:** `core`
+
 Begin tracking a decision journey.
 
 | Parameter | Type | Required | Description |
@@ -119,6 +131,8 @@ Begin tracking a decision journey.
 
 ### `journey_update`
 
+**Profile:** `core`
+
 Add a progress update to an active journey.
 
 | Parameter | Type | Required | Description |
@@ -130,6 +144,8 @@ Add a progress update to an active journey.
 
 ### `journey_complete`
 
+**Profile:** `core`
+
 Mark a journey as completed with a final outcome summary.
 
 | Parameter | Type | Required | Description |
@@ -140,6 +156,8 @@ Mark a journey as completed with a final outcome summary.
 ---
 
 ### `journey_list`
+
+**Profile:** `core`
 
 List journeys, optionally filtered by project or status.
 
@@ -155,6 +173,8 @@ List journeys, optionally filtered by project or status.
 
 ### `link`
 
+**Profile:** `full`
+
 Create a typed relationship between two entities (memory, journey, or artifact).
 
 | Parameter | Type | Required | Description |
@@ -168,6 +188,8 @@ Create a typed relationship between two entities (memory, journey, or artifact).
 ---
 
 ### `trace`
+
+**Profile:** `full`
 
 Walk the relationship graph outward from an entity to find connected knowledge.
 
@@ -183,6 +205,8 @@ Walk the relationship graph outward from an entity to find connected knowledge.
 
 ### `insights`
 
+**Profile:** `core`
+
 Get recent unacknowledged insights for a project (e.g. velocity summaries).
 
 | Parameter | Type | Required | Description |
@@ -193,6 +217,8 @@ Get recent unacknowledged insights for a project (e.g. velocity summaries).
 ---
 
 ### `insights_ack`
+
+**Profile:** `full`
 
 Acknowledge an insight so it no longer appears in unacknowledged lists.
 
@@ -206,6 +232,8 @@ Acknowledge an insight so it no longer appears in unacknowledged lists.
 
 ### `ingest_git`
 
+**Profile:** `full`
+
 Import commits from a local git repository as searchable artifacts.
 
 | Parameter | Type | Required | Description |
@@ -218,6 +246,8 @@ Import commits from a local git repository as searchable artifacts.
 ---
 
 ### `ingest_gha`
+
+**Profile:** `full`
 
 Import CI runs from GitHub Actions as artifacts.
 
@@ -234,6 +264,8 @@ Requires `GITHUB_TOKEN` to be set.
 
 ### `ingest_linear`
 
+**Profile:** `full`
+
 Import tickets from Linear as artifacts.
 
 | Parameter | Type | Required | Description |
@@ -249,6 +281,8 @@ Requires `LINEAR_API_KEY` to be set.
 ## Analysis tools
 
 ### `analyze`
+
+**Profile:** `full`
 
 Run an intelligence analysis plugin against stored data.
 
@@ -268,6 +302,8 @@ Results are stored as Insights and returned in the response.
 
 ### `draft_blog`
 
+**Profile:** `full`
+
 Generate a structured blog post brief from a completed journey.
 
 | Parameter | Type | Required | Description |
@@ -280,6 +316,8 @@ Returns a blog brief with suggested title, hook, sections, and key takeaways.
 ---
 
 ### `draft_adr`
+
+**Profile:** `full`
 
 Generate an Architecture Decision Record from a `decision` category memory.
 

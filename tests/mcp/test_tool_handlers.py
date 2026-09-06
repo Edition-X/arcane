@@ -30,6 +30,20 @@ from arcane.services.journey import JourneyService
 from arcane.services.memory import MemoryService
 
 
+@pytest.fixture(autouse=True)
+def _full_tool_profile(monkeypatch):
+    """This module tests tool handlers, so it should see every tool.
+
+    Without this, ARCANE_TOOL_PROFILE defaults to "core" and call_tool
+    gates non-core tools before the handler ever runs, which silently
+    turns "not found" assertions into "not enabled" assertions instead.
+    Individual tests (e.g. tests/mcp/test_tool_profiles.py) that set the
+    env var themselves still control it: monkeypatch calls made inside a
+    test run after this fixture's, so they override it for that test.
+    """
+    monkeypatch.setenv("ARCANE_TOOL_PROFILE", "full")
+
+
 @pytest.fixture
 def mem_svc(container):
     return MemoryService(container)
@@ -584,6 +598,9 @@ class TestIsError:
     def test_memory_delete_not_found_is_error(self, container):
         result = self._call_tool(container, "memory_delete", {"memory_id": "nonexistent"})
         assert result.isError is True
+        text = result.content[0].text
+        assert "not enabled" not in text
+        assert "Memory not found: nonexistent" in text
 
     def test_journey_update_not_found_is_error(self, container):
         result = self._call_tool(container, "journey_update", {"journey_id": "nope"})
@@ -596,10 +613,16 @@ class TestIsError:
     def test_insights_ack_not_found_is_error(self, container):
         result = self._call_tool(container, "insights_ack", {"insight_id": "nope"})
         assert result.isError is True
+        text = result.content[0].text
+        assert "not enabled" not in text
+        assert "ID prefix must be at least" in text
 
     def test_draft_adr_not_found_is_error(self, container):
         result = self._call_tool(container, "draft_adr", {"memory_id": "nope"})
         assert result.isError is True
+        text = result.content[0].text
+        assert "not enabled" not in text
+        assert "Memory nope not found" in text
 
     def test_link_nonexistent_source_is_error(self, container):
         result = self._call_tool(
@@ -614,6 +637,9 @@ class TestIsError:
             },
         )
         assert result.isError is True
+        text = result.content[0].text
+        assert "not enabled" not in text
+        assert "Source memory not found: nope" in text
 
     def test_success_is_not_error(self, container):
         """Successful ops must still have isError=False."""
