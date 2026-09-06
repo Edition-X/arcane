@@ -9,7 +9,7 @@ from datetime import datetime
 
 from arcane.domain.enums import Category
 from arcane.domain.models import RawMemoryInput
-from arcane.domain.scope import GLOBAL_ORG, resolve_scope
+from arcane.domain.scope import GLOBAL_ORG, resolve_scope, resolve_write_scope
 from arcane.infra.db.ids import IdentifierResolutionError
 from arcane.services.memory import MemoryService
 
@@ -29,7 +29,9 @@ Save when you:
 
 When filling `details`, prefer: Context, Options considered, Decision, Tradeoffs, Follow-up."""
 
-SEARCH_DESCRIPTION = """Search memories using keyword and semantic search. Call this at session start and when the user's request relates to a topic with prior context."""
+SEARCH_DESCRIPTION = """Search memories using keyword and semantic search. Call this at session start and when the user's request relates to a topic with prior context.
+
+Results omit why/impact by default; call memory_details for the full body."""
 
 CONTEXT_DESCRIPTION = """Get memory context for the current project. Call this at session start to load prior decisions, bugs, and context.
 
@@ -55,6 +57,7 @@ def handle_save(
     journey_id: str | None = None,
     ttl_days: int | None = None,
     confidence: float | None = None,
+    source: str | None = None,
 ) -> str:
     handler_warnings: list[str] = []
 
@@ -81,7 +84,12 @@ def handle_save(
         org_final, project_final = (org or resolved.org), ""
     else:
         org_final = org or resolved.org
-        project_final = project if project is not None else resolved.project
+        if project is not None:
+            # Canonicalise and collapse worktree variants through the same
+            # path the service uses, so the echoed scope matches the stored row.
+            project_final = resolve_write_scope(project, svc.c.config).project
+        else:
+            project_final = resolved.project
         if not project_final.strip():
             handler_warnings.append(
                 "empty_project: no project resolved for this save — it will be invisible to "
@@ -98,7 +106,7 @@ def handle_save(
         category=category,
         related_files=related_files or [],
         details=details,
-        source=None,
+        source=source,
         journey_id=journey_id,
         ttl_days=ttl_days,
         confidence=confidence,
@@ -116,6 +124,63 @@ def _normalize_limit(limit: int | None, default: int) -> int:
     return limit
 
 
+def _normalize_detail(detail: str | None) -> str:
+    """Coerce a `detail` argument to a known level, defaulting to "standard".
+
+    Shared by handle_search and handle_context so both tools fall back the
+    same way for an unrecognised value.
+    """
+    detail = detail or "standard"
+    if detail not in ("minimal", "standard", "full"):
+        detail = "standard"
+    return detail
+
+
+def _search_hit(r: dict, detail: str) -> dict:
+    # Search hits and context memories don't share a field-selection helper:
+    # search carries score/project/org/ttl/confidence sourced straight off
+    # the row, while context carries a human-formatted date and no score —
+    # unifying them would need per-field branching that reads worse than
+    # two short builders.
+    score = round(r.get("score", 0), 2)
+    if detail == "minimal":
+        return {
+            "id": r["id"],
+            "title": r["title"],
+            "category": r.get("category"),
+            "score": score,
+        }
+    if detail == "full":
+        return {
+            "id": r["id"],
+            "title": r["title"],
+            "what": r["what"],
+            "why": r.get("why"),
+            "impact": r.get("impact"),
+            "category": r.get("category"),
+            "tags": r.get("tags", []),  # already list[str] from repo
+            "project": r.get("project"),
+            "org": r.get("org", ""),
+            "created_at": r.get("created_at", "")[:10],
+            "score": score,
+            "has_details": bool(r.get("has_details")),
+            "ttl_days": r.get("ttl_days"),
+            "confidence": r.get("confidence"),
+        }
+    # standard (default)
+    return {
+        "id": r["id"],
+        "title": r["title"],
+        "category": r.get("category"),
+        "score": score,
+        "what": r["what"],
+        "tags": r.get("tags", []),
+        "project": r.get("project"),
+        "date": r.get("created_at", "")[:10],
+        "has_details": bool(r.get("has_details")),
+    }
+
+
 def handle_search(
     svc: MemoryService,
     query: str,
@@ -124,10 +189,12 @@ def handle_search(
     org: str | None = None,
     include_org: bool = True,
     include_global: bool = True,
+    detail: str | None = "standard",
 ) -> str:
     resolved = resolve_scope(os.getcwd(), svc.c.config)
     org_final = org or resolved.org
     project_final = project if project is not None else resolved.project
+    detail = _normalize_detail(detail)
 
     results = svc.search(
         query,
@@ -138,26 +205,7 @@ def handle_search(
         include_global=include_global,
     )
 
-    clean = []
-    for r in results:
-        clean.append(
-            {
-                "id": r["id"],
-                "title": r["title"],
-                "what": r["what"],
-                "why": r.get("why"),
-                "impact": r.get("impact"),
-                "category": r.get("category"),
-                "tags": r.get("tags", []),  # already list[str] from repo
-                "project": r.get("project"),
-                "org": r.get("org", ""),
-                "created_at": r.get("created_at", "")[:10],
-                "score": round(r.get("score", 0), 2),
-                "has_details": bool(r.get("has_details")),
-                "ttl_days": r.get("ttl_days"),
-                "confidence": r.get("confidence"),
-            }
-        )
+    clean = [_search_hit(r, detail) for r in results]
     return json.dumps(clean)
 
 
@@ -197,9 +245,7 @@ def handle_context(
     )
 
     # Normalise detail level — fall back to standard for unknown values
-    detail = detail or "standard"
-    if detail not in ("minimal", "standard", "full"):
-        detail = "standard"
+    detail = _normalize_detail(detail)
 
     memories = []
     for r in results:
@@ -267,6 +313,18 @@ def handle_context(
                 }
                 for i in pending
             ]
+
+    # Surface active journeys idle for more than 14 days so the agent is
+    # prompted to complete or abandon them instead of letting them rot.
+    if detail != "minimal" and project_final:
+        stale = svc.c.journey_repo.list_stale_active(14, project=project_final)[:5]
+        if stale:
+            payload["stale_journeys"] = [
+                {"id": j["id"], "title": j["title"], "last_update": (j.get("updated_at") or "")[:10]} for j in stale
+            ]
+            payload["message"] = (payload.get("message") or "") + (
+                f" {len(stale)} active journey(s) idle >14 days: call journey_complete or journey_abandon."
+            )
 
     return json.dumps(payload)
 

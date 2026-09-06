@@ -201,6 +201,7 @@ arcane merge-projects grafana-usage-report grafana-usage-automation --apply  # c
 | `LINEAR_API_KEY` | Linear API key for ticket ingestion |
 | `OPENAI_API_KEY` | OpenAI API key (alternative to config file) |
 | `ARCANE_LOG_LEVEL` | Log verbosity: `DEBUG`, `INFO`, `WARNING` |
+| `ARCANE_TOOL_PROFILE` | MCP tool set to advertise: `core` (default, 13 tools) or `full` (all tools) |
 
 ---
 

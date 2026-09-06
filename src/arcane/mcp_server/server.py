@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any, cast
 
 import anyio
@@ -25,6 +26,7 @@ from pydantic import AnyUrl
 
 from arcane import __version__
 from arcane.domain.enums import RelationType
+from arcane.domain.scope import slugify
 from arcane.mcp_server.prompts import (
     PROMPTS,
     build_catchup_prompt,
@@ -69,6 +71,37 @@ from arcane.services.memory import MemoryService
 
 logger = logging.getLogger(__name__)
 
+# Tools advertised by default. Everything else ("full" profile only) was
+# called fewer than ten times across every harness and all time, per usage
+# data reviewed for the "Tool profiles: core by default" decision.
+CORE_TOOLS = frozenset(
+    {
+        "memory_save",
+        "memory_search",
+        "memory_context",
+        "memory_details",
+        "memory_update",
+        "journey_start",
+        "journey_update",
+        "journey_complete",
+        "journey_abandon",
+        "journey_list",
+        "journey_show",
+        "artifact_search",
+        "insights",
+    }
+)
+
+
+def _tool_profile() -> str:
+    """Read the active tool profile from the environment at call time.
+
+    Read on each call (not cached at import) so tests can toggle it with
+    monkeypatch.setenv/delenv without recreating the server.
+    """
+    value = os.environ.get("ARCANE_TOOL_PROFILE", "core").strip().lower()
+    return value if value in {"core", "full"} else "core"
+
 
 def _create_server(container: ServiceContainer) -> Server:
     """Create and configure the MCP server with all tools."""
@@ -76,9 +109,23 @@ def _create_server(container: ServiceContainer) -> Server:
     mem_svc = MemoryService(container)
     journey_svc = JourneyService(container)
 
+    def _client_name() -> str | None:
+        """Best-effort slug of the connecting MCP client's name (e.g. "claude-code").
+
+        The initialize handshake's clientInfo.name is only available inside a
+        request context, and any attribute along the path may be missing
+        (notably in tests), so this is defensive end to end.
+        """
+        try:
+            params = server.request_context.session.client_params
+            name = params.clientInfo.name if params and params.clientInfo else None
+        except (LookupError, AttributeError):
+            return None
+        return slugify(name) if name else None
+
     @server.list_tools()
     async def list_tools() -> list[Tool]:
-        return [
+        all_tools = [
             # ── Memory tools (backward-compatible) ──
             Tool(
                 name="memory_save",
@@ -134,6 +181,16 @@ def _create_server(container: ServiceContainer) -> Server:
                         "org": {"type": "string", "description": "Org slug. Omit to auto-detect from the git remote."},
                         "include_org": {"type": "boolean", "default": True},
                         "include_global": {"type": "boolean", "default": True},
+                        "detail": {
+                            "type": "string",
+                            "enum": ["minimal", "standard", "full"],
+                            "default": "standard",
+                            "description": (
+                                "minimal: id, title, category, score. "
+                                "standard: adds what, tags, project, date, has_details. "
+                                "full: adds why and impact."
+                            ),
+                        },
                     },
                     "required": ["query"],
                 },
@@ -450,6 +507,9 @@ def _create_server(container: ServiceContainer) -> Server:
                 },
             ),
         ]
+        if _tool_profile() == "core":
+            return [tool for tool in all_tools if tool.name in CORE_TOOLS]
+        return all_tools
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict[str, object] | None) -> CallToolResult:
@@ -457,7 +517,11 @@ def _create_server(container: ServiceContainer) -> Server:
         # Run them in a worker thread so the asyncio event loop is never blocked.
         args = cast(dict[str, Any], arguments or {})
         handlers = {
-            "memory_save": lambda: handle_save(mem_svc, **args),
+            "memory_save": lambda: handle_save(
+                mem_svc,
+                source=args.get("source") or _client_name(),
+                **{k: v for k, v in args.items() if k != "source"},
+            ),
             "memory_search": lambda: handle_search(mem_svc, **args),
             "memory_context": lambda: handle_context(mem_svc, **args),
             "memory_details": lambda: handle_details(mem_svc, **args),
@@ -486,7 +550,13 @@ def _create_server(container: ServiceContainer) -> Server:
 
         handler = handlers.get(name)
         is_error = False
-        if handler:
+        if handler and _tool_profile() == "core" and name not in CORE_TOOLS:
+            logger.warning("Tool '%s' requested outside the core profile", name)
+            result = json.dumps(
+                {"error": f"Tool '{name}' is not enabled. Start the server with ARCANE_TOOL_PROFILE=full to use it."}
+            )
+            is_error = True
+        elif handler:
             try:
                 result = await anyio.to_thread.run_sync(handler)
             except Exception:

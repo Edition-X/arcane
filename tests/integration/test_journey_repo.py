@@ -169,6 +169,41 @@ class TestJourneyRepoLifecycle:
         stale = journey_repo.list_stale_active(days=30, project="a")
         assert [j["id"] for j in stale] == ["j-a"]
 
+    def test_list_stale_active_uses_updated_at_not_started_at(self, journey_repo):
+        from datetime import datetime, timedelta, timezone
+
+        old = (datetime.now(timezone.utc) - timedelta(days=20)).isoformat()
+        recent = datetime.now(timezone.utc).isoformat()
+
+        # Started 20 days ago but touched just now — not idle.
+        journey_repo.insert(
+            {
+                "id": "j-recently-updated",
+                "title": "Old start, fresh update",
+                "project": "p",
+                "status": "active",
+                "started_at": old,
+                "created_at": old,
+                "updated_at": recent,
+            }
+        )
+        # Started and last touched 20 days ago — idle.
+        journey_repo.insert(
+            {
+                "id": "j-truly-stale",
+                "title": "Old start, old update",
+                "project": "p",
+                "status": "active",
+                "started_at": old,
+                "created_at": old,
+                "updated_at": old,
+            }
+        )
+
+        stale = journey_repo.list_stale_active(days=14, project="p")
+
+        assert [j["id"] for j in stale] == ["j-truly-stale"]
+
     def test_delete_by_id(self, journey_repo):
         journey_repo.insert(self._journey("j-doomed-123"))
 
