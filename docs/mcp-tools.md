@@ -73,6 +73,12 @@ Get memory context for the current project. Call at session start to load prior 
 
 Default is `standard`. Use `minimal` when token budget is tight; use `full` when you need the complete picture for a small result set.
 
+When `detail` is not `minimal` and a project resolves, the response also includes a
+`stale_journeys` field: up to 5 active journeys idle for more than 14 days, each with
+`id`, `title`, and `last_update` (the journey's last `updated_at` date). The `message`
+field gains a one-line prompt to call `journey_complete` or `journey_abandon` on them.
+The key is omitted entirely when no journeys are stale.
+
 ---
 
 ### `memory_details`
