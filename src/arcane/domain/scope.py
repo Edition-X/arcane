@@ -55,6 +55,22 @@ def canonicalize_project(name: str, aliases: Mapping[str, str] | None = None) ->
     return slug
 
 
+def collapse_project_variant(explicit: str, resolved: str) -> str:
+    """Collapse a worktree-style variant of *resolved* back to *resolved*.
+
+    Agents often pass the working-directory name as the project. For a git
+    worktree that is ``<repo>-<suffix>`` (``sunrise-robot-sw-inf613``), which
+    would split memories away from ``sunrise-robot-sw``. When *explicit* is
+    ``resolved + "-" + anything`` we return *resolved*; otherwise *explicit*
+    is returned untouched so a deliberately different project still wins.
+    """
+    if not explicit or not resolved or explicit == resolved:
+        return explicit
+    if explicit.startswith(resolved + "-"):
+        return resolved
+    return explicit
+
+
 def _parse_remote_url(url: str) -> tuple[str | None, str | None]:
     """Extract ``(owner, repo)`` from a git remote URL, or ``(None, None)``."""
     m = _REMOTE_RE.search((url or "").strip())
@@ -127,4 +143,18 @@ def resolve_write_scope(
     resolved = resolve_scope(repo_path or os.getcwd(), config, _remote=_remote)
     if project is None:
         return resolved
-    return Scope(org=resolved.org, project=canonicalize_project(project, config.projects.aliases))
+    slug = canonicalize_project(project, config.projects.aliases)
+    return Scope(org=resolved.org, project=collapse_project_variant(slug, resolved.project))
+
+
+def resolve_read_project(project: str | None, config: ArcaneConfig, cwd: str | None = None) -> str | None:
+    """Canonicalise an explicit *project* for reads, collapsing worktree variants.
+
+    Returns ``None`` when *project* is ``None`` so callers keep their existing
+    "no filter" behaviour.
+    """
+    if project is None:
+        return None
+    resolved = resolve_scope(cwd or os.getcwd(), config)
+    slug = canonicalize_project(project, config.projects.aliases)
+    return collapse_project_variant(slug, resolved.project)
