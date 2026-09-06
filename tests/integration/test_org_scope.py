@@ -134,5 +134,6 @@ class TestHandlerScope:
     def test_search_results_include_org(self, container):
         svc = MemoryService(container)
         handle_save(svc, title="Findable", what="searchme", org="acme", project="widget")
-        results = json.loads(handle_search(svc, query="searchme", org="acme", project="widget"))
+        # org is a full-only field now that memory_search defaults to standard detail.
+        results = json.loads(handle_search(svc, query="searchme", org="acme", project="widget", detail="full"))
         assert results[0]["org"] == "acme"

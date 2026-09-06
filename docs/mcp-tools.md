@@ -54,6 +54,17 @@ Search memories using keyword and vector search. Call at session start and whene
 | `query` | string | yes | Search query (natural language or keywords) |
 | `limit` | integer | no | Number of results to return (default: 5) |
 | `project` | string | no | Restrict search to a specific project. Worktree-style variants of the current repo (`<repo>-<suffix>`) collapse to `<repo>`. |
+| `detail` | string | no | Level of detail per hit — see below |
+
+**`detail` levels:**
+
+| Level | Fields returned |
+|---|---|
+| `minimal` | `id`, `title`, `category`, `score` |
+| `standard` | `id`, `title`, `category`, `score`, `what`, `tags`, `project`, `date`, `has_details` |
+| `full` | `id`, `title`, `what`, `why`, `impact`, `category`, `tags`, `project`, `org`, `created_at`, `score`, `has_details`, `ttl_days`, `confidence` |
+
+Default is `standard`, which omits `why`/`impact` to keep results small — call `memory_details` for the full body of a specific hit. Use `full` if your integration already depends on the previous shape.
 
 ---
 

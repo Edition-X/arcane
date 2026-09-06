@@ -732,10 +732,63 @@ class TestCategoryCoercionWarning:
         assert coercion_warnings == []
 
 
+class TestMemorySearchDetailLevels:
+    def test_search_minimal(self, mem_svc):
+        handle_save(mem_svc, title="Search Min Test", what="the what", why="the why", project="test")
+        results = json.loads(handle_search(mem_svc, query="Search Min Test", project="test", detail="minimal"))
+        assert len(results) >= 1
+        r = results[0]
+        assert set(r.keys()) == {"id", "title", "category", "score"}
+
+    def test_search_default_is_standard(self, mem_svc):
+        handle_save(
+            mem_svc, title="Search Std Test", what="the what", why="the why", impact="the impact", project="test"
+        )
+        results = json.loads(handle_search(mem_svc, query="Search Std Test", project="test"))
+        assert len(results) >= 1
+        r = results[0]
+        assert set(r.keys()) == {"id", "title", "category", "score", "what", "tags", "project", "date", "has_details"}
+
+    def test_search_full(self, mem_svc):
+        handle_save(
+            mem_svc, title="Search Full Test", what="the what", why="the why", impact="the impact", project="test"
+        )
+        results = json.loads(handle_search(mem_svc, query="Search Full Test", project="test", detail="full"))
+        assert len(results) >= 1
+        r = results[0]
+        assert set(r.keys()) == {
+            "id",
+            "title",
+            "what",
+            "why",
+            "impact",
+            "category",
+            "tags",
+            "project",
+            "org",
+            "created_at",
+            "score",
+            "has_details",
+            "ttl_days",
+            "confidence",
+        }
+        assert r["why"] == "the why"
+        assert r["impact"] == "the impact"
+
+    def test_search_invalid_detail_falls_back_to_standard(self, mem_svc):
+        handle_save(mem_svc, title="Search Fallback Test", what="the what", project="test")
+        results = json.loads(handle_search(mem_svc, query="Search Fallback Test", project="test", detail="bogus"))
+        assert len(results) >= 1
+        r = results[0]
+        assert set(r.keys()) == {"id", "title", "category", "score", "what", "tags", "project", "date", "has_details"}
+
+
 class TestSearchTTLConfidence:
+    # ttl_days/confidence only appear in the "full" detail level (see
+    # TestMemorySearchDetailLevels) — standard, the new default, omits them.
     def test_search_result_includes_ttl_and_confidence(self, mem_svc):
         handle_save(mem_svc, title="TTL mem", what="expires soon", ttl_days=30, confidence=0.9, project="test")
-        results = json.loads(handle_search(mem_svc, query="TTL mem", project="test"))
+        results = json.loads(handle_search(mem_svc, query="TTL mem", project="test", detail="full"))
         assert len(results) >= 1
         r = results[0]
         assert "ttl_days" in r
@@ -745,7 +798,7 @@ class TestSearchTTLConfidence:
 
     def test_search_result_ttl_none_when_not_set(self, mem_svc):
         handle_save(mem_svc, title="No TTL mem", what="permanent", project="test")
-        results = json.loads(handle_search(mem_svc, query="No TTL mem", project="test"))
+        results = json.loads(handle_search(mem_svc, query="No TTL mem", project="test", detail="full"))
         assert len(results) >= 1
         assert results[0]["ttl_days"] is None
         assert results[0]["confidence"] is None
