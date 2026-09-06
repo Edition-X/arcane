@@ -269,6 +269,18 @@ def handle_context(
                 for i in pending
             ]
 
+    # Surface active journeys idle for more than 14 days so the agent is
+    # prompted to complete or abandon them instead of letting them rot.
+    if detail != "minimal" and project_final:
+        stale = svc.c.journey_repo.list_stale_active(14, project=project_final)[:5]
+        if stale:
+            payload["stale_journeys"] = [
+                {"id": j["id"], "title": j["title"], "last_update": (j.get("updated_at") or "")[:10]} for j in stale
+            ]
+            payload["message"] = (payload.get("message") or "") + (
+                f" {len(stale)} active journey(s) idle >14 days: call journey_complete or journey_abandon."
+            )
+
     return json.dumps(payload)
 
 

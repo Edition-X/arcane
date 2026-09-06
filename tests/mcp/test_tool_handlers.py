@@ -860,6 +860,63 @@ class TestContextSurfacesInsights:
         assert "insights" not in result
 
 
+class TestContextSurfacesStaleJourneys:
+    def test_standard_detail_includes_stale_journey(self, container):
+        from datetime import datetime, timedelta, timezone
+
+        old = (datetime.now(timezone.utc) - timedelta(days=20)).isoformat()
+        container.journey_repo.insert(
+            {
+                "id": "j-stale-context",
+                "title": "Old spike",
+                "project": "p",
+                "status": "active",
+                "started_at": old,
+                "created_at": old,
+                "updated_at": old,
+            }
+        )
+        svc = MemoryService(container)
+
+        result = json.loads(handle_context(svc, project="p", detail="standard"))
+
+        assert "stale_journeys" in result
+        assert len(result["stale_journeys"]) == 1
+        assert result["stale_journeys"][0]["id"] == "j-stale-context"
+        assert result["stale_journeys"][0]["title"] == "Old spike"
+        assert "idle >14 days" in result["message"]
+
+    def test_no_stale_journeys_key_when_fresh(self, container):
+        js = JourneyService(container)
+        js.start("Fresh journey", project="p")
+        svc = MemoryService(container)
+
+        result = json.loads(handle_context(svc, project="p", detail="standard"))
+
+        assert "stale_journeys" not in result
+
+    def test_minimal_detail_omits_stale_journeys(self, container):
+        from datetime import datetime, timedelta, timezone
+
+        old = (datetime.now(timezone.utc) - timedelta(days=20)).isoformat()
+        container.journey_repo.insert(
+            {
+                "id": "j-stale-minimal",
+                "title": "Old spike",
+                "project": "p",
+                "status": "active",
+                "started_at": old,
+                "created_at": old,
+                "updated_at": old,
+            }
+        )
+        svc = MemoryService(container)
+
+        result = json.loads(handle_context(svc, project="p", detail="minimal"))
+
+        assert "stale_journeys" not in result
+
+
 class TestEmptyProjectGuard:
     def test_save_with_blank_project_warns(self, container):
         svc = MemoryService(container)

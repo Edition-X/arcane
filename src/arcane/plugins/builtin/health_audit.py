@@ -117,7 +117,7 @@ class HealthAuditor:
                 self._insight(
                     "health_stale_journeys",
                     f"{len(stale)} journey(s) stuck in active",
-                    f"Active for more than {self.stale_days} days: {listed}. "
+                    f"No update for more than {self.stale_days} days: {listed}. "
                     "Complete them with a summary or abandon them.",
                     "warning",
                     project,
