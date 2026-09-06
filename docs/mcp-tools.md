@@ -20,7 +20,7 @@ Save a memory for future sessions. Call this before ending any session where you
 | `category` | string | no | One of: `decision`, `bug`, `pattern`, `learning`, `context`, `poc`, `milestone` |
 | `related_files` | array of strings | no | File paths relevant to this memory |
 | `details` | string | no | Full context — options considered, tradeoffs, follow-up |
-| `project` | string | no | Project name (defaults to current directory name) |
+| `project` | string | no | Project name (defaults to current directory name). Worktree-style variants of the current repo (`<repo>-<suffix>`) collapse to `<repo>`. |
 | `journey_id` | string | no | Link this memory to an active journey |
 | `ttl_days` | integer | no | Days until this memory expires from search results. Omit for permanent memories. |
 | `confidence` | number | no | Confidence in accuracy 0.0–1.0. Omit if not applicable. |
@@ -49,7 +49,7 @@ Search memories using keyword and vector search. Call at session start and whene
 |---|---|---|---|
 | `query` | string | yes | Search query (natural language or keywords) |
 | `limit` | integer | no | Number of results to return (default: 5) |
-| `project` | string | no | Restrict search to a specific project |
+| `project` | string | no | Restrict search to a specific project. Worktree-style variants of the current repo (`<repo>-<suffix>`) collapse to `<repo>`. |
 
 ---
 
@@ -59,7 +59,7 @@ Get memory context for the current project. Call at session start to load prior 
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `project` | string | no | Project name (defaults to current directory name) |
+| `project` | string | no | Project name (defaults to current directory name). Worktree-style variants of the current repo (`<repo>-<suffix>`) collapse to `<repo>`. |
 | `limit` | integer | no | Number of memories to return (default: 10) |
 | `detail` | string | no | Level of detail per memory — see below |
 

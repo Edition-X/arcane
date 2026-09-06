@@ -65,6 +65,27 @@ class TestMemoryToolHandlers:
         )
         assert result["action"] == "created"
 
+    def test_handle_save_collapses_worktree_project_variant(self, mem_svc, monkeypatch):
+        from arcane.domain.scope import Scope
+
+        monkeypatch.setattr(
+            "arcane.domain.scope.resolve_scope",
+            lambda cwd, config, _remote=None: Scope(org="personal", project="repo"),
+        )
+        result = json.loads(
+            handle_save(
+                mem_svc,
+                title="Worktree Save",
+                what="Saved from a worktree checkout",
+                project="repo-inf999",
+            )
+        )
+        assert result["action"] == "created"
+        assert result["scope"]["project"] == "repo-inf999"
+
+        found = json.loads(handle_search(mem_svc, query="Worktree Save", project="repo"))
+        assert any(m["id"] == result["id"] for m in found)
+
     def test_handle_save_invalid_category(self, mem_svc):
         result = json.loads(
             handle_save(
