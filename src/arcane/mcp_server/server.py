@@ -181,6 +181,16 @@ def _create_server(container: ServiceContainer) -> Server:
                         "org": {"type": "string", "description": "Org slug. Omit to auto-detect from the git remote."},
                         "include_org": {"type": "boolean", "default": True},
                         "include_global": {"type": "boolean", "default": True},
+                        "detail": {
+                            "type": "string",
+                            "enum": ["minimal", "standard", "full"],
+                            "default": "standard",
+                            "description": (
+                                "minimal: id, title, category, score. "
+                                "standard: adds what, tags, project, date, has_details. "
+                                "full: adds why and impact."
+                            ),
+                        },
                     },
                     "required": ["query"],
                 },
