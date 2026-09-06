@@ -55,6 +55,7 @@ def handle_save(
     journey_id: str | None = None,
     ttl_days: int | None = None,
     confidence: float | None = None,
+    source: str | None = None,
 ) -> str:
     handler_warnings: list[str] = []
 
@@ -98,7 +99,7 @@ def handle_save(
         category=category,
         related_files=related_files or [],
         details=details,
-        source=None,
+        source=source,
         journey_id=journey_id,
         ttl_days=ttl_days,
         confidence=confidence,
