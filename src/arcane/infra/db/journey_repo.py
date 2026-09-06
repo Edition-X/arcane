@@ -128,14 +128,17 @@ class JourneyRepository:
         )
 
     def list_stale_active(self, days: int, project: str | None = None) -> list[dict[str, Any]]:
-        """Active journeys whose ``started_at`` is more than *days* days ago."""
-        where_clauses = ["status = 'active'", "(unixepoch('now') - unixepoch(started_at)) > ? * 86400"]
+        """Active journeys with no update for more than *days* days (falls back to started_at)."""
+        where_clauses = [
+            "status = 'active'",
+            "(unixepoch('now') - unixepoch(COALESCE(updated_at, started_at))) > ? * 86400",
+        ]
         params: list[Any] = [days]
         if project:
             where_clauses.append("project = ?")
             params.append(project)
         return self.db.fetchall(
-            f"SELECT * FROM journeys WHERE {' AND '.join(where_clauses)} ORDER BY started_at",
+            f"SELECT * FROM journeys WHERE {' AND '.join(where_clauses)} ORDER BY COALESCE(updated_at, started_at)",
             params,
         )
 

@@ -30,6 +30,20 @@ from arcane.services.journey import JourneyService
 from arcane.services.memory import MemoryService
 
 
+@pytest.fixture(autouse=True)
+def _full_tool_profile(monkeypatch):
+    """This module tests tool handlers, so it should see every tool.
+
+    Without this, ARCANE_TOOL_PROFILE defaults to "core" and call_tool
+    gates non-core tools before the handler ever runs, which silently
+    turns "not found" assertions into "not enabled" assertions instead.
+    Individual tests (e.g. tests/mcp/test_tool_profiles.py) that set the
+    env var themselves still control it: monkeypatch calls made inside a
+    test run after this fixture's, so they override it for that test.
+    """
+    monkeypatch.setenv("ARCANE_TOOL_PROFILE", "full")
+
+
 @pytest.fixture
 def mem_svc(container):
     return MemoryService(container)
@@ -64,6 +78,52 @@ class TestMemoryToolHandlers:
             )
         )
         assert result["action"] == "created"
+
+    def test_handle_save_stores_explicit_source(self, mem_svc, container):
+        result = json.loads(
+            handle_save(
+                mem_svc,
+                title="Sourced",
+                what="Came from codex",
+                project="test",
+                source="codex",
+            )
+        )
+        mem = container.memory_repo.get(result["id"])
+        assert mem["source"] == "codex"
+
+    def test_handle_save_without_source_is_unset(self, mem_svc, container):
+        result = json.loads(
+            handle_save(
+                mem_svc,
+                title="Unsourced",
+                what="No source given",
+                project="test",
+            )
+        )
+        mem = container.memory_repo.get(result["id"])
+        assert not mem["source"]
+
+    def test_handle_save_collapses_worktree_project_variant(self, mem_svc, monkeypatch):
+        from arcane.domain.scope import Scope
+
+        monkeypatch.setattr(
+            "arcane.domain.scope.resolve_scope",
+            lambda cwd, config, _remote=None: Scope(org="personal", project="repo"),
+        )
+        result = json.loads(
+            handle_save(
+                mem_svc,
+                title="Worktree Save",
+                what="Saved from a worktree checkout",
+                project="repo-inf999",
+            )
+        )
+        assert result["action"] == "created"
+        assert result["scope"]["project"] == "repo"
+
+        found = json.loads(handle_search(mem_svc, query="Worktree Save", project="repo"))
+        assert any(m["id"] == result["id"] for m in found)
 
     def test_handle_save_invalid_category(self, mem_svc):
         result = json.loads(
@@ -333,6 +393,54 @@ class TestMcpServerCallTool:
     def test_server_reports_arcane_version(self, container):
         assert _create_server(container).version == __version__
 
+    def test_memory_save_stamps_source_from_client_info(self, container, monkeypatch):
+        from mcp.server.lowlevel.server import Server
+
+        class _FakeClientInfo:
+            name = "Claude Code"
+
+        class _FakeClientParams:
+            clientInfo = _FakeClientInfo()
+
+        class _FakeSession:
+            client_params = _FakeClientParams()
+
+        class _FakeRequestContext:
+            session = _FakeSession()
+
+        monkeypatch.setattr(Server, "request_context", property(lambda self: _FakeRequestContext()))
+
+        result = self._call_tool(container, "memory_save", {"title": "Stamped", "what": "via clientInfo"})
+        assert result.isError is False
+        payload = json.loads(result.content[0].text)
+        mem = container.memory_repo.get(payload["id"])
+        assert mem["source"] == "claude-code"
+
+    def test_memory_save_explicit_source_wins_over_client_info(self, container, monkeypatch):
+        from mcp.server.lowlevel.server import Server
+
+        class _FakeClientInfo:
+            name = "Claude Code"
+
+        class _FakeClientParams:
+            clientInfo = _FakeClientInfo()
+
+        class _FakeSession:
+            client_params = _FakeClientParams()
+
+        class _FakeRequestContext:
+            session = _FakeSession()
+
+        monkeypatch.setattr(Server, "request_context", property(lambda self: _FakeRequestContext()))
+
+        result = self._call_tool(
+            container, "memory_save", {"title": "Explicit", "what": "explicit source wins", "source": "codex"}
+        )
+        assert result.isError is False
+        payload = json.loads(result.content[0].text)
+        mem = container.memory_repo.get(payload["id"])
+        assert mem["source"] == "codex"
+
     def test_memory_context_succeeds_via_call_tool(self, container):
         mem_svc = MemoryService(container)
         handle_save(mem_svc, title="Context via MCP", what="Context item", project="test")
@@ -490,6 +598,9 @@ class TestIsError:
     def test_memory_delete_not_found_is_error(self, container):
         result = self._call_tool(container, "memory_delete", {"memory_id": "nonexistent"})
         assert result.isError is True
+        text = result.content[0].text
+        assert "not enabled" not in text
+        assert "Memory not found: nonexistent" in text
 
     def test_journey_update_not_found_is_error(self, container):
         result = self._call_tool(container, "journey_update", {"journey_id": "nope"})
@@ -502,10 +613,16 @@ class TestIsError:
     def test_insights_ack_not_found_is_error(self, container):
         result = self._call_tool(container, "insights_ack", {"insight_id": "nope"})
         assert result.isError is True
+        text = result.content[0].text
+        assert "not enabled" not in text
+        assert "ID prefix must be at least" in text
 
     def test_draft_adr_not_found_is_error(self, container):
         result = self._call_tool(container, "draft_adr", {"memory_id": "nope"})
         assert result.isError is True
+        text = result.content[0].text
+        assert "not enabled" not in text
+        assert "Memory nope not found" in text
 
     def test_link_nonexistent_source_is_error(self, container):
         result = self._call_tool(
@@ -520,6 +637,9 @@ class TestIsError:
             },
         )
         assert result.isError is True
+        text = result.content[0].text
+        assert "not enabled" not in text
+        assert "Source memory not found: nope" in text
 
     def test_success_is_not_error(self, container):
         """Successful ops must still have isError=False."""
@@ -612,10 +732,63 @@ class TestCategoryCoercionWarning:
         assert coercion_warnings == []
 
 
+class TestMemorySearchDetailLevels:
+    def test_search_minimal(self, mem_svc):
+        handle_save(mem_svc, title="Search Min Test", what="the what", why="the why", project="test")
+        results = json.loads(handle_search(mem_svc, query="Search Min Test", project="test", detail="minimal"))
+        assert len(results) >= 1
+        r = results[0]
+        assert set(r.keys()) == {"id", "title", "category", "score"}
+
+    def test_search_default_is_standard(self, mem_svc):
+        handle_save(
+            mem_svc, title="Search Std Test", what="the what", why="the why", impact="the impact", project="test"
+        )
+        results = json.loads(handle_search(mem_svc, query="Search Std Test", project="test"))
+        assert len(results) >= 1
+        r = results[0]
+        assert set(r.keys()) == {"id", "title", "category", "score", "what", "tags", "project", "date", "has_details"}
+
+    def test_search_full(self, mem_svc):
+        handle_save(
+            mem_svc, title="Search Full Test", what="the what", why="the why", impact="the impact", project="test"
+        )
+        results = json.loads(handle_search(mem_svc, query="Search Full Test", project="test", detail="full"))
+        assert len(results) >= 1
+        r = results[0]
+        assert set(r.keys()) == {
+            "id",
+            "title",
+            "what",
+            "why",
+            "impact",
+            "category",
+            "tags",
+            "project",
+            "org",
+            "created_at",
+            "score",
+            "has_details",
+            "ttl_days",
+            "confidence",
+        }
+        assert r["why"] == "the why"
+        assert r["impact"] == "the impact"
+
+    def test_search_invalid_detail_falls_back_to_standard(self, mem_svc):
+        handle_save(mem_svc, title="Search Fallback Test", what="the what", project="test")
+        results = json.loads(handle_search(mem_svc, query="Search Fallback Test", project="test", detail="bogus"))
+        assert len(results) >= 1
+        r = results[0]
+        assert set(r.keys()) == {"id", "title", "category", "score", "what", "tags", "project", "date", "has_details"}
+
+
 class TestSearchTTLConfidence:
+    # ttl_days/confidence only appear in the "full" detail level (see
+    # TestMemorySearchDetailLevels) — standard, the new default, omits them.
     def test_search_result_includes_ttl_and_confidence(self, mem_svc):
         handle_save(mem_svc, title="TTL mem", what="expires soon", ttl_days=30, confidence=0.9, project="test")
-        results = json.loads(handle_search(mem_svc, query="TTL mem", project="test"))
+        results = json.loads(handle_search(mem_svc, query="TTL mem", project="test", detail="full"))
         assert len(results) >= 1
         r = results[0]
         assert "ttl_days" in r
@@ -625,7 +798,7 @@ class TestSearchTTLConfidence:
 
     def test_search_result_ttl_none_when_not_set(self, mem_svc):
         handle_save(mem_svc, title="No TTL mem", what="permanent", project="test")
-        results = json.loads(handle_search(mem_svc, query="No TTL mem", project="test"))
+        results = json.loads(handle_search(mem_svc, query="No TTL mem", project="test", detail="full"))
         assert len(results) >= 1
         assert results[0]["ttl_days"] is None
         assert results[0]["confidence"] is None
@@ -764,6 +937,63 @@ class TestContextSurfacesInsights:
 
         result = json.loads(handle_context(svc, project="p", detail="standard"))
         assert "insights" not in result
+
+
+class TestContextSurfacesStaleJourneys:
+    def test_standard_detail_includes_stale_journey(self, container):
+        from datetime import datetime, timedelta, timezone
+
+        old = (datetime.now(timezone.utc) - timedelta(days=20)).isoformat()
+        container.journey_repo.insert(
+            {
+                "id": "j-stale-context",
+                "title": "Old spike",
+                "project": "p",
+                "status": "active",
+                "started_at": old,
+                "created_at": old,
+                "updated_at": old,
+            }
+        )
+        svc = MemoryService(container)
+
+        result = json.loads(handle_context(svc, project="p", detail="standard"))
+
+        assert "stale_journeys" in result
+        assert len(result["stale_journeys"]) == 1
+        assert result["stale_journeys"][0]["id"] == "j-stale-context"
+        assert result["stale_journeys"][0]["title"] == "Old spike"
+        assert "idle >14 days" in result["message"]
+
+    def test_no_stale_journeys_key_when_fresh(self, container):
+        js = JourneyService(container)
+        js.start("Fresh journey", project="p")
+        svc = MemoryService(container)
+
+        result = json.loads(handle_context(svc, project="p", detail="standard"))
+
+        assert "stale_journeys" not in result
+
+    def test_minimal_detail_omits_stale_journeys(self, container):
+        from datetime import datetime, timedelta, timezone
+
+        old = (datetime.now(timezone.utc) - timedelta(days=20)).isoformat()
+        container.journey_repo.insert(
+            {
+                "id": "j-stale-minimal",
+                "title": "Old spike",
+                "project": "p",
+                "status": "active",
+                "started_at": old,
+                "created_at": old,
+                "updated_at": old,
+            }
+        )
+        svc = MemoryService(container)
+
+        result = json.loads(handle_context(svc, project="p", detail="minimal"))
+
+        assert "stale_journeys" not in result
 
 
 class TestEmptyProjectGuard:

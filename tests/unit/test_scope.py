@@ -7,6 +7,7 @@ from arcane.domain.scope import (
     GLOBAL_ORG,
     Scope,
     canonicalize_project,
+    collapse_project_variant,
     resolve_scope,
     resolve_write_scope,
     slugify,
@@ -125,6 +126,24 @@ class TestResolveScope:
         assert sc.project == "grafana-usage-automation"
 
 
+class TestCollapseProjectVariant:
+    def test_worktree_suffix_collapses(self):
+        assert collapse_project_variant("sunrise-robot-sw-inf613", "sunrise-robot-sw") == "sunrise-robot-sw"
+
+    def test_identical_is_noop(self):
+        assert collapse_project_variant("sunrise-robot-sw", "sunrise-robot-sw") == "sunrise-robot-sw"
+
+    def test_unrelated_project_untouched(self):
+        assert collapse_project_variant("monitoring-config", "sunrise-robot-sw") == "monitoring-config"
+
+    def test_no_dash_separator_does_not_collapse(self):
+        assert collapse_project_variant("sunrise-robot-sw2", "sunrise-robot-sw") == "sunrise-robot-sw2"
+
+    def test_empty_explicit_or_resolved_is_noop(self):
+        assert collapse_project_variant("", "x") == ""
+        assert collapse_project_variant("x", "") == "x"
+
+
 class TestResolveWriteScope:
     def test_explicit_project_keeps_repo_org_and_canonicalizes(self):
         cfg = ArcaneConfig(projects=ProjectsConfig(aliases={"legacy-widget": "widget"}))
@@ -137,6 +156,20 @@ class TestResolveWriteScope:
         scope = resolve_write_scope(None, _config(), repo_path="/repos/widget", _remote=("Acme", "widget"))
 
         assert scope == Scope(org="acme", project="widget")
+
+    def test_worktree_variant_collapses_to_git_resolved_project(self):
+        cfg = _config(remotes={"Sunrise-Robotics": "sunrise-robotics"})
+
+        scope = resolve_write_scope("sunrise_robot_sw-inf613", cfg, _remote=("Sunrise-Robotics", "sunrise-robot-sw"))
+
+        assert scope.project == "sunrise-robot-sw"
+
+    def test_genuinely_different_project_still_wins(self):
+        cfg = _config(remotes={"Sunrise-Robotics": "sunrise-robotics"})
+
+        scope = resolve_write_scope("monitoring-config", cfg, _remote=("Sunrise-Robotics", "sunrise-robot-sw"))
+
+        assert scope.project == "monitoring-config"
 
 
 class TestOrgsConfig:
