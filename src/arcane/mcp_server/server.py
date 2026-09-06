@@ -25,6 +25,7 @@ from pydantic import AnyUrl
 
 from arcane import __version__
 from arcane.domain.enums import RelationType
+from arcane.domain.scope import slugify
 from arcane.mcp_server.prompts import (
     PROMPTS,
     build_catchup_prompt,
@@ -75,6 +76,20 @@ def _create_server(container: ServiceContainer) -> Server:
     server = Server("arcane", version=__version__)
     mem_svc = MemoryService(container)
     journey_svc = JourneyService(container)
+
+    def _client_name() -> str | None:
+        """Best-effort slug of the connecting MCP client's name (e.g. "claude-code").
+
+        The initialize handshake's clientInfo.name is only available inside a
+        request context, and any attribute along the path may be missing
+        (notably in tests), so this is defensive end to end.
+        """
+        try:
+            params = server.request_context.session.client_params
+            name = params.clientInfo.name if params and params.clientInfo else None
+        except (LookupError, AttributeError):
+            return None
+        return slugify(name) if name else None
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
@@ -457,7 +472,11 @@ def _create_server(container: ServiceContainer) -> Server:
         # Run them in a worker thread so the asyncio event loop is never blocked.
         args = cast(dict[str, Any], arguments or {})
         handlers = {
-            "memory_save": lambda: handle_save(mem_svc, **args),
+            "memory_save": lambda: handle_save(
+                mem_svc,
+                source=args.get("source") or _client_name(),
+                **{k: v for k, v in args.items() if k != "source"},
+            ),
             "memory_search": lambda: handle_search(mem_svc, **args),
             "memory_context": lambda: handle_context(mem_svc, **args),
             "memory_details": lambda: handle_details(mem_svc, **args),

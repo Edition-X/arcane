@@ -65,6 +65,31 @@ class TestMemoryToolHandlers:
         )
         assert result["action"] == "created"
 
+    def test_handle_save_stores_explicit_source(self, mem_svc, container):
+        result = json.loads(
+            handle_save(
+                mem_svc,
+                title="Sourced",
+                what="Came from codex",
+                project="test",
+                source="codex",
+            )
+        )
+        mem = container.memory_repo.get(result["id"])
+        assert mem["source"] == "codex"
+
+    def test_handle_save_without_source_is_unset(self, mem_svc, container):
+        result = json.loads(
+            handle_save(
+                mem_svc,
+                title="Unsourced",
+                what="No source given",
+                project="test",
+            )
+        )
+        mem = container.memory_repo.get(result["id"])
+        assert not mem["source"]
+
     def test_handle_save_collapses_worktree_project_variant(self, mem_svc, monkeypatch):
         from arcane.domain.scope import Scope
 
@@ -353,6 +378,54 @@ class TestMcpServerCallTool:
 
     def test_server_reports_arcane_version(self, container):
         assert _create_server(container).version == __version__
+
+    def test_memory_save_stamps_source_from_client_info(self, container, monkeypatch):
+        from mcp.server.lowlevel.server import Server
+
+        class _FakeClientInfo:
+            name = "Claude Code"
+
+        class _FakeClientParams:
+            clientInfo = _FakeClientInfo()
+
+        class _FakeSession:
+            client_params = _FakeClientParams()
+
+        class _FakeRequestContext:
+            session = _FakeSession()
+
+        monkeypatch.setattr(Server, "request_context", property(lambda self: _FakeRequestContext()))
+
+        result = self._call_tool(container, "memory_save", {"title": "Stamped", "what": "via clientInfo"})
+        assert result.isError is False
+        payload = json.loads(result.content[0].text)
+        mem = container.memory_repo.get(payload["id"])
+        assert mem["source"] == "claude-code"
+
+    def test_memory_save_explicit_source_wins_over_client_info(self, container, monkeypatch):
+        from mcp.server.lowlevel.server import Server
+
+        class _FakeClientInfo:
+            name = "Claude Code"
+
+        class _FakeClientParams:
+            clientInfo = _FakeClientInfo()
+
+        class _FakeSession:
+            client_params = _FakeClientParams()
+
+        class _FakeRequestContext:
+            session = _FakeSession()
+
+        monkeypatch.setattr(Server, "request_context", property(lambda self: _FakeRequestContext()))
+
+        result = self._call_tool(
+            container, "memory_save", {"title": "Explicit", "what": "explicit source wins", "source": "codex"}
+        )
+        assert result.isError is False
+        payload = json.loads(result.content[0].text)
+        mem = container.memory_repo.get(payload["id"])
+        assert mem["source"] == "codex"
 
     def test_memory_context_succeeds_via_call_tool(self, container):
         mem_svc = MemoryService(container)
