@@ -9,7 +9,7 @@ from datetime import datetime
 
 from arcane.domain.enums import Category
 from arcane.domain.models import RawMemoryInput
-from arcane.domain.scope import GLOBAL_ORG, resolve_scope
+from arcane.domain.scope import GLOBAL_ORG, resolve_scope, resolve_write_scope
 from arcane.infra.db.ids import IdentifierResolutionError
 from arcane.services.memory import MemoryService
 
@@ -84,7 +84,12 @@ def handle_save(
         org_final, project_final = (org or resolved.org), ""
     else:
         org_final = org or resolved.org
-        project_final = project if project is not None else resolved.project
+        if project is not None:
+            # Canonicalise and collapse worktree variants through the same
+            # path the service uses, so the echoed scope matches the stored row.
+            project_final = resolve_write_scope(project, svc.c.config).project
+        else:
+            project_final = resolved.project
         if not project_final.strip():
             handler_warnings.append(
                 "empty_project: no project resolved for this save — it will be invisible to "

@@ -120,7 +120,7 @@ class TestMemoryToolHandlers:
             )
         )
         assert result["action"] == "created"
-        assert result["scope"]["project"] == "repo-inf999"
+        assert result["scope"]["project"] == "repo"
 
         found = json.loads(handle_search(mem_svc, query="Worktree Save", project="repo"))
         assert any(m["id"] == result["id"] for m in found)
