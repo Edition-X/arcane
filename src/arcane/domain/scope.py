@@ -10,6 +10,8 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import threading
+import time
 from collections.abc import Mapping
 
 from pydantic import BaseModel
@@ -23,6 +25,13 @@ DEFAULT_ORG = "personal"
 RESERVED_ORGS = {GLOBAL_ORG, DEFAULT_ORG}
 
 _REMOTE_RE = re.compile(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?/?$")
+
+# Every MCP call resolves scope from the working directory, and the git
+# subprocess behind it was most of a call's latency. Remotes almost never
+# change mid-session, so a lookup is reused for this many seconds.
+REMOTE_CACHE_TTL_SECONDS = 60.0
+_remote_cache: dict[str, tuple[float, tuple[str | None, str | None]]] = {}
+_remote_cache_lock = threading.Lock()
 
 
 class Scope(BaseModel):
@@ -84,7 +93,26 @@ def git_remote_info(cwd: str) -> tuple[str | None, str | None]:
 
     Best-effort and fast: a short timeout, and any failure (no repo, no remote,
     git missing) resolves to ``(None, None)`` so the caller falls back cleanly.
+    Results are cached per directory for ``REMOTE_CACHE_TTL_SECONDS``.
     """
+    now = time.monotonic()
+    with _remote_cache_lock:
+        cached = _remote_cache.get(cwd)
+    if cached is not None and now - cached[0] < REMOTE_CACHE_TTL_SECONDS:
+        return cached[1]
+    info = _read_git_remote(cwd)
+    with _remote_cache_lock:
+        _remote_cache[cwd] = (now, info)
+    return info
+
+
+def clear_remote_cache() -> None:
+    """Forget cached git remote lookups (tests, or after changing a remote)."""
+    with _remote_cache_lock:
+        _remote_cache.clear()
+
+
+def _read_git_remote(cwd: str) -> tuple[str | None, str | None]:
     try:
         out = subprocess.run(
             ["git", "-C", cwd, "remote", "get-url", "origin"],

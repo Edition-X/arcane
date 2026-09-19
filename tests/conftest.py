@@ -6,6 +6,7 @@ import os
 
 import pytest
 
+from arcane.domain.scope import clear_remote_cache
 from arcane.infra.config import ArcaneConfig, ContextConfig, EmbeddingConfig
 from arcane.infra.db.artifact_repo import ArtifactRepository
 from arcane.infra.db.connection import Database
@@ -32,6 +33,14 @@ class FakeEmbeddingProvider(EmbeddingProvider):
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
         return [self.embed(t) for t in texts]
+
+
+@pytest.fixture(autouse=True)
+def _fresh_remote_cache():
+    """Each test sees git remotes as they are now, not as an earlier test cached them."""
+    clear_remote_cache()
+    yield
+    clear_remote_cache()
 
 
 @pytest.fixture
