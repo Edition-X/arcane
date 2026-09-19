@@ -9,10 +9,17 @@ from datetime import datetime, timezone
 from typing import Any
 
 from arcane.infra.db.connection import Database
+from arcane.infra.db.fts import prefix_or_query
 from arcane.infra.db.ids import resolve_unique_id
 from arcane.infra.redaction import redact, redact_values
 
 logger = logging.getLogger(__name__)
+
+# Candidate pool for filtered KNN. Measured on the live store (1k vectors,
+# 768 dims): scoped recall@3 rose from 94.7% at k=20 to 98.7% at k=200 while
+# a query went from 0.94 ms to 1.11 ms. vec0 rejects k above 4096.
+KNN_MIN_CANDIDATES = 200
+VEC0_MAX_K = 4096
 
 # Reserved org for the "applies everywhere" layer. Mirrors
 # ``arcane.domain.scope.GLOBAL_ORG`` (kept local to avoid an infra→domain import).
@@ -270,6 +277,28 @@ class MemoryRepository:
                 r["scope_rank"] = 0
         return rows
 
+    def find_by_title(self, title: str, project: str, org: str | None = None) -> dict[str, Any] | None:
+        """Newest live memory titled *title* (ignoring case and edge spaces) in the exact scope layer.
+
+        With an *org*, only the layer being written is searched: the project
+        layer when *project* is set, else the org layer. Without an org, the
+        match is confined to *project*.
+        """
+        where_clauses = [MemoryRepository._not_expired_clause(), "lower(trim(m.title)) = lower(trim(?))"]
+        params: list[Any] = [title]
+        if org:
+            scope_sql, scope_params = self._scope_where(org, project, include_org=not project, include_global=False)
+            where_clauses.append(scope_sql)
+            params += scope_params
+        else:
+            where_clauses.append("m.project = ?")
+            params.append(project)
+        row = self.db.fetchone(
+            f"SELECT m.* FROM memories m WHERE {' AND '.join(where_clauses)} ORDER BY m.created_at DESC LIMIT 1",
+            params,
+        )
+        return _process_row(row) if row else None
+
     def list_projects(self) -> list[dict[str, Any]]:
         """Distinct (project, org) pairs with counts — for backfill and audits."""
         return self.db.fetchall(
@@ -319,10 +348,9 @@ class MemoryRepository:
         include_org: bool = True,
         include_global: bool = True,
     ) -> list[dict[str, Any]]:
-        terms = query.split()
-        if not terms:
+        fts_query = prefix_or_query(query)
+        if fts_query is None:
             return []
-        fts_query = " OR ".join(f'"{term}"*' for term in terms)
 
         where_clauses: list[str] = [MemoryRepository._not_expired_clause()]
         params: list[Any] = [fts_query]
@@ -372,16 +400,16 @@ class MemoryRepository:
     ) -> list[dict[str, Any]]:
         """Return the nearest-neighbour memories for ``query_embedding``.
 
-        Project/source/scope filters are applied inside SQL (via a JOIN
-        condition) so that the ``limit`` guarantee is meaningful — we never burn
-        our k budget on rows that will be discarded afterwards.
+        vec0 picks its ``k`` nearest rows *before* the JOIN applies the
+        scope, source and expiry filters, so a narrow ``k`` spent on other
+        projects' rows would starve a scoped search. vec0 KNN is an exact
+        brute-force scan whose cost barely depends on ``k``, so the candidate
+        pool is always wide.
         """
         if not self._has_vec_table():
             return []
 
-        # Fetch a wider candidate pool when filters are active so the final
-        # result still has a chance of reaching ``limit`` rows.
-        fetch_k = limit * 5 if (project or source or org is not None) else limit
+        fetch_k = min(max(limit * 5, KNN_MIN_CANDIDATES), VEC0_MAX_K)
 
         vec_bytes = struct.pack(f"{len(query_embedding)}f", *query_embedding)
 

@@ -8,6 +8,7 @@ from typing import Any
 from arcane.domain.enums import RelationType
 from arcane.domain.models import Relationship
 from arcane.domain.scope import resolve_write_scope
+from arcane.infra.db.ids import IdentifierResolutionError, resolve_entity_id
 from arcane.infra.redaction import redact_values
 from arcane.plugins.protocols import IngestionPlugin
 from arcane.services.container import ServiceContainer
@@ -27,7 +28,16 @@ class IngestionService:
         journey_id: str | None = None,
         repo_path: str | None = None,
     ) -> dict[str, Any]:
-        """Run a single ingestion plugin and store results."""
+        """Run a single ingestion plugin and store results.
+
+        Raises ``IdentifierResolutionError`` when *journey_id* does not
+        identify exactly one journey, before any artifact is written.
+        """
+        if journey_id:
+            resolved_journey = resolve_entity_id(self.c.db, "journey", journey_id)
+            if resolved_journey is None:
+                raise IdentifierResolutionError(f"Journey not found: {journey_id}")
+            journey_id = resolved_journey
         project = resolve_write_scope(project, self.c.config, repo_path=repo_path).project
         artifacts = plugin.ingest(project=project, since=since)
 

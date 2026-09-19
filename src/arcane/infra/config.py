@@ -19,6 +19,9 @@ class EmbeddingConfig(BaseModel):
     model: str = "nomic-embed-text"
     base_url: str | None = "http://localhost:11434"
     api_key: str | None = None
+    # Start a local Ollama when it is not running (provider "ollama" only).
+    # The ARCANE_OLLAMA_AUTOSTART=0 env var overrides this to off.
+    autostart: bool = True
 
     model_config = {"extra": "ignore"}
 

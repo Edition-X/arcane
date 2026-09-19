@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from arcane.infra.db.ids import IdentifierResolutionError
 from arcane.services.container import ServiceContainer
 
 
@@ -22,7 +23,10 @@ def handle_artifact_search(
 
 def handle_artifact_details(container: ServiceContainer, artifact_id: str) -> str:
     """Return full artifact data, including parsed raw ingestion data."""
-    artifact = container.artifact_repo.get(artifact_id)
+    try:
+        artifact = container.artifact_repo.get(artifact_id)
+    except IdentifierResolutionError as exc:
+        return json.dumps({"error": str(exc)})
     if not artifact:
         return json.dumps({"error": f"Artifact not found: {artifact_id}"})
     return json.dumps(_artifact_details(artifact))

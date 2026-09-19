@@ -85,14 +85,29 @@ def create_container(home: str | None = None) -> ServiceContainer:
     )
 
 
+def start_embedding_backend(config: ArcaneConfig) -> None:
+    """Start a local Ollama in the background when it is the provider and is down.
+
+    Called when a long-lived process (the MCP server) starts, so Ollama is
+    usually up before the first save needs it. Never blocks.
+    """
+    if config.embedding.provider != "ollama":
+        return
+    from arcane.infra.embeddings.ollama import autostart_enabled, start_in_background
+
+    if autostart_enabled(config.embedding.autostart):
+        start_in_background(config.embedding.base_url or "http://localhost:11434")
+
+
 def _create_embedding_provider(config: ArcaneConfig) -> EmbeddingProvider:
     provider = config.embedding.provider
     if provider == "ollama":
-        from arcane.infra.embeddings.ollama import OllamaEmbedding
+        from arcane.infra.embeddings.ollama import OllamaEmbedding, autostart_enabled
 
         return OllamaEmbedding(
             model=config.embedding.model,
             base_url=config.embedding.base_url or "http://localhost:11434",
+            autostart=autostart_enabled(config.embedding.autostart),
         )
     elif provider == "openai":
         from arcane.infra.embeddings.openai_embed import OpenAIEmbedding

@@ -5,11 +5,14 @@ from __future__ import annotations
 import logging
 import math
 import os
+import struct
 from datetime import date
 from typing import Any
 
+from arcane.domain.enums import RelationType
 from arcane.domain.models import Memory, RawMemoryInput
 from arcane.domain.scope import GLOBAL_ORG, resolve_read_project, resolve_write_scope, slugify
+from arcane.infra.db.ids import IdentifierResolutionError, resolve_entity_id
 from arcane.infra.db.schema import create_vec_table
 from arcane.infra.markdown import remove_session_memory, write_session_memory
 from arcane.infra.redaction import redact, redact_values
@@ -17,6 +20,9 @@ from arcane.infra.search import hybrid_search, tiered_search
 from arcane.services.container import ServiceContainer
 
 logger = logging.getLogger(__name__)
+
+# Texts sent to the embedding provider per request during a reindex.
+REINDEX_BATCH_SIZE = 64
 
 
 class DimensionMismatchError(Exception):
@@ -106,6 +112,25 @@ class MemoryService:
             ]
         return []
 
+    def _resolve_journey(self, journey_id: str | None, warnings: list[str]) -> str | None:
+        """Resolve a caller-supplied journey ID or prefix to the stored full ID.
+
+        A bad journey reference must not lose the save, so it becomes a warning
+        and the memory is stored unlinked.
+        """
+        if not journey_id:
+            return None
+        try:
+            full_id = resolve_entity_id(self.c.db, "journey", journey_id)
+        except IdentifierResolutionError as exc:
+            warnings.append(f"journey_not_linked: {exc} The memory was saved without a journey link.")
+            return None
+        if full_id is None:
+            warnings.append(
+                f"journey_not_found: no journey matches '{journey_id}'. The memory was saved without a journey link."
+            )
+        return full_id
+
     @staticmethod
     def _near_duplicate_message(title: str, memory_id: str, score: float | None) -> str:
         score_part = f", similarity {score:.2f}" if score is not None else ""
@@ -120,17 +145,18 @@ class MemoryService:
         project: str,
         org: str,
         fts_candidates: list[dict[str, Any]],
+        embedding: list[float] | None,
     ) -> str | None:
         """Return a warning when the new memory is semantically close to an existing one.
 
-        Advisory only — a false positive must never lose a save, so every
-        failure path degrades to ``None`` (or to a normalised-title match when
-        embeddings are down). The search is confined to the exact scope layer
-        being written, mirroring the exact-title dedup above.
+        *embedding* is the new memory's own stored embedding, so the check
+        compares like with like and costs no extra embedding call. Advisory
+        only — a false positive must never lose a save, so every failure path
+        degrades to ``None`` (or to a normalised-title match when embeddings
+        are down). The search is confined to the exact scope layer being
+        written, mirroring the exact-title dedup.
         """
-        try:
-            embedding = self.c.embedding_provider.embed(redact(f"{raw.title}\n{raw.what}", self.c.ignore_patterns))
-        except Exception:
+        if embedding is None:
             # Embeddings unavailable — fall back to a normalised-title match
             # over the FTS candidates so the check still does something.
             norm_title = slugify(raw.title)
@@ -157,8 +183,7 @@ class MemoryService:
             # ranks fine but is meaningless as an absolute threshold.
             best: tuple[float, dict[str, Any]] | None = None
             for hit in hits:
-                rowid = self.c.memory_repo.get_rowid(hit["id"])
-                stored = self.c.memory_repo.get_vector(rowid) if rowid is not None else None
+                stored = self.c.memory_repo.get_vector(hit["rowid"])
                 if stored is None:
                     continue
                 sim = _cosine_similarity(embedding, stored)
@@ -172,14 +197,6 @@ class MemoryService:
             return self._near_duplicate_message(best[1]["title"], best[1]["id"], best[0])
         return None
 
-    def _embed_and_store(
-        self, rowid: int, title: str, what: str, why: str | None, impact: str | None, tags: list[str]
-    ) -> None:
-        """Compute embedding and upsert into the vector table. Logs on failure."""
-        embedding = self._prepare_embedding(title, what, why, impact, tags)
-        if embedding is not None:
-            self._store_embedding(rowid, embedding)
-
     def _prepare_embedding(
         self, title: str, what: str, why: str | None, impact: str | None, tags: list[str]
     ) -> list[float] | None:
@@ -187,8 +204,11 @@ class MemoryService:
         text = _embedding_text(title, what, why, impact, tags, self.c.ignore_patterns)
         try:
             return self.c.embedding_provider.embed(text)
-        except Exception:
-            logger.warning("Embedding failed — memory will be saved without a vector.", exc_info=True)
+        except Exception as exc:
+            # One line per failure: an unreachable provider (e.g. Ollama not
+            # running) is routine, and a traceback per save floods MCP logs.
+            logger.warning("Embedding failed (%s) — memory will be saved without a vector.", exc)
+            logger.debug("Embedding failure detail", exc_info=True)
             return None
 
     def _store_embedding(self, rowid: int, embedding: list[float]) -> None:
@@ -222,9 +242,17 @@ class MemoryService:
         assert isinstance(raw_data, dict)
         raw = RawMemoryInput.model_validate(raw_data)
         warnings = self._details_warnings(raw)
+        journey_id = self._resolve_journey(raw.journey_id, warnings)
+        raw = raw.model_copy(update={"journey_id": journey_id})
 
-        # Dedup check — FTS search by title + what, confined to the exact scope
-        # layer being written so an org/global write can't merge into a project.
+        # Exact-title dedup, confined to the exact scope layer being written so
+        # an org/global write can't merge into a project.
+        existing = self.c.memory_repo.find_by_title(raw.title, project, org)
+        if existing:
+            return self._merge_into(existing, raw, today, warnings)
+
+        # New memory — warn (never block) when it looks semantically close to
+        # an existing one. FTS candidates back the check when embeddings are down.
         candidates: list[dict[str, Any]] = []
         try:
             if org:
@@ -241,47 +269,14 @@ class MemoryService:
         except Exception:
             logger.debug("FTS dedup search failed; treating as new memory", exc_info=True)
 
-        if candidates:
-            top = candidates[0]
-            title_match = raw.title.strip().lower() == top["title"].strip().lower()
-
-            if title_match:
-                existing_id = top["id"]
-                merged_tags = self._merge_tags(top.get("tags") or [], raw.tags)
-                details_append = f"--- updated {today} ---\n{raw.details}" if raw.details else None
-                embedding = self._prepare_embedding(top["title"], raw.what, raw.why, raw.impact, merged_tags)
-
-                with self.c.db.transaction():
-                    self.c.memory_repo.update(
-                        memory_id=existing_id,
-                        what=raw.what,
-                        why=raw.why,
-                        impact=raw.impact,
-                        tags=merged_tags,
-                        details_append=details_append,
-                    )
-                    rowid = self.c.memory_repo.get_rowid(existing_id)
-                    if rowid is not None and embedding is not None:
-                        self._store_embedding(rowid, embedding)
-                logger.debug("Merged duplicate memory id=%s", existing_id)
-
-                return {
-                    "id": existing_id,
-                    "file_path": top.get("file_path", ""),
-                    "action": "updated",
-                    "warnings": warnings,
-                }
-
-        # New memory — warn (never block) when it looks semantically close to
-        # an existing one the exact-title check above missed.
-        near_dup = self._near_duplicate_warning(raw, project, org, candidates)
+        embedding = self._prepare_embedding(raw.title, raw.what, raw.why, raw.impact, raw.tags)
+        near_dup = self._near_duplicate_warning(raw, project, org, candidates, embedding)
         if near_dup:
             warnings.append(near_dup)
 
         file_path = os.path.join(vault_project_dir, f"{today}-session.md")
         mem = Memory.from_raw(raw, project=project, org=org, file_path=file_path)
         mem_dict = mem.model_dump()
-        embedding = self._prepare_embedding(mem.title, mem.what, mem.why, mem.impact, mem.tags)
 
         with self.c.db.transaction():
             rowid = self.c.memory_repo.insert(mem_dict, details=raw.details)
@@ -295,6 +290,41 @@ class MemoryService:
         logger.debug("Created memory id=%s project=%s", mem.id, project)
 
         return {"id": mem.id, "file_path": file_path, "action": "created", "warnings": warnings}
+
+    def _merge_into(
+        self, existing: dict[str, Any], raw: RawMemoryInput, today: str, warnings: list[str]
+    ) -> dict[str, Any]:
+        """Fold a same-titled save into *existing* instead of creating a duplicate."""
+        existing_id = existing["id"]
+        merged_tags = self._merge_tags(existing.get("tags") or [], raw.tags)
+        details_append = f"--- updated {today} ---\n{raw.details}" if raw.details else None
+        embedding = self._prepare_embedding(existing["title"], raw.what, raw.why, raw.impact, merged_tags)
+
+        with self.c.db.transaction():
+            self.c.memory_repo.update(
+                memory_id=existing_id,
+                what=raw.what,
+                why=raw.why,
+                impact=raw.impact,
+                tags=merged_tags,
+                details_append=details_append,
+            )
+            if embedding is not None:
+                self._store_embedding(existing["rowid"], embedding)
+            if raw.journey_id and not self.c.relationship_repo.exists(
+                "memory", existing_id, "journey", raw.journey_id, RelationType.PART_OF.value
+            ):
+                from arcane.services.journey import JourneyService
+
+                JourneyService(self.c).link_memory(raw.journey_id, existing_id)
+        logger.debug("Merged duplicate memory id=%s", existing_id)
+
+        return {
+            "id": existing_id,
+            "file_path": existing.get("file_path", ""),
+            "action": "updated",
+            "warnings": warnings,
+        }
 
     def search(
         self,
@@ -520,52 +550,55 @@ class MemoryService:
             return deleted
 
     def reindex(self, progress_callback: Any = None) -> dict[str, Any]:
-        """Rebuild the vector index from scratch using a crash-safe strategy.
+        """Rebuild the vector index from scratch.
 
-        All embeddings are written to a *staging* virtual table first.  Only
-        when every row has been embedded successfully is the staging table
-        atomically swapped into place, making the operation resumable and
-        safe to interrupt.
+        Every embedding is computed before the database is touched: embedding
+        is slow, and holding the write lock meanwhile would make every other
+        Arcane process fail with ``database is locked``. The table is then
+        dropped, recreated and filled in one short transaction, so an
+        interrupted run leaves the old index intact. (A vec0 table cannot be
+        swapped in with ``ALTER TABLE ... RENAME``: its shadow tables keep
+        their old names and the renamed table stops working.)
         """
-        probe = self.c.embedding_provider.embed("dimension probe")
-        dim = len(probe)
-
         memories = self.c.memory_repo.list_all_for_reindex()
         total = len(memories)
-        logger.info("Reindexing %d memories with dim=%d model=%s", total, dim, self.c.config.embedding.model)
+        logger.info("Reindexing %d memories with model=%s", total, self.c.config.embedding.model)
 
-        # Build into a staging table so interruptions don't leave the live
-        # table in a half-populated state.
-        self.c.db.execute("DROP TABLE IF EXISTS memories_vec_staging")
-        self.c.db.execute(f"""
-            CREATE VIRTUAL TABLE memories_vec_staging USING vec0(
-                rowid INTEGER PRIMARY KEY,
-                embedding float[{dim}]
+        texts = [
+            _embedding_text(
+                mem["title"], mem["what"], mem.get("why"), mem.get("impact"), mem["tags"], self.c.ignore_patterns
             )
-        """)
-
-        import struct
-
-        for i, mem in enumerate(memories):
-            tags = mem.get("tags") or []  # already deserialized by _process_row
-            text = _embedding_text(
-                mem["title"], mem["what"], mem.get("why"), mem.get("impact"), tags, self.c.ignore_patterns
-            )
-            embedding = self.c.embedding_provider.embed(text)
-            vec_bytes = struct.pack(f"{dim}f", *embedding)
-            self.c.db.execute(
-                "INSERT INTO memories_vec_staging (rowid, embedding) VALUES (?, ?)",
-                (mem["rowid"], vec_bytes),
-            )
-
+            for mem in memories
+        ]
+        packed: list[bytes] = []
+        dim: int | None = None
+        for start in range(0, total, REINDEX_BATCH_SIZE):
+            for embedding in self.c.embedding_provider.embed_batch(texts[start : start + REINDEX_BATCH_SIZE]):
+                if dim is None:
+                    dim = len(embedding)
+                elif len(embedding) != dim:
+                    raise ValueError(f"Embedding provider returned mixed dimensions ({dim} and {len(embedding)}).")
+                packed.append(struct.pack(f"{dim}f", *embedding))
             if progress_callback:
-                progress_callback(i + 1, total)
+                progress_callback(len(packed), total)
+        if dim is None:
+            dim = len(self.c.embedding_provider.embed("dimension probe"))
 
-        # Atomic swap: drop live table, rename staging → live.
-        self.c.db.execute("DROP TABLE IF EXISTS memories_vec")
-        self.c.db.execute("ALTER TABLE memories_vec_staging RENAME TO memories_vec")
-        self.c.memory_repo.set_embedding_dim(dim)
-        self.c.db.commit()
+        stored_dim = self.c.memory_repo.get_embedding_dim()
+        last_rowid = memories[-1]["rowid"] if memories else 0
+        rows: list[tuple[int, bytes]] = [(mem["rowid"], vec) for mem, vec in zip(memories, packed)]
+        with self.c.db.transaction():
+            # Memories saved while the embeddings were computed already have a
+            # vector in the live table; carry those over when the shape matches.
+            if stored_dim == dim and self.c.memory_repo._has_vec_table():
+                late = self.c.db.fetchall("SELECT rowid, embedding FROM memories_vec WHERE rowid > ?", (last_rowid,))
+                rows += [(row["rowid"], row["embedding"]) for row in late]
+            # Left behind by an interrupted run of the old staging-table reindex.
+            self.c.db.execute("DROP TABLE IF EXISTS memories_vec_staging")
+            self.c.memory_repo.drop_vec_table()
+            create_vec_table(self.c.db, dim)
+            self.c.db.executemany("INSERT INTO memories_vec (rowid, embedding) VALUES (?, ?)", rows)
+            self.c.memory_repo.set_embedding_dim(dim)
         self.c.memory_repo.invalidate_vec_cache()
 
         return {"count": total, "dim": dim, "model": self.c.config.embedding.model}

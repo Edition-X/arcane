@@ -2,6 +2,8 @@
 
 Arcane exposes 25 tools, 1 resource template, and 3 prompts to MCP-compatible agents. 13 are in the default `core` tool profile; the rest require `ARCANE_TOOL_PROFILE=full` (see `ARCANE_TOOL_PROFILE` in the environment variable table).
 
+A call with an argument the tool does not accept returns an `Invalid arguments for tool '<name>'` error naming the argument.
+
 ---
 
 ## Memory tools
@@ -23,7 +25,7 @@ Save a memory for future sessions. Call this before ending any session where you
 | `related_files` | array of strings | no | File paths relevant to this memory |
 | `details` | string | no | Full context — options considered, tradeoffs, follow-up |
 | `project` | string | no | Project name (defaults to current directory name). Worktree-style variants of the current repo (`<repo>-<suffix>`) collapse to `<repo>`. |
-| `journey_id` | string | no | Link this memory to an active journey |
+| `journey_id` | string | no | Journey ID or unambiguous prefix to link this memory to. An unknown or ambiguous ID adds a `journey_not_found`/`journey_not_linked` warning and saves the memory unlinked. |
 | `ttl_days` | integer | no | Days until this memory expires from search results. Omit for permanent memories. |
 | `confidence` | number | no | Confidence in accuracy 0.0–1.0. Omit if not applicable. |
 
@@ -191,10 +193,10 @@ Create a typed relationship between two entities (memory, journey, or artifact).
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `source_type` | string | yes | `memory`, `journey`, or `artifact` |
-| `source_id` | string | yes | Source entity ID |
+| `source_id` | string | yes | Source entity ID or unambiguous prefix (stored as the full ID) |
 | `target_type` | string | yes | `memory`, `journey`, or `artifact` |
-| `target_id` | string | yes | Target entity ID |
-| `relation` | string | yes | Relationship type (e.g. `caused_by`, `implements`, `supersedes`) |
+| `target_id` | string | yes | Target entity ID or unambiguous prefix (stored as the full ID) |
+| `relation` | string | yes | One of: `led_to`, `informed_by`, `resulted_in`, `part_of`, `supersedes`, `references` |
 
 ---
 
@@ -207,7 +209,7 @@ Walk the relationship graph outward from an entity to find connected knowledge.
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `entity_type` | string | yes | `memory`, `journey`, or `artifact` |
-| `entity_id` | string | yes | Starting entity ID |
+| `entity_id` | string | yes | Starting entity ID or unambiguous prefix |
 | `max_depth` | integer | no | Maximum hops to follow (default: 5) |
 
 ---
@@ -252,7 +254,7 @@ Import commits from a local git repository as searchable artifacts.
 | `project` | string | no | Project name to tag the artifacts |
 | `repo_path` | string | no | Path to the git repository (defaults to current directory) |
 | `max_count` | integer | no | Maximum number of commits to import (default: 100) |
-| `journey_id` | string | no | Link ingested artifacts to a journey |
+| `journey_id` | string | no | Journey ID or unambiguous prefix to link ingested artifacts to. An unknown ID is an error and nothing is ingested. |
 
 ---
 
@@ -267,7 +269,7 @@ Import CI runs from GitHub Actions as artifacts.
 | `owner` | string | yes | GitHub repository owner |
 | `repo` | string | yes | GitHub repository name |
 | `project` | string | no | Project name to tag the artifacts |
-| `journey_id` | string | no | Link ingested artifacts to a journey |
+| `journey_id` | string | no | Journey ID or unambiguous prefix to link ingested artifacts to. An unknown ID is an error and nothing is ingested. |
 
 Requires `GITHUB_TOKEN` to be set.
 
@@ -283,7 +285,7 @@ Import tickets from Linear as artifacts.
 |---|---|---|---|
 | `team_id` | string | yes | Linear team ID |
 | `project` | string | no | Project name to tag the artifacts |
-| `journey_id` | string | no | Link ingested artifacts to a journey |
+| `journey_id` | string | no | Journey ID or unambiguous prefix to link ingested artifacts to. An unknown ID is an error and nothing is ingested. |
 
 Requires `LINEAR_API_KEY` to be set.
 

@@ -211,3 +211,42 @@ class TestDedupConfig:
 
     def test_default_on_arcane_config(self):
         assert ArcaneConfig().dedup.threshold == 0.92
+
+
+class TestGitRemoteCache:
+    def test_repeat_lookups_reuse_one_git_call(self, monkeypatch):
+        from arcane.domain import scope
+
+        calls: list[str] = []
+        monkeypatch.setattr(scope, "_read_git_remote", lambda cwd: calls.append(cwd) or ("Acme", "widget"))
+
+        assert scope.git_remote_info("/repo") == ("Acme", "widget")
+        assert scope.git_remote_info("/repo") == ("Acme", "widget")
+        scope.git_remote_info("/other")
+
+        assert calls == ["/repo", "/other"]
+
+    def test_entries_expire(self, monkeypatch):
+        from arcane.domain import scope
+
+        calls: list[str] = []
+        monkeypatch.setattr(scope, "_read_git_remote", lambda cwd: calls.append(cwd) or (None, None))
+        clock = iter([0.0, scope.REMOTE_CACHE_TTL_SECONDS + 1])
+        monkeypatch.setattr(scope.time, "monotonic", lambda: next(clock))
+
+        scope.git_remote_info("/repo")
+        scope.git_remote_info("/repo")
+
+        assert calls == ["/repo", "/repo"]
+
+    def test_clear_forgets_lookups(self, monkeypatch):
+        from arcane.domain import scope
+
+        calls: list[str] = []
+        monkeypatch.setattr(scope, "_read_git_remote", lambda cwd: calls.append(cwd) or (None, None))
+
+        scope.git_remote_info("/repo")
+        scope.clear_remote_cache()
+        scope.git_remote_info("/repo")
+
+        assert calls == ["/repo", "/repo"]

@@ -6,6 +6,8 @@ import json
 from typing import Any
 
 from arcane.infra.db.connection import Database
+from arcane.infra.db.fts import prefix_or_query
+from arcane.infra.db.ids import resolve_unique_id
 from arcane.infra.redaction import redact_values
 
 
@@ -49,7 +51,10 @@ class ArtifactRepository:
         )
 
     def get(self, artifact_id: str) -> dict[str, Any] | None:
-        return self.db.fetchone("SELECT * FROM artifacts WHERE id LIKE ?", (artifact_id + "%",))
+        full_id = resolve_unique_id(self.db, "artifacts", artifact_id)
+        if full_id is None:
+            return None
+        return self.db.fetchone("SELECT * FROM artifacts WHERE id = ?", (full_id,))
 
     def fts_search(
         self,
@@ -59,10 +64,9 @@ class ArtifactRepository:
         limit: int = 10,
     ) -> list[dict[str, Any]]:
         """Search artifact metadata and ingested raw content with FTS5."""
-        terms = query.split()
-        if not terms:
+        fts_query = prefix_or_query(query)
+        if fts_query is None:
             return []
-        fts_query = " OR ".join(f'"{term}"*' for term in terms)
         clauses: list[str] = []
         params: list[Any] = [fts_query]
         if project:

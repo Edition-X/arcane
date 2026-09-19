@@ -7,6 +7,7 @@ import json
 import click
 
 from arcane.cli._utils import create_container
+from arcane.infra.db.ids import IdentifierResolutionError
 
 
 @click.group()
@@ -35,7 +36,10 @@ def artifact_search(query: str, project: str | None, artifact_type: str | None, 
 def artifact_show(artifact_id: str) -> None:
     """Show complete artifact data by ID or prefix."""
     with create_container() as container:
-        item = container.artifact_repo.get(artifact_id)
+        try:
+            item = container.artifact_repo.get(artifact_id)
+        except IdentifierResolutionError as exc:
+            raise click.ClickException(str(exc)) from exc
     if not item:
         click.echo(f"Artifact {artifact_id} not found.")
         return

@@ -5,9 +5,26 @@ from __future__ import annotations
 import json
 import os
 
-from arcane.plugins.protocols import IntelligencePlugin
+from arcane.infra.db.ids import IdentifierResolutionError
+from arcane.plugins.protocols import IngestionPlugin, IntelligencePlugin
 from arcane.services.container import ServiceContainer
 from arcane.services.ingestion import IngestionService
+
+
+def _run_ingestion(
+    container: ServiceContainer,
+    plugin: IngestionPlugin,
+    project: str | None,
+    journey_id: str | None,
+    repo_path: str | None = None,
+) -> str:
+    try:
+        result = IngestionService(container).run_plugin(
+            plugin, project=project, journey_id=journey_id, repo_path=repo_path
+        )
+    except IdentifierResolutionError as exc:
+        return json.dumps({"error": str(exc)})
+    return json.dumps(result)
 
 
 def handle_ingest_git(
@@ -21,9 +38,7 @@ def handle_ingest_git(
     from arcane.plugins.builtin.git_ingest import GitIngestionPlugin
 
     plugin = GitIngestionPlugin(repo_path=repo_path or os.getcwd(), max_count=max_count)
-    svc = IngestionService(container)
-    result = svc.run_plugin(plugin, project=project, journey_id=journey_id, repo_path=repo_path)
-    return json.dumps(result)
+    return _run_ingestion(container, plugin, project=project, journey_id=journey_id, repo_path=repo_path)
 
 
 def handle_ingest_gha(
@@ -37,9 +52,7 @@ def handle_ingest_gha(
     from arcane.plugins.builtin.gha_ingest import GHAIngestionPlugin
 
     plugin = GHAIngestionPlugin(owner=owner, repo=repo)
-    svc = IngestionService(container)
-    result = svc.run_plugin(plugin, project=project, journey_id=journey_id)
-    return json.dumps(result)
+    return _run_ingestion(container, plugin, project=project, journey_id=journey_id)
 
 
 def handle_ingest_linear(
@@ -52,9 +65,7 @@ def handle_ingest_linear(
     from arcane.plugins.builtin.linear_ingest import LinearIngestionPlugin
 
     plugin = LinearIngestionPlugin(team_id=team_id)
-    svc = IngestionService(container)
-    result = svc.run_plugin(plugin, project=project, journey_id=journey_id)
-    return json.dumps(result)
+    return _run_ingestion(container, plugin, project=project, journey_id=journey_id)
 
 
 def handle_analyze(

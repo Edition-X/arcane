@@ -147,3 +147,28 @@ class TestIngestionService:
         assert len(container.artifact_repo.list_all(project="test-project")) == 1
         assert len(container.relationship_repo.get_all_for("journey", first["id"])) == 1
         assert len(container.relationship_repo.get_all_for("journey", second["id"])) == 1
+
+
+class TestIngestionJourneyResolution:
+    def test_journey_prefix_links_full_id(self, container):
+        from arcane.services.journey import JourneyService
+
+        journey = JourneyService(container).start("Ingest journey", project="test-project")
+        plugin = FakeIngestionPlugin(results=[_make_artifact("Commit")])
+
+        IngestionService(container).run_plugin(plugin, project="test-project", journey_id=journey["id"][:12])
+
+        shown = JourneyService(container).show(journey["id"])
+        assert [a["artifact"]["title"] for a in shown["linked_artifacts"]] == ["Commit"]
+
+    def test_unknown_journey_is_rejected_before_writing(self, container):
+        import pytest
+
+        from arcane.infra.db.ids import IdentifierResolutionError
+
+        plugin = FakeIngestionPlugin(results=[_make_artifact("Commit")])
+
+        with pytest.raises(IdentifierResolutionError):
+            IngestionService(container).run_plugin(plugin, project="test-project", journey_id="doesnotexist")
+
+        assert container.artifact_repo.count() == 0

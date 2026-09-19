@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from arcane.infra.db.ids import IdentifierResolutionError
 from arcane.infra.redaction import redact
 from arcane.services.container import ServiceContainer
 from arcane.services.journey import JourneyService
@@ -37,11 +38,15 @@ def handle_draft_adr(
     memory_id: str,
 ) -> str:
     """Generate a structured ADR brief from a decision memory."""
-    mem = container.memory_repo.get(memory_id)
+    try:
+        full_id = container.memory_repo.resolve_prefix(memory_id)
+    except IdentifierResolutionError as exc:
+        return json.dumps({"error": str(exc)})
+    mem = container.memory_repo.get(full_id) if full_id else None
     if not mem:
         return json.dumps({"error": f"Memory {memory_id} not found"})
 
-    detail = container.memory_repo.get_details(memory_id)
+    detail = container.memory_repo.get_details(mem["id"])
     detail_body = detail["body"] if detail else ""
 
     brief = f"""# ADR: {mem["title"]}
@@ -50,13 +55,13 @@ def handle_draft_adr(
 Accepted
 
 ## Context
-{mem.get("what", "")}
+{mem.get("what") or ""}
 
 ## Decision
-{mem.get("why", "See details below.")}
+{mem.get("why") or "See details below."}
 
 ## Consequences
-{mem.get("impact", "See details below.")}
+{mem.get("impact") or "See details below."}
 
 ## Details
 {detail_body}
@@ -80,7 +85,7 @@ def _build_project_brief(container: ServiceContainer, project: str) -> str:
     ]
     if memories:
         for mem in memories:
-            category = mem.get("category", "note")
+            category = mem.get("category") or "note"
             lines.append(f"### [{category}] {mem['title']}")
             lines.append(f"**What:** {mem.get('what', '')}")
             if mem.get("why"):
@@ -122,7 +127,7 @@ def _build_journey_brief(journey: dict) -> str:
         for item in memories:
             mem = item["memory"]
             rel = item["relation"]
-            lines.append(f"### [{mem.get('category', 'note')}] {mem['title']}")
+            lines.append(f"### [{mem.get('category') or 'note'}] {mem['title']}")
             lines.append(f"**What:** {mem['what']}")
             if mem.get("why"):
                 lines.append(f"**Why:** {mem['why']}")

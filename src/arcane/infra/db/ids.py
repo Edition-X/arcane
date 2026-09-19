@@ -9,6 +9,9 @@ from arcane.infra.db.connection import Database
 MIN_PREFIX_LENGTH = 8
 _TABLES = {"memories", "journeys", "insights", "artifacts", "relationships"}
 
+# Relationship endpoint types and the table that holds each.
+ENTITY_TABLES = {"memory": "memories", "journey": "journeys", "artifact": "artifacts"}
+
 
 class IdentifierResolutionError(ValueError):
     """A supplied ID cannot safely identify one entity."""
@@ -43,3 +46,15 @@ def resolve_unique_id(db: Database, table: str, value: str) -> str | None:
     if len(matches) > 1:
         raise IdentifierResolutionError("ID prefix is ambiguous; provide more characters.")
     return cast(str, matches[0]["id"])
+
+
+def resolve_entity_id(db: Database, entity_type: str, value: str) -> str | None:
+    """Resolve a relationship endpoint (memory, journey, artifact) to its full ID.
+
+    Relationships are matched by exact ID, so every write path must store the
+    resolved ID — never the prefix a caller typed.
+    """
+    table = ENTITY_TABLES.get(entity_type)
+    if table is None:
+        raise IdentifierResolutionError(f"Unknown entity type '{entity_type}'. Must be one of: {sorted(ENTITY_TABLES)}")
+    return resolve_unique_id(db, table, value)

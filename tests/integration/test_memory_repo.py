@@ -254,3 +254,51 @@ class TestMemoryRepoReassignProject:
 
         assert memory_repo.reassign_project("does-not-exist", "new-name") == 0
         assert memory_repo.get(mem["id"])["project"] == "keep-me"
+
+
+class TestFtsQuoting:
+    def test_unbalanced_quote_in_query_does_not_raise(self, memory_repo):
+        memory_repo.insert(make_memory_dict(title="Locked database", what="SQLite said database is locked"))
+
+        results = memory_repo.fts_search('database "is locked')
+
+        assert [r["title"] for r in results] == ["Locked database"]
+
+
+class TestFindByTitle:
+    def test_matches_ignoring_case_and_edge_spaces(self, memory_repo):
+        mem = make_memory_dict(title="Cache git remote", project="p", org="o")
+        memory_repo.insert(mem)
+
+        found = memory_repo.find_by_title("  cache GIT remote ", "p", "o")
+
+        assert found is not None
+        assert found["id"] == mem["id"]
+
+    def test_confined_to_the_written_layer(self, memory_repo):
+        memory_repo.insert(make_memory_dict(title="Shared title", project="other", org="o"))
+        memory_repo.insert(make_memory_dict(title="Shared title", project="", org="o"))
+
+        assert memory_repo.find_by_title("Shared title", "p", "o") is None
+
+
+class TestVectorSearchScope:
+    def test_scoped_search_reaches_past_closer_out_of_scope_rows(self, memory_repo):
+        from arcane.infra.db.schema import create_vec_table
+
+        create_vec_table(memory_repo.db, 4)
+        memory_repo.set_embedding_dim(4)
+        memory_repo.invalidate_vec_cache()
+        # 60 other-project rows sit closer to the query than the in-scope row,
+        # more than the old limit * 5 candidate pool could see past.
+        for i in range(60):
+            rowid = memory_repo.insert(make_memory_dict(title=f"noise {i}", project="other", org="o"))
+            memory_repo.insert_vector(rowid, [1.0, 0.0, 0.0, 0.001 * i])
+        target = make_memory_dict(title="in scope", project="p", org="o")
+        memory_repo.insert_vector(memory_repo.insert(target), [0.0, 1.0, 0.0, 0.0])
+
+        hits = memory_repo.vector_search(
+            [1.0, 0.0, 0.0, 0.0], limit=3, project="p", org="o", include_org=False, include_global=False
+        )
+
+        assert [h["id"] for h in hits] == [target["id"]]

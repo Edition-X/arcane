@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import os
+from collections.abc import Callable
 from typing import Any, cast
 
 import anyio
@@ -65,7 +67,7 @@ from arcane.mcp_server.tools.memory_tools import (
     handle_update,
 )
 from arcane.mcp_server.tools.relationship_tools import handle_link, handle_trace
-from arcane.services.container import ServiceContainer, create_container
+from arcane.services.container import ServiceContainer, create_container, start_embedding_backend
 from arcane.services.journey import JourneyService
 from arcane.services.memory import MemoryService
 
@@ -511,58 +513,70 @@ def _create_server(container: ServiceContainer) -> Server:
             return [tool for tool in all_tools if tool.name in CORE_TOOLS]
         return all_tools
 
+    # Tool name → (handler, first positional argument). Every handler is a
+    # synchronous function called as handler(target, **arguments).
+    handlers: dict[str, tuple[Callable[..., str], Any]] = {
+        "memory_save": (handle_save, mem_svc),
+        "memory_search": (handle_search, mem_svc),
+        "memory_context": (handle_context, mem_svc),
+        "memory_details": (handle_details, mem_svc),
+        "memory_update": (handle_update, mem_svc),
+        "memory_delete": (handle_delete, mem_svc),
+        "journey_start": (handle_journey_start, journey_svc),
+        "journey_update": (handle_journey_update, journey_svc),
+        "journey_complete": (handle_journey_complete, journey_svc),
+        "journey_abandon": (handle_journey_abandon, journey_svc),
+        "journey_delete": (handle_journey_delete, journey_svc),
+        "journey_list": (handle_journey_list, journey_svc),
+        "journey_show": (handle_journey_show, container),
+        "artifact_search": (handle_artifact_search, container),
+        "artifact_details": (handle_artifact_details, container),
+        "ingest_git": (handle_ingest_git, container),
+        "ingest_gha": (handle_ingest_gha, container),
+        "ingest_linear": (handle_ingest_linear, container),
+        "analyze": (handle_analyze, container),
+        "link": (handle_link, container),
+        "trace": (handle_trace, container),
+        "insights": (handle_insights, container),
+        "insights_ack": (handle_insights_ack, container),
+        "draft_blog": (handle_draft_blog, container),
+        "draft_adr": (handle_draft_adr, container),
+    }
+
     @server.call_tool()
     async def call_tool(name: str, arguments: dict[str, object] | None) -> CallToolResult:
-        # All handler functions are synchronous (SQLite + subprocess work).
-        # Run them in a worker thread so the asyncio event loop is never blocked.
         args = cast(dict[str, Any], arguments or {})
-        handlers = {
-            "memory_save": lambda: handle_save(
-                mem_svc,
-                source=args.get("source") or _client_name(),
-                **{k: v for k, v in args.items() if k != "source"},
-            ),
-            "memory_search": lambda: handle_search(mem_svc, **args),
-            "memory_context": lambda: handle_context(mem_svc, **args),
-            "memory_details": lambda: handle_details(mem_svc, **args),
-            "memory_update": lambda: handle_update(mem_svc, **args),
-            "memory_delete": lambda: handle_delete(mem_svc, **args),
-            "journey_start": lambda: handle_journey_start(journey_svc, **args),
-            "journey_update": lambda: handle_journey_update(journey_svc, **args),
-            "journey_complete": lambda: handle_journey_complete(journey_svc, **args),
-            "journey_abandon": lambda: handle_journey_abandon(journey_svc, **args),
-            "journey_delete": lambda: handle_journey_delete(journey_svc, **args),
-            "journey_list": lambda: handle_journey_list(journey_svc, **args),
-            "journey_show": lambda: handle_journey_show(container, **args),
-            "artifact_search": lambda: handle_artifact_search(container, **args),
-            "artifact_details": lambda: handle_artifact_details(container, **args),
-            "ingest_git": lambda: handle_ingest_git(container, **args),
-            "ingest_gha": lambda: handle_ingest_gha(container, **args),
-            "ingest_linear": lambda: handle_ingest_linear(container, **args),
-            "analyze": lambda: handle_analyze(container, **args),
-            "link": lambda: handle_link(container, **args),
-            "trace": lambda: handle_trace(container, **args),
-            "insights": lambda: handle_insights(container, **args),
-            "insights_ack": lambda: handle_insights_ack(container, **args),
-            "draft_blog": lambda: handle_draft_blog(container, **args),
-            "draft_adr": lambda: handle_draft_adr(container, **args),
-        }
+        if name == "memory_save":
+            # Stamp the connecting client as the source unless the caller set one.
+            args = {**args, "source": args.get("source") or _client_name()}
 
-        handler = handlers.get(name)
+        spec = handlers.get(name)
         is_error = False
-        if handler and _tool_profile() == "core" and name not in CORE_TOOLS:
+        if spec and _tool_profile() == "core" and name not in CORE_TOOLS:
             logger.warning("Tool '%s' requested outside the core profile", name)
             result = json.dumps(
                 {"error": f"Tool '{name}' is not enabled. Start the server with ARCANE_TOOL_PROFILE=full to use it."}
             )
             is_error = True
-        elif handler:
+        elif spec:
+            handler, target = spec
             try:
-                result = await anyio.to_thread.run_sync(handler)
-            except Exception:
-                logger.error("Tool '%s' failed", name, exc_info=True)
-                result = json.dumps({"error": f"Internal error in tool '{name}'. Check server logs."})
+                # Reject arguments the handler does not take with a message the
+                # agent can act on, instead of a TypeError reported as an
+                # internal error.
+                inspect.signature(handler).bind(target, **args)
+            except TypeError as exc:
+                result = json.dumps({"error": f"Invalid arguments for tool '{name}': {exc}"})
                 is_error = True
+            else:
+                try:
+                    # Handlers are synchronous (SQLite + subprocess work). Run them
+                    # in a worker thread so the asyncio event loop is never blocked.
+                    result = await anyio.to_thread.run_sync(lambda: handler(target, **args))
+                except Exception:
+                    logger.error("Tool '%s' failed", name, exc_info=True)
+                    result = json.dumps({"error": f"Internal error in tool '{name}'. Check server logs."})
+                    is_error = True
         else:
             logger.warning("Unknown MCP tool requested: %s", name)
             result = json.dumps({"error": f"Unknown tool: {name}"})
@@ -666,6 +680,7 @@ def _create_server(container: ServiceContainer) -> Server:
 async def run_server() -> None:
     """Run the MCP server with stdio transport."""
     container = create_container()
+    start_embedding_backend(container.config)
     try:
         server = _create_server(container)
         async with stdio_server() as (read_stream, write_stream):
