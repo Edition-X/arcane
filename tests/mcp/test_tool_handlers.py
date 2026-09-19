@@ -618,11 +618,11 @@ class TestIsError:
         assert "ID prefix must be at least" in text
 
     def test_draft_adr_not_found_is_error(self, container):
-        result = self._call_tool(container, "draft_adr", {"memory_id": "nope"})
+        result = self._call_tool(container, "draft_adr", {"memory_id": "nonexistent-id"})
         assert result.isError is True
         text = result.content[0].text
         assert "not enabled" not in text
-        assert "Memory nope not found" in text
+        assert "Memory nonexistent-id not found" in text
 
     def test_link_nonexistent_source_is_error(self, container):
         result = self._call_tool(
@@ -1029,3 +1029,79 @@ class TestAnalyzeHealth:
         assert result["insights_created"] >= 1
         stored = container.insight_repo.list_all(project="p")
         assert any(i["insight_type"] == "health" for i in stored)
+
+
+class TestReviewFixes:
+    """Prefix-safe relationship writes, argument errors, and content fixes."""
+
+    @staticmethod
+    def _call_tool(container, name: str, arguments: dict | None = None):
+        server = _create_server(container)
+        handler = server.request_handlers[CallToolRequest]
+        request = CallToolRequest(params=CallToolRequestParams(name=name, arguments=arguments))
+        return asyncio.run(handler(request)).root
+
+    @staticmethod
+    def _entities(container):
+        from arcane.domain.models import Journey
+        from tests.conftest import make_memory_dict
+
+        mem = make_memory_dict(title="Linked memory")
+        container.memory_repo.insert(mem)
+        journey = Journey(title="Linked journey", project="test-project")
+        container.journey_repo.insert(journey.model_dump())
+        return mem["id"], journey.id
+
+    def test_link_stores_full_ids_when_given_prefixes(self, container):
+        mem_id, journey_id = self._entities(container)
+
+        handle_link(
+            container,
+            source_type="memory",
+            source_id=mem_id[:12],
+            target_type="journey",
+            target_id=journey_id[:12],
+            relation="part_of",
+        )
+
+        shown = json.loads(handle_journey_show(container, journey_id=journey_id))
+        assert [m["memory_id"] for m in shown["linked_memories"]] == [mem_id]
+
+    def test_trace_accepts_a_prefix(self, container):
+        mem_id, journey_id = self._entities(container)
+        handle_link(
+            container,
+            source_type="memory",
+            source_id=mem_id,
+            target_type="journey",
+            target_id=journey_id,
+            relation="part_of",
+        )
+
+        edges = json.loads(handle_trace(container, entity_type="journey", entity_id=journey_id[:12]))
+
+        assert [(e["source_id"], e["target_id"]) for e in edges] == [(mem_id, journey_id)]
+
+    def test_unexpected_argument_is_a_clear_error(self, container):
+        result = self._call_tool(container, "memory_search", {"query": "x", "scope": "org"})
+
+        assert result.isError is True
+        text = result.content[0].text
+        assert "Invalid arguments for tool 'memory_search'" in text
+        assert "scope" in text
+
+    def test_draft_adr_accepts_prefix_and_omits_missing_fields(self, container):
+        from tests.conftest import make_memory_dict
+
+        mem = make_memory_dict(title="Adopt WAL", what="Use WAL mode", why=None, impact=None)
+        container.memory_repo.insert(mem)
+
+        result = json.loads(handle_draft_adr(container, memory_id=mem["id"][:12]))
+
+        assert result["memory_id"] == mem["id"]
+        assert "None" not in result["brief"]
+
+    def test_artifact_details_rejects_short_prefix(self, container):
+        result = json.loads(handle_artifact_details(container, artifact_id=""))
+
+        assert "error" in result
