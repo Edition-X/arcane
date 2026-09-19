@@ -127,6 +127,13 @@ def create_schema(db: Database) -> None:
         END
     """)
 
+    db.execute("""
+        CREATE TRIGGER IF NOT EXISTS journeys_ad AFTER DELETE ON journeys BEGIN
+            INSERT INTO journeys_fts(journeys_fts, rowid, title, summary, project)
+            VALUES ('delete', old.rowid, old.title, old.summary, old.project);
+        END
+    """)
+
     # ── artifacts ───────────────────────────────────────────────────────
     db.execute("""
         CREATE TABLE IF NOT EXISTS artifacts (
@@ -237,16 +244,15 @@ def create_schema(db: Database) -> None:
     db.execute("CREATE INDEX IF NOT EXISTS idx_memories_source ON memories(source)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at DESC)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_memories_ttl ON memories(ttl_days, created_at)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_mem_details_id ON memory_details(memory_id)")
 
     db.execute("CREATE INDEX IF NOT EXISTS idx_journeys_project ON journeys(project)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_journeys_status ON journeys(status)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_journeys_project_status ON journeys(project, status)")
 
     db.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_project ON artifacts(project)")
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_artifacts_type_ext_proj ON artifacts(artifact_type, external_id, project)"
-    )
+    # Duplicates of the implicit PRIMARY KEY / UNIQUE indexes; they only slowed writes.
+    db.execute("DROP INDEX IF EXISTS idx_mem_details_id")
+    db.execute("DROP INDEX IF EXISTS idx_artifacts_type_ext_proj")
 
     db.execute("CREATE INDEX IF NOT EXISTS idx_journey_events_journey ON journey_events(journey_id, created_at)")
 
@@ -256,6 +262,7 @@ def create_schema(db: Database) -> None:
     db.commit()
 
     _repair_relationship_ids(db)
+    _heal_renamed_vec_table(db)
 
     # Create vec table if dimension already known
     dim = _get_meta(db, "embedding_dim")
@@ -272,6 +279,27 @@ def create_vec_table(db: Database, dim: int) -> None:
         )
     """)
     db.commit()
+
+
+def _heal_renamed_vec_table(db: Database) -> None:
+    """Repair a ``memories_vec`` left broken by an older ``arcane reindex``.
+
+    That reindex built ``memories_vec_staging`` and renamed it to
+    ``memories_vec``, but vec0 keeps its shadow tables under the old name, so
+    every read or write of the renamed table failed. Renaming the shadow
+    tables to match makes the table (and its rebuilt vectors) usable again.
+    """
+    names = {
+        row["name"]
+        for row in db.fetchall("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'memories_vec%'")
+    }
+    if "memories_vec" not in names or "memories_vec_rowids" in names or "memories_vec_staging_rowids" not in names:
+        return
+    staging_prefix = "memories_vec_staging_"
+    with db.transaction():
+        for name in sorted(names):
+            if name.startswith(staging_prefix):
+                db.execute(f"ALTER TABLE {name} RENAME TO memories_vec_{name[len(staging_prefix) :]}")
 
 
 def _repair_relationship_ids(db: Database) -> None:

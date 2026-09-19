@@ -443,3 +443,133 @@ class TestJourneyServiceLifecycle:
         assert container.relationship_repo.get_all_for("journey", j["id"]) == []
         # The linked memory itself survives
         assert container.memory_repo.get(m["id"]) is not None
+
+
+class TestSaveDedupAndJourneyLinks:
+    def test_exact_title_merges_even_when_another_memory_ranks_higher(self, container):
+        svc = MemoryService(container)
+        first = svc.save(RawMemoryInput(title="Cache git remote", what="short"), project="p")
+        # A longer memory repeating the query terms outranks `first` in FTS.
+        svc.save(
+            RawMemoryInput(
+                title="Cache git remote lookups in scope resolution",
+                what="cache git remote lookups cache git remote cache git remote lookups",
+            ),
+            project="p",
+        )
+
+        again = svc.save(
+            RawMemoryInput(title="cache git remote", what="cache git remote lookups cache git remote lookups"),
+            project="p",
+        )
+
+        assert again["action"] == "updated"
+        assert again["id"] == first["id"]
+
+    def test_journey_prefix_links_the_full_journey_id(self, container):
+        journey = JourneyService(container).start("Prefix journey", project="p")
+        svc = MemoryService(container)
+
+        saved = svc.save(RawMemoryInput(title="Linked by prefix", what="x", journey_id=journey["id"][:12]), project="p")
+
+        shown = JourneyService(container).show(journey["id"])
+        assert [item["memory"]["id"] for item in shown["linked_memories"]] == [saved["id"]]
+
+    def test_unknown_journey_saves_unlinked_with_warning(self, container):
+        svc = MemoryService(container)
+
+        saved = svc.save(RawMemoryInput(title="Orphan link", what="x", journey_id="doesnotexist"), project="p")
+
+        assert saved["action"] == "created"
+        assert any("journey_not_found" in w for w in saved["warnings"])
+        assert container.relationship_repo.get_all_for("memory", saved["id"]) == []
+
+    def test_merge_links_existing_memory_to_journey_once(self, container):
+        journey = JourneyService(container).start("Merge journey", project="p")
+        svc = MemoryService(container)
+        first = svc.save(RawMemoryInput(title="Same title", what="v1"), project="p")
+
+        for _ in range(2):
+            svc.save(RawMemoryInput(title="Same title", what="v2", journey_id=journey["id"]), project="p")
+
+        rels = container.relationship_repo.get_all_for("memory", first["id"])
+        assert [(r["target_type"], r["target_id"]) for r in rels] == [("journey", journey["id"])]
+
+    def test_new_save_embeds_once(self, container, fake_embedder):
+        MemoryService(container).save(RawMemoryInput(title="One embedding", what="body"), project="p")
+
+        assert fake_embedder.call_count == 1
+
+
+class _CountingEmbedder:
+    """Constant 4-dim vectors; counts batch calls and can run a hook per batch."""
+
+    def __init__(self, on_batch=None) -> None:
+        self.batches = 0
+        self.on_batch = on_batch
+
+    def embed(self, text: str) -> list[float]:
+        return [1.0, 2.0, 3.0, 4.0]
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        self.batches += 1
+        if self.on_batch:
+            self.on_batch()
+        return [self.embed(t) for t in texts]
+
+
+class TestReindex:
+    def _seed(self, container, count: int) -> None:
+        container._embedding_provider = _CountingEmbedder()
+        svc = MemoryService(container)
+        for i in range(count):
+            svc.save(RawMemoryInput(title=f"Memory {i}", what=f"body {i}"), project="p")
+
+    def test_rebuilds_every_vector(self, container):
+        self._seed(container, 3)
+        container._embedding_provider = _CountingEmbedder()
+
+        result = MemoryService(container).reindex()
+
+        assert result == {"count": 3, "dim": 4, "model": container.config.embedding.model}
+        assert container.memory_repo.get_embedding_dim() == 4
+        rows = container.db.fetchall("SELECT rowid FROM memories_vec")
+        assert len(rows) == 3
+        assert not container.db.fetchone("SELECT 1 FROM sqlite_master WHERE name = 'memories_vec_staging'")
+
+    def test_embeds_in_batches_and_reports_progress(self, container, monkeypatch):
+        monkeypatch.setattr("arcane.services.memory.REINDEX_BATCH_SIZE", 2)
+        self._seed(container, 5)
+        embedder = _CountingEmbedder()
+        container._embedding_provider = embedder
+        progress: list[tuple[int, int]] = []
+
+        MemoryService(container).reindex(progress_callback=lambda done, total: progress.append((done, total)))
+
+        assert embedder.batches == 3
+        assert progress == [(2, 5), (4, 5), (5, 5)]
+
+    def test_does_not_hold_a_write_transaction_while_embedding(self, container):
+        self._seed(container, 2)
+        seen: list[bool] = []
+        container._embedding_provider = _CountingEmbedder(
+            on_batch=lambda: seen.append(container.db.conn.in_transaction)
+        )
+
+        MemoryService(container).reindex()
+
+        assert seen == [False]
+
+    def test_keeps_vectors_of_memories_saved_during_the_run(self, container):
+        self._seed(container, 2)
+        svc = MemoryService(container)
+
+        def save_meanwhile() -> None:
+            container._embedding_provider = _CountingEmbedder()
+            svc.save(RawMemoryInput(title="Saved mid-reindex", what="late"), project="p")
+
+        container._embedding_provider = _CountingEmbedder(on_batch=save_meanwhile)
+        svc.reindex()
+
+        late = container.memory_repo.fts_search("Saved mid-reindex")[0]
+        assert container.memory_repo.get_vector(late["rowid"]) == [1.0, 2.0, 3.0, 4.0]

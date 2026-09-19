@@ -277,6 +277,28 @@ class MemoryRepository:
                 r["scope_rank"] = 0
         return rows
 
+    def find_by_title(self, title: str, project: str, org: str | None = None) -> dict[str, Any] | None:
+        """Newest live memory titled *title* (ignoring case and edge spaces) in the exact scope layer.
+
+        With an *org*, only the layer being written is searched: the project
+        layer when *project* is set, else the org layer. Without an org, the
+        match is confined to *project*.
+        """
+        where_clauses = [MemoryRepository._not_expired_clause(), "lower(trim(m.title)) = lower(trim(?))"]
+        params: list[Any] = [title]
+        if org:
+            scope_sql, scope_params = self._scope_where(org, project, include_org=not project, include_global=False)
+            where_clauses.append(scope_sql)
+            params += scope_params
+        else:
+            where_clauses.append("m.project = ?")
+            params.append(project)
+        row = self.db.fetchone(
+            f"SELECT m.* FROM memories m WHERE {' AND '.join(where_clauses)} ORDER BY m.created_at DESC LIMIT 1",
+            params,
+        )
+        return _process_row(row) if row else None
+
     def list_projects(self) -> list[dict[str, Any]]:
         """Distinct (project, org) pairs with counts — for backfill and audits."""
         return self.db.fetchall(

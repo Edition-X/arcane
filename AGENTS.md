@@ -31,7 +31,7 @@ All services receive a `ServiceContainer` (defined in `services/container.py`). 
 All DB read methods return fully deserialized Python objects — tags are `list[str]`, datetimes are strings. Never call `json.loads()` on data returned from a repo method; `_process_row()` in `MemoryRepo` handles this centrally.
 
 ### Embedding + Vector Search
-Vector search is optional — the system degrades gracefully to FTS if `memories_vec` table is absent or dimensions mismatch. The dimension is stored in `kv_store` and checked on every embed operation. Use `memory_repo.invalidate_vec_cache()` after DDL changes to the vec table.
+Vector search is optional — the system degrades gracefully to FTS if `memories_vec` table is absent or dimensions mismatch. The dimension is stored in the `meta` table and checked on every embed operation. Use `memory_repo.invalidate_vec_cache()` after DDL changes to the vec table. Never `ALTER TABLE ... RENAME` a vec0 table: its shadow tables keep the old name and the renamed table stops working — drop and recreate it inside one transaction instead.
 
 ### Plugin System
 Plugins are discovered via Python entry points (`arcane.plugins.ingestion`, `arcane.plugins.intelligence`, `arcane.plugins.content`). Built-in plugins are registered in `pyproject.toml`. Third-party plugins just need to install a package that declares the entry point.
@@ -85,7 +85,7 @@ mypy src/arcane
 
 1. Create or extend a file in `mcp_server/tools/`.
 2. Define a handler function `(args: dict) -> str`.
-3. Register it in `mcp_server/server.py` in `_register_tools()` with name, description, and JSON schema.
+3. Register it in `mcp_server/server.py`: add a `Tool` (name, description, JSON schema) to `list_tools()` and a `(handler, first_arg)` entry to the `handlers` dict. Add it to `CORE_TOOLS` only if it belongs in the default profile.
 
 ## Commit Style
 
