@@ -36,6 +36,12 @@ class FakeEmbeddingProvider(EmbeddingProvider):
 
 
 @pytest.fixture(autouse=True)
+def _no_ollama_autostart(monkeypatch):
+    """The suite must never launch a real Ollama; autostart tests re-enable it explicitly."""
+    monkeypatch.setenv("ARCANE_OLLAMA_AUTOSTART", "0")
+
+
+@pytest.fixture(autouse=True)
 def _fresh_remote_cache():
     """Each test sees git remotes as they are now, not as an earlier test cached them."""
     clear_remote_cache()

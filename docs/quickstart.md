@@ -100,6 +100,7 @@ Then add updates as you go with `journey_update`, and close it with `journey_com
 | `ARCANE_HOME` | Override data directory | `~/.arcane` |
 | `OPENAI_API_KEY` | OpenAI API key for cloud embeddings | — |
 | `ARCANE_LOG_LEVEL` | Log verbosity: `DEBUG`, `INFO`, `WARNING` | `INFO` |
+| `ARCANE_OLLAMA_AUTOSTART` | Set to `0` to stop Arcane starting a local Ollama (overrides `embedding.autostart`) | on |
 | `GITHUB_TOKEN` | GitHub API auth for GHA ingestion | — |
 | `LINEAR_API_KEY` | Linear API key for ticket ingestion | — |
 
