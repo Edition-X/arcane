@@ -9,6 +9,7 @@ embedding:
   provider: ollama              # Embedding backend: "ollama", "openai", or "none"
   model: nomic-embed-text       # Model name (provider-specific)
   base_url: http://localhost:11434  # Ollama API base URL (ignored for openai)
+  autostart: true               # Start a local Ollama when it is not running (ollama only)
   api_key: null                 # OpenAI API key — prefer OPENAI_API_KEY env var
 
 context:
@@ -29,6 +30,17 @@ ollama pull nomic-embed-text
 ```
 
 No API key needed. `base_url` defaults to `http://localhost:11434` — change it if you run Ollama on a different host or port.
+
+**Autostart.** When `base_url` points at this machine and Ollama is not running, Arcane starts it:
+
+- **When the MCP server starts**, a background thread probes Ollama and starts it if it is down, so it is usually up before the first save.
+- **When an embed call finds nothing listening**, Arcane starts Ollama, waits up to 5 seconds, and retries once. A memory saved right after Ollama stopped still gets a vector.
+
+On macOS with Ollama.app installed and the default port, Arcane runs `open -g -a Ollama`, which launches the app in the background without taking focus. Otherwise it runs a detached `ollama serve` bound to `base_url`'s host and port.
+
+When Ollama is already up, the check costs one local HTTP request, under 1 ms. A start that fails is not retried for 60 seconds, so a broken install never slows every save. Arcane never starts a remote Ollama.
+
+To turn autostart off, set `autostart: false` in the config or `ARCANE_OLLAMA_AUTOSTART=0` in the environment.
 
 ```yaml
 embedding:
@@ -97,6 +109,7 @@ Environment variables take precedence over the config file.
 | `ARCANE_HOME` | Override data directory | `~/.arcane` |
 | `OPENAI_API_KEY` | OpenAI API key for embeddings | — |
 | `ARCANE_LOG_LEVEL` | Log verbosity: `DEBUG`, `INFO`, `WARNING` | `INFO` |
+| `ARCANE_OLLAMA_AUTOSTART` | Set to `0` to stop Arcane starting a local Ollama (overrides `embedding.autostart`) | on |
 | `GITHUB_TOKEN` | GitHub API auth for GHA ingestion | — |
 | `LINEAR_API_KEY` | Linear API key for ticket ingestion | — |
 

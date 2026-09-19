@@ -67,7 +67,7 @@ from arcane.mcp_server.tools.memory_tools import (
     handle_update,
 )
 from arcane.mcp_server.tools.relationship_tools import handle_link, handle_trace
-from arcane.services.container import ServiceContainer, create_container
+from arcane.services.container import ServiceContainer, create_container, start_embedding_backend
 from arcane.services.journey import JourneyService
 from arcane.services.memory import MemoryService
 
@@ -680,6 +680,7 @@ def _create_server(container: ServiceContainer) -> Server:
 async def run_server() -> None:
     """Run the MCP server with stdio transport."""
     container = create_container()
+    start_embedding_backend(container.config)
     try:
         server = _create_server(container)
         async with stdio_server() as (read_stream, write_stream):
