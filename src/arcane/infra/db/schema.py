@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from arcane.infra.db.connection import Database
+from arcane.infra.db.ids import ENTITY_TABLES, IdentifierResolutionError, resolve_unique_id
+
+RELATIONSHIP_REPAIR_KEY = "relationship_ids_repaired"
 
 
 def create_schema(db: Database) -> None:
@@ -252,6 +255,8 @@ def create_schema(db: Database) -> None:
 
     db.commit()
 
+    _repair_relationship_ids(db)
+
     # Create vec table if dimension already known
     dim = _get_meta(db, "embedding_dim")
     if dim is not None:
@@ -267,6 +272,33 @@ def create_vec_table(db: Database, dim: int) -> None:
         )
     """)
     db.commit()
+
+
+def _repair_relationship_ids(db: Database) -> None:
+    """Expand relationship endpoints stored as ID prefixes to full IDs. Runs once.
+
+    Older write paths stored whatever prefix the caller typed, but lookups
+    match exact IDs, so those edges never showed up in journey_show or trace.
+    A prefix that no longer identifies exactly one entity is left untouched.
+    """
+    if _get_meta(db, RELATIONSHIP_REPAIR_KEY) is not None:
+        return
+    with db.transaction():
+        for id_column, type_column in (("source_id", "source_type"), ("target_id", "target_type")):
+            for entity_type, table in ENTITY_TABLES.items():
+                rows = db.fetchall(
+                    f"SELECT r.id, r.{id_column} AS ref FROM relationships r WHERE r.{type_column} = ? "
+                    f"AND NOT EXISTS (SELECT 1 FROM {table} t WHERE t.id = r.{id_column})",
+                    (entity_type,),
+                )
+                for row in rows:
+                    try:
+                        full_id = resolve_unique_id(db, table, row["ref"] or "")
+                    except IdentifierResolutionError:
+                        continue
+                    if full_id is not None:
+                        db.execute(f"UPDATE relationships SET {id_column} = ? WHERE id = ?", (full_id, row["id"]))
+        db.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')", (RELATIONSHIP_REPAIR_KEY,))
 
 
 def _add_column_if_missing(db: Database, table: str, column: str, definition: str) -> None:

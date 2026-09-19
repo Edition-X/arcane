@@ -33,15 +33,17 @@ class RelationshipRepository:
         self.db.commit()
 
     def get_from(self, source_type: str, source_id: str) -> list[dict[str, Any]]:
+        """Edges leaving the entity with exactly *source_id* (callers resolve prefixes first)."""
         return self.db.fetchall(
-            "SELECT * FROM relationships WHERE source_type = ? AND source_id LIKE ?",
-            (source_type, source_id + "%"),
+            "SELECT * FROM relationships WHERE source_type = ? AND source_id = ?",
+            (source_type, source_id),
         )
 
     def get_to(self, target_type: str, target_id: str) -> list[dict[str, Any]]:
+        """Edges entering the entity with exactly *target_id* (callers resolve prefixes first)."""
         return self.db.fetchall(
-            "SELECT * FROM relationships WHERE target_type = ? AND target_id LIKE ?",
-            (target_type, target_id + "%"),
+            "SELECT * FROM relationships WHERE target_type = ? AND target_id = ?",
+            (target_type, target_id),
         )
 
     def get_all_for(self, entity_type: str, entity_id: str) -> list[dict[str, Any]]:
@@ -69,11 +71,7 @@ class RelationshipRepository:
         )
 
     def trace(self, entity_type: str, entity_id: str, max_depth: int = 5) -> list[dict[str, Any]]:
-        """Walk the relationship graph from an entity, returning all connected edges.
-
-        Direction is determined by exact ID equality so prefix matches in other
-        entities don't accidentally flip source/target traversal.
-        """
+        """Walk the relationship graph from an entity, returning all connected edges."""
         visited: set[str] = set()
         result: list[dict[str, Any]] = []
         seen_rel_ids: set[str] = set()
@@ -95,7 +93,6 @@ class RelationshipRepository:
                     seen_rel_ids.add(rel["id"])
                     result.append(rel)
 
-                # Determine the *other* side by exact equality (not prefix).
                 if rel["source_type"] == etype and rel["source_id"] == eid:
                     other_type = rel["target_type"]
                     other_id = rel["target_id"]

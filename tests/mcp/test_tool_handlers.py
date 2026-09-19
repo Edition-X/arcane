@@ -630,16 +630,16 @@ class TestIsError:
             "link",
             {
                 "source_type": "memory",
-                "source_id": "nope",
+                "source_id": "nonexistent-id",
                 "target_type": "journey",
-                "target_id": "nope",
+                "target_id": "nonexistent-id",
                 "relation": "part_of",
             },
         )
         assert result.isError is True
         text = result.content[0].text
         assert "not enabled" not in text
-        assert "Source memory not found: nope" in text
+        assert "Source memory not found: nonexistent-id" in text
 
     def test_success_is_not_error(self, container):
         """Successful ops must still have isError=False."""

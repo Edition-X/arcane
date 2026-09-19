@@ -6,18 +6,8 @@ import json
 
 from arcane.domain.enums import RelationType
 from arcane.domain.models import Relationship
+from arcane.infra.db.ids import ENTITY_TABLES, IdentifierResolutionError, resolve_entity_id
 from arcane.services.container import ServiceContainer
-
-
-def _entity_exists(container: ServiceContainer, entity_type: str, entity_id: str) -> bool:
-    """Check if an entity exists by type and ID."""
-    if entity_type == "memory":
-        return container.memory_repo.get(entity_id) is not None
-    if entity_type == "journey":
-        return container.journey_repo.get(entity_id) is not None
-    if entity_type == "artifact":
-        return container.artifact_repo.get(entity_id) is not None
-    return False
 
 
 def handle_link(
@@ -28,7 +18,7 @@ def handle_link(
     target_id: str,
     relation: str,
 ) -> str:
-    valid_types = {"memory", "journey", "artifact"}
+    valid_types = set(ENTITY_TABLES)
     if source_type not in valid_types or target_type not in valid_types:
         return json.dumps({"error": f"Invalid entity type. Must be one of: {sorted(valid_types)}"})
 
@@ -36,16 +26,24 @@ def handle_link(
     if relation not in valid_relations:
         return json.dumps({"error": f"Invalid relation. Must be one of: {sorted(valid_relations)}"})
 
-    if not _entity_exists(container, source_type, source_id):
-        return json.dumps({"error": f"Source {source_type} not found: {source_id}"})
-    if not _entity_exists(container, target_type, target_id):
-        return json.dumps({"error": f"Target {target_type} not found: {target_id}"})
+    resolved: dict[str, str] = {}
+    for side, entity_type, entity_id in (("Source", source_type, source_id), ("Target", target_type, target_id)):
+        try:
+            full_id = resolve_entity_id(container.db, entity_type, entity_id)
+        except IdentifierResolutionError as exc:
+            return json.dumps({"error": f"{side} {entity_type} '{entity_id}': {exc}"})
+        if full_id is None:
+            return json.dumps({"error": f"{side} {entity_type} not found: {entity_id}"})
+        resolved[side] = full_id
+    source_full, target_full = resolved["Source"], resolved["Target"]
 
+    # Store full IDs: relationship lookups match exactly, so a stored prefix
+    # would make the edge invisible to journey_show and trace.
     rel = Relationship(
         source_type=source_type,
-        source_id=source_id,
+        source_id=source_full,
         target_type=target_type,
-        target_id=target_id,
+        target_id=target_full,
         relation=RelationType(relation),
     )
     container.relationship_repo.insert(rel.model_dump())
@@ -58,7 +56,13 @@ def handle_trace(
     entity_id: str,
     max_depth: int = 5,
 ) -> str:
-    rels = container.relationship_repo.trace(entity_type, entity_id, max_depth=max_depth)
+    try:
+        full_id = resolve_entity_id(container.db, entity_type, entity_id)
+    except IdentifierResolutionError as exc:
+        return json.dumps({"error": str(exc)})
+    if full_id is None:
+        return json.dumps({"error": f"{entity_type.capitalize()} not found: {entity_id}"})
+    rels = container.relationship_repo.trace(entity_type, full_id, max_depth=max_depth)
     return json.dumps(
         [
             {
