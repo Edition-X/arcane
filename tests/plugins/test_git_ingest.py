@@ -128,3 +128,41 @@ class TestGitIngestionPlugin:
         results = plugin.ingest(project="test-project")
         # At least one result should have branch info
         assert all("branch" in r["raw_data"] for r in results)
+
+
+def _git(repo, *args):
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "Test",
+        "GIT_AUTHOR_EMAIL": "test@test.com",
+        "GIT_COMMITTER_NAME": "Test",
+        "GIT_COMMITTER_EMAIL": "test@test.com",
+    }
+    subprocess.run(["git", *args], cwd=repo, capture_output=True, env=env, check=True)
+
+
+class TestGitIngestionLayouts:
+    def test_ingests_from_a_linked_worktree(self, git_repo, tmp_path):
+        worktree = tmp_path / "worktree"
+        _git(git_repo, "worktree", "add", "-b", "feature", str(worktree))
+
+        results = GitIngestionPlugin(repo_path=str(worktree)).ingest(project="test-project")
+
+        assert [r["title"] for r in results] == ["Add tests", "Add source file", "Initial commit"]
+        assert results[0]["raw_data"]["branch"] == "feature"
+
+    def test_merge_commit_is_kept_with_no_files(self, git_repo):
+        _git(git_repo, "checkout", "-b", "side")
+        with open(os.path.join(git_repo, "side.py"), "w") as f:
+            f.write("x = 1")
+        _git(git_repo, "add", ".")
+        _git(git_repo, "commit", "-m", "Side work")
+        _git(git_repo, "checkout", "main")
+        _git(git_repo, "merge", "--no-ff", "-m", "Merge side", "side")
+
+        results = GitIngestionPlugin(repo_path=git_repo).ingest(project="test-project")
+
+        by_title = {r["title"]: r["raw_data"]["files_changed"] for r in results}
+        assert by_title["Merge side"] == []
+        assert by_title["Side work"] == ["side.py"]
+        assert len(results) == 5

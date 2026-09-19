@@ -11,7 +11,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Use record separator to cleanly delimit commits
+# Record/field separators delimit commits and fields in git log output
 _RS = "\x1e"  # record separator
 _FS = "\x1f"  # field separator
 
@@ -24,18 +24,18 @@ class GitIngestionPlugin:
         self.max_count = max_count
 
     def ingest(self, project: str, since: datetime | None = None) -> list[dict[str, Any]]:
+        # No ".git" directory check: in a linked worktree ".git" is a file, and
+        # git itself reports a non-repository through its exit code.
         if not os.path.isdir(self.repo_path):
             return []
 
-        git_dir = os.path.join(self.repo_path, ".git")
-        if not os.path.isdir(git_dir):
-            return []
-
-        # Use two commands: one for metadata, one for files per commit
-        format_str = f"{_RS}%H{_FS}%s{_FS}%b{_FS}%an{_FS}%aI"
+        # One git call returns metadata and changed files for every commit.
+        format_str = f"{_RS}%H{_FS}%s{_FS}%b{_FS}%an{_FS}%aI{_FS}"
         cmd = [
             "git",
             "log",
+            "--no-color",
+            "--name-only",
             f"--max-count={self.max_count}",
             f"--format={format_str}",
         ]
@@ -61,14 +61,9 @@ class GitIngestionPlugin:
             logger.warning("git not found on PATH")
             return []
 
-        # Parse commits from metadata
-        commits = self._parse_metadata(result.stdout)
+        commits = self._parse_log(result.stdout)
         if not commits:
             return []
-
-        # Get files changed per commit using --name-only --diff-filter
-        for commit in commits:
-            commit["files_changed"] = self._get_files_changed(commit["sha"])
 
         # Get current branch
         current_branch = self._get_branch()
@@ -97,15 +92,17 @@ class GitIngestionPlugin:
 
         return artifacts
 
-    def _parse_metadata(self, output: str) -> list[dict[str, Any]]:
-        """Parse git log output using record separator."""
+    def _parse_log(self, output: str) -> list[dict[str, Any]]:
+        """Parse ``git log --name-only`` output delimited by record/field separators."""
         commits: list[dict[str, Any]] = []
         for record in output.split(_RS):
-            record = record.strip()
-            if not record:
+            # Never strip the record itself: Python treats the separator
+            # characters as whitespace and would eat the trailing field
+            # separator of a commit with no changed files (e.g. a merge).
+            if not record.strip():
                 continue
             parts = record.split(_FS)
-            if len(parts) < 5:
+            if len(parts) < 6:
                 continue
             commits.append(
                 {
@@ -114,27 +111,10 @@ class GitIngestionPlugin:
                     "body": parts[2].strip(),
                     "author": parts[3].strip(),
                     "date": parts[4].strip(),
+                    "files_changed": [line for line in parts[5].splitlines() if line.strip()],
                 }
             )
         return commits
-
-    def _get_files_changed(self, sha: str) -> list[str]:
-        """Get list of files changed in a commit."""
-        try:
-            result = subprocess.run(
-                ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", sha],
-                cwd=self.repo_path,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode == 0:
-                return [f for f in result.stdout.strip().split("\n") if f.strip()]
-        except subprocess.TimeoutExpired:
-            logger.debug("diff-tree timed out for sha=%s", sha)
-        except FileNotFoundError:
-            logger.debug("git not found when fetching changed files")
-        return []
 
     def _get_branch(self) -> str:
         try:
