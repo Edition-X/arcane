@@ -1,0 +1,131 @@
+name: Maintenance
+
+# Weekly, because some things break without anyone touching the repository: a
+# dependency ships a release that stops the published version installing, a
+# secret lands in history, a new query finds an old bug.
+
+on:
+  schedule:
+    - cron: '23 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: maintenance
+  cancel-in-progress: false
+
+jobs:
+  scorecard:
+    name: OpenSSF Scorecard
+    # Scheduled jobs on a fork would fail on a repository the owner cannot
+    # publish results for.
+    if: github.repository == 'Edition-X/arcane'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run analysis
+        uses: ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e # v2.5.0
+        with:
+          results_file: scorecard.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: Upload to the Security tab
+        uses: github/codeql-action/upload-sarif@0fda7a646fd14a20daf520829ca1ae8847000819 # codeql-bundle-v2.27.3
+        with:
+          sarif_file: scorecard.sarif
+
+  secrets:
+    name: Secret scan (full history)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # pre-commit only ever sees the diff in front of it; this sees
+          # everything that was ever committed.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Scan
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  dependencies:
+    name: Stale dependency report
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          enable-cache: true
+
+      # Reports only. Dependabot owns the actual bumps; this just makes the gap
+      # between the lock and the index visible when Dependabot is grouping.
+      - name: Show what an unpinned resolve would change
+        run: |
+          set -euo pipefail
+          cp uv.lock /tmp/uv.lock.current
+          uv lock --upgrade --quiet
+          {
+            echo "### Lockfile drift"
+            echo
+            if diff -q /tmp/uv.lock.current uv.lock >/dev/null; then
+              echo "Everything is already at the newest resolvable version."
+            else
+              echo '```diff'
+              diff -u /tmp/uv.lock.current uv.lock | grep -E '^[-+]version|^[-+]name' | head -60 || true
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Does the release people are installing today still install today? Nothing
+  # else in the pipeline can answer that: it depends on the rest of the index,
+  # not on this repository.
+  latest:
+    name: Resolve the published release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.pypi.outputs.version }}
+    steps:
+      - name: Ask PyPI what is current
+        id: pypi
+        run: |
+          set -euo pipefail
+          version=$(curl -fsS https://pypi.org/pypi/arcane-mcp/json | jq -r '.info.version' || echo "")
+          if [ -z "$version" ] || [ "$version" = "null" ]; then
+            echo "Nothing published yet — skipping the canary."
+            version=""
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "latest published: ${version:-none}" >> "$GITHUB_STEP_SUMMARY"
+
+  canary:
+    name: Canary
+    needs: latest
+    if: needs.latest.outputs.version != ''
+    uses: ./.github/workflows/verify.yml
+    with:
+      source: pypi
+      version: ${{ needs.latest.outputs.version }}
+      image: ghcr.io/edition-x/arcane:${{ needs.latest.outputs.version }}
