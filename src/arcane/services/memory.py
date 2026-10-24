@@ -19,7 +19,7 @@ from arcane.infra.embeddings.base import EmbeddingsDisabled
 from arcane.infra.markdown import remove_session_memory, write_session_memory
 from arcane.infra.paths import relative_vault_path, vault_path
 from arcane.infra.redaction import redact, redact_values
-from arcane.infra.search import hybrid_search, tiered_search
+from arcane.infra.search import tiered_search
 from arcane.services.container import ServiceContainer
 
 logger = logging.getLogger(__name__)
@@ -443,20 +443,7 @@ class MemoryService:
     ) -> list[dict[str, Any]]:
         if project:
             project = resolve_read_project(project, self.c.config)
-        if not use_vectors:
-            return hybrid_search(
-                self.c.memory_repo,
-                None,
-                query,
-                limit=limit,
-                project=project,
-                source=source,
-                org=org,
-                include_org=include_org,
-                include_global=include_global,
-            )
-
-        if self.vectors_available:
+        if use_vectors and self.vectors_available:
             try:
                 return tiered_search(
                     self.c.memory_repo,
