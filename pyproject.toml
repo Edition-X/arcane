@@ -54,6 +54,7 @@ linear = "arcane.plugins.builtin.linear_ingest:LinearIngestionPlugin"
 [project.entry-points."arcane.plugins.intelligence"]
 velocity = "arcane.plugins.builtin.velocity:VelocityTracker"
 health = "arcane.plugins.builtin.health_audit:HealthAuditor"
+usage = "arcane.plugins.builtin.usage:UsageAnalyzer"
 
 [project.entry-points."arcane.plugins.content"]
 blog = "arcane.plugins.builtin.blog_gen:BlogGenerator"

@@ -237,6 +237,38 @@ def create_schema(db: Database) -> None:
         )
     """)
 
+    # ── retrievals ──────────────────────────────────────────────────────
+    # One row per MCP lookup, and one hit per entity it returned, so usage
+    # analysis can tell recalled memories from ones nobody ever reads.
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS retrievals (
+            id TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            client TEXT,
+            tool TEXT NOT NULL,
+            org TEXT,
+            project TEXT,
+            query TEXT,
+            result_count INTEGER NOT NULL DEFAULT 0,
+            keyword_matches INTEGER,
+            duration_ms INTEGER,
+            is_error INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS retrieval_hits (
+            retrieval_id TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            rank INTEGER NOT NULL,
+            PRIMARY KEY (retrieval_id, entity_type, entity_id)
+        )
+    """)
+    # Added during the table's first release; a store created by a pre-release build lacks it.
+    _add_column_if_missing(db, "retrievals", "keyword_matches", "INTEGER")
+
     # ── Performance indexes ─────────────────────────────────────────────
     db.execute("CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_memories_org ON memories(org)")
@@ -258,6 +290,10 @@ def create_schema(db: Database) -> None:
 
     db.execute("CREATE INDEX IF NOT EXISTS idx_insights_project ON insights(project)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_insights_ack ON insights(acknowledged, project)")
+
+    db.execute("CREATE INDEX IF NOT EXISTS idx_retrievals_created ON retrievals(created_at)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_retrievals_session ON retrievals(session_id, created_at)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_retrieval_hits_entity ON retrieval_hits(entity_type, entity_id)")
 
     db.commit()
 

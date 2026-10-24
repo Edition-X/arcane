@@ -80,6 +80,23 @@ class DedupConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+class UsageConfig(BaseModel):
+    """Lookup recording — which memories agents actually retrieve.
+
+    Every MCP lookup (search, context, details, journey and artifact reads)
+    is recorded with the memories it returned, so ``arcane analyze usage``
+    can show what is used, what is never recalled and which searches find
+    nothing. ``log_queries`` keeps the (redacted) search text; rows older than
+    ``retention_days`` are pruned when the MCP server starts.
+    """
+
+    enabled: bool = True
+    log_queries: bool = True
+    retention_days: int = 180
+
+    model_config = {"extra": "ignore"}
+
+
 class ArcaneConfig(BaseModel):
     """Top-level Arcane configuration."""
 
@@ -88,6 +105,7 @@ class ArcaneConfig(BaseModel):
     orgs: OrgsConfig = Field(default_factory=OrgsConfig)
     projects: ProjectsConfig = Field(default_factory=ProjectsConfig)
     dedup: DedupConfig = Field(default_factory=DedupConfig)
+    usage: UsageConfig = Field(default_factory=UsageConfig)
 
     model_config = {"extra": "ignore"}
 

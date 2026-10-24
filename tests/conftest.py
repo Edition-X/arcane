@@ -14,6 +14,7 @@ from arcane.infra.db.insight_repo import InsightRepository
 from arcane.infra.db.journey_repo import JourneyRepository
 from arcane.infra.db.memory_repo import MemoryRepository
 from arcane.infra.db.relationship_repo import RelationshipRepository
+from arcane.infra.db.retrieval_repo import RetrievalRepository
 from arcane.infra.db.schema import create_schema
 from arcane.infra.embeddings.base import EmbeddingProvider
 from arcane.services.container import ServiceContainer
@@ -94,6 +95,7 @@ def container(db, tmp_home, config, fake_embedder):
         artifact_repo=ArtifactRepository(db),
         relationship_repo=RelationshipRepository(db),
         insight_repo=InsightRepository(db),
+        retrieval_repo=RetrievalRepository(db),
         _embedding_provider=fake_embedder,
         _ignore_patterns=[],
     )
