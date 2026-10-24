@@ -10,6 +10,10 @@ from arcane.infra.db.connection import Database
 from arcane.infra.db.ids import resolve_unique_id
 from arcane.infra.redaction import redact, redact_values
 
+# An active journey with no update for longer than this is idle. memory_context,
+# journey_list and the health audit all use this one definition.
+IDLE_JOURNEY_DAYS = 14
+
 
 class JourneyRepository:
     """CRUD operations for the journeys table."""
@@ -147,7 +151,7 @@ class JourneyRepository:
             journey["events"] = self.list_events(journey["id"])
         return journeys
 
-    def list_stale_active(self, days: int, project: str | None = None) -> list[dict[str, Any]]:
+    def list_stale_active(self, days: int = IDLE_JOURNEY_DAYS, project: str | None = None) -> list[dict[str, Any]]:
         """Active journeys with no update for more than *days* days (falls back to started_at)."""
         where_clauses = [
             "status = 'active'",

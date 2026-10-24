@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 
 from arcane.domain.scope import resolve_write_scope
 from arcane.infra.db.ids import IdentifierResolutionError
 from arcane.services.container import ServiceContainer
 from arcane.services.journey import JourneyService
-
-STALE_JOURNEY_DAYS = 30
 
 
 def handle_journey_start(
@@ -78,18 +75,6 @@ def handle_journey_delete(
     return json.dumps({"deleted": True, "journey_id": journey_id})
 
 
-def _is_stale(journey: dict, days: int = STALE_JOURNEY_DAYS) -> bool:
-    if journey.get("status") != "active":
-        return False
-    try:
-        started = datetime.fromisoformat(journey["started_at"])
-    except (KeyError, ValueError, TypeError):
-        return False
-    if started.tzinfo is None:
-        started = started.replace(tzinfo=timezone.utc)
-    return (datetime.now(timezone.utc) - started).days > days
-
-
 def handle_journey_show(
     container: ServiceContainer,
     journey_id: str,
@@ -142,6 +127,7 @@ def handle_journey_list(
 ) -> str:
     project = resolve_write_scope(project, svc.c.config).project
     journeys = svc.list(project=project, status=status, limit=limit)
+    idle = {j["id"] for j in svc.c.journey_repo.list_stale_active(project=project or None)}
     return json.dumps(
         [
             {
@@ -151,7 +137,7 @@ def handle_journey_list(
                 "project": j["project"],
                 "started_at": j["started_at"][:10],
                 "completed_at": (j.get("completed_at") or "")[:10] or None,
-                **({"stale": True} if _is_stale(j) else {}),
+                **({"stale": True} if j["id"] in idle else {}),
             }
             for j in journeys
         ]
