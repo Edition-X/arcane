@@ -58,7 +58,7 @@ When you do patch, use the full dotted path where the name is **used**, not wher
 ```
 
 ### Redaction
-`infra/redaction.py` runs before any persistence in `MemoryService.save()`. Patterns are compiled at module load. Custom user patterns from config are compiled lazily with malformed ones silently skipped.
+`infra/redaction.py` runs before any persistence in `MemoryService.save()`. Built-in patterns are compiled at module load. Custom patterns come from `$ARCANE_HOME/.memoryignore`; one that is not a valid regex is dropped with a warning naming its line. `redact_values` redacts string values only, never mapping keys: every dict it sees has structural keys (model dumps, column names, `raw_data`), and rewriting one drops that field.
 
 ## Dev Setup
 

@@ -4,6 +4,8 @@
 
 Arcane reads its configuration from `~/.arcane/config.yaml` (or `$ARCANE_HOME/config.yaml`). The file is optional and `arcane init` does not create it: write it when you want to change a default. Every field is optional, and missing values fall back to the defaults shown below. `arcane config` prints the settings in effect.
 
+A file that is present but unusable — invalid YAML, an unknown `embedding.provider`, or an org that is not a slug (letters, digits and single hyphens) — stops the CLI and the MCP server with a message naming the setting. Arcane does not fall back to defaults in that case, because a dropped `orgs` mapping would file memories under a different org.
+
 ```yaml
 embedding:
   provider: ollama              # Embedding backend: "ollama", "openai", or "none"
