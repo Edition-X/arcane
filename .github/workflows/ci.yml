@@ -169,6 +169,23 @@ jobs:
         shell: bash
         run: uv run pytest -q --tb=short
 
+      # The suite runs on a uv-managed interpreter, which can load SQLite
+      # extensions. The python.org build on macOS cannot, and that is what a lot
+      # of people install Arcane onto. So the wheel also gets the exact check a
+      # release gets, on an interpreter this job did not install — otherwise a
+      # break there only shows up after merge.
+      - name: Build the wheel
+        run: uv build --wheel --out-dir dist
+
+      - name: Install and exercise the wheel on the runner's own Python
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel=$(find dist -name '*.whl' | head -1)
+          test -n "$wheel"
+          uv run --no-project --with "mcp>=2.3,<3" python scripts/verify_release.py \
+            --target wheel --wheel "$wheel" --python 3.11 --installer uv
+
   # Proves the lower bounds in pyproject are real rather than aspirational.
   # A user who already has an older pydantic or mcp pinned resolves to this set.
   lowest-deps:

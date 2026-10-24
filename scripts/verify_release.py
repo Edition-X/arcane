@@ -91,7 +91,7 @@ def install_from_pypi(workdir: Path, version: str, python: str, installer: str) 
     environment = workdir / "venv"
     _run(["uv", "venv", "--python", python, str(environment)])
     scripts = environment / ("Scripts" if os.name == "nt" else "bin")
-    _run([str(scripts / "python"), "-m", "pip", "install", "--quiet", requirement])
+    _run([str(_executable(scripts, "python")), "-m", "pip", "install", "--quiet", requirement])
     return scripts
 
 
@@ -99,7 +99,7 @@ def install_from_wheel(workdir: Path, wheel: Path, python: str) -> Path:
     environment = workdir / "venv"
     _run(["uv", "venv", "--python", python, str(environment)])
     scripts = environment / ("Scripts" if os.name == "nt" else "bin")
-    _run(["uv", "pip", "install", "--python", str(scripts / "python"), str(wheel)])
+    _run(["uv", "pip", "install", "--python", str(_executable(scripts, "python")), str(wheel)])
     return scripts
 
 
