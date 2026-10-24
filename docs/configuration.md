@@ -2,7 +2,7 @@
 
 ## Config file location
 
-Arcane reads its configuration from `~/.arcane/config.yaml` (or `$ARCANE_HOME/config.yaml`). The file is created with defaults by `arcane init`. All fields are optional — missing values fall back to the defaults shown below.
+Arcane reads its configuration from `~/.arcane/config.yaml` (or `$ARCANE_HOME/config.yaml`). The file is optional and `arcane init` does not create it: write it when you want to change a default. Every field is optional, and missing values fall back to the defaults shown below. `arcane config` prints the settings in effect.
 
 ```yaml
 embedding:
@@ -109,6 +109,39 @@ The MCP server records every lookup (`memory_search`, `memory_context`, `memory_
 | `retention_days` | integer | `180` | Lookups older than this are deleted when the MCP server starts. |
 
 A search counts as a possible gap when it returned nothing, or when no memory contains its key words (all of them for up to three, all but one for longer searches), since vector search always returns its nearest neighbours.
+
+---
+
+## Orgs and projects
+
+Every save and lookup resolves an org and a project from the working directory's git remote. These settings correct that when the remote is not enough.
+
+```yaml
+orgs:
+  remotes:                   # git remote owner -> org slug
+    Sunrise-Robotics: sunrise-robotics
+  overrides:                 # canonical project name -> org, for forks and mirrors
+    some-fork: personal
+  default: personal          # org for repositories with no git remote
+
+projects:
+  aliases:                   # different names for the same work
+    grafana-usage-report: grafana-usage-automation
+```
+
+Project names are canonicalised on every save and lookup: trimmed, lowercased, separators collapsed (`Edition X` becomes `edition-x`), `owner/repo` reduced to the repo name, then mapped through `projects.aliases`. To heal a project that already split in two, list the projects and merge one into the other:
+
+```bash
+arcane projects                                                              # projects with memory counts
+arcane merge-projects grafana-usage-report grafana-usage-automation          # dry run
+arcane merge-projects grafana-usage-report grafana-usage-automation --apply  # write the change
+```
+
+---
+
+## Near-duplicate warnings
+
+`dedup.threshold` (default `0.92`) is the cosine similarity at which a new memory triggers a `near_duplicate` warning against an existing one. Raise it towards `1.0` to warn less. The warning never blocks a save.
 
 ---
 

@@ -1,375 +1,209 @@
-# Arcane
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/banner-dark.svg">
+  <img alt="arcane: Persistent memory for AI coding agents, shared across every project and harness." src=".github/assets/banner-light.svg" width="100%">
+</picture>
 
-[![CI](https://github.com/Edition-X/arcane/actions/workflows/ci.yml/badge.svg)](https://github.com/Edition-X/arcane/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/arcane-mcp)](https://pypi.org/project/arcane-mcp/)
-[![Python](https://img.shields.io/pypi/pyversions/arcane-mcp)](https://pypi.org/project/arcane-mcp/)
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/Edition-X/arcane/badge)](https://scorecard.dev/viewer/?uri=github.com/Edition-X/arcane)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+<p align="center">
+  <a href="https://github.com/Edition-X/arcane/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Edition-X/arcane/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://pypi.org/project/arcane-mcp/"><img alt="PyPI" src="https://img.shields.io/pypi/v/arcane-mcp?style=flat"></a>
+  <a href="https://pypi.org/project/arcane-mcp/"><img alt="Python" src="https://img.shields.io/pypi/pyversions/arcane-mcp?style=flat"></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/Edition-X/arcane"><img alt="OpenSSF Scorecard" src="https://api.securityscorecards.dev/projects/github.com/Edition-X/arcane/badge"></a>
+  <a href="LICENSE"><img alt="Licence: MIT" src="https://img.shields.io/badge/licence-MIT-blue?style=flat"></a>
+</p>
 
-> **Pre-1.0** — the MCP tool surface and the storage format can still change
-> between minor versions. Back up `~/.arcane` before upgrading. Breaking
-> changes move the minor version and are called out in the
-> [changelog](https://github.com/Edition-X/arcane/releases).
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#connect-an-agent">Connect an agent</a> ·
+  <a href="#use-it-from-the-terminal">CLI</a> ·
+  <a href="#configuration">Configuration</a> ·
+  <a href="docs/README.md">Docs</a>
+</p>
 
-**Unified engineering intelligence** — persistent memory, decision journeys, and knowledge capture for AI-assisted development workflows.
+Arcane is an [MCP](https://modelcontextprotocol.io) server that gives coding agents such as Claude Code and Codex a memory that outlives the session. Agents save the decisions, bugs and patterns they work through. The next session, in any harness, finds them again with keyword and semantic search.
 
-Arcane runs as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server, giving Claude Code, Claude Desktop, and other MCP-compatible agents a persistent, searchable knowledge store that survives context window resets and spans every project you work on.
-
----
-
-## What It Does
-
-- **Memories** — save and search decisions, bugs, patterns, and learnings with hybrid FTS + vector search
-- **Journeys** — track multi-step investigations from problem → exploration → decision → outcome
-- **Artifacts** — ingest CI runs, git commits, and Linear tickets as searchable references
-- **Relationships** — link any entities (memory → memory, journey → artifact, etc.) into a knowledge graph
-- **Content generation** — draft blog posts and Architecture Decision Records from your stored knowledge
-- **Intelligence** — summarise engineering velocity
-
----
-
-## Quickstart
-
-### Install
+Everything stays on your machine: one SQLite database plus a Markdown copy you can read and grep. Secrets are redacted before anything is written or sent to the embedding model.
 
 ```bash
-# With uv (recommended)
-uv tool install arcane-mcp
-
-# Or with pip
-pip install arcane-mcp
+arcane search "why were customers charged twice"
 ```
 
-The distribution is `arcane-mcp`. PyPI's `arcane` is an unrelated project — do
-not install that one.
+```console
+ Results (4 found)
 
-Every release is also published as a container image and as signed wheel and
-source-distribution assets on its [GitHub release](https://github.com/Edition-X/arcane/releases):
+ [1] Webhook retries double-charged customers (score: 1.00)
+     bug | 2026-10-24 | payments-api
+     What: Stripe retried webhooks after our 10s timeout and each retry created a new charge.
+     Why: Handler was not idempotent; it keyed on our own request ID, not Stripe's event ID.
+     Impact: Dedupe on event.id in a unique index; refunds issued to 14 customers.
+
+ [2] Use Postgres advisory locks for payout batches (score: 0.83)
+     decision | 2026-10-24 | payments-api
+     What: Payout batches take a pg_advisory_xact_lock keyed on merchant ID.
+```
+
+> **Pre-1.0.** The MCP tool surface and the storage format can still change between minor versions. Run `arcane backup` before upgrading, and read the [release notes](https://github.com/Edition-X/arcane/releases).
+
+## Quick start
+
+Arcane needs Python 3.11 or later. For semantic search, install [Ollama](https://ollama.com) and pull the default embedding model. Without it, search falls back to keyword matching.
+
+```bash
+uv tool install arcane-mcp        # or: pip install arcane-mcp
+ollama pull nomic-embed-text
+arcane init                       # creates ~/.arcane
+```
+
+The package is `arcane-mcp`. PyPI's `arcane` is an unrelated project.
+
+Arcane starts a local Ollama by itself when it is installed but not running. Set `ARCANE_OLLAMA_AUTOSTART=0` to stop that.
+
+## Connect an agent
+
+Arcane speaks MCP over stdio, so any MCP client can run it with `arcane mcp`.
+
+| Client | Command or config |
+|---|---|
+| Claude Code | `claude mcp add --scope user arcane -- arcane mcp` |
+| Codex | `codex mcp add arcane -- arcane mcp` |
+| Claude Desktop | the JSON below, in `~/Library/Application Support/Claude/claude_desktop_config.json` |
+
+```json
+{
+  "mcpServers": {
+    "arcane": { "command": "arcane", "args": ["mcp"] }
+  }
+}
+```
+
+If a client cannot find `arcane`, use the full path that `command -v arcane` prints.
+
+<details>
+<summary>Run it in a container</summary>
+
+Each release also ships a container image, plus wheel and source assets with build provenance on its [GitHub release](https://github.com/Edition-X/arcane/releases). The image runs `arcane mcp` and keeps its data in `/data/.arcane`:
 
 ```bash
 docker run -i --rm -v "$HOME/.arcane:/data/.arcane" ghcr.io/edition-x/arcane
 ```
 
-### Initialise
+The container cannot see your working directory's git remote, so memories land in the default org unless the agent passes `org` and `project` explicitly.
 
-```bash
-arcane init
-```
+</details>
 
-This creates `~/.arcane/` with a SQLite database and default config.
+## What agents get
 
-### Connect to Claude Code
+By default the server advertises 13 tools, the ones an agent uses in every session. Set `ARCANE_TOOL_PROFILE=full` for all 26, including deletion, ingestion, analysis and content drafting. Every tool and its parameters are in the [tool reference](docs/mcp-tools.md).
 
-Add to your Claude Code MCP config (`~/.claude/config.json` or project `.claude/config.json`):
-
-```json
-{
-  "mcpServers": {
-    "arcane": {
-      "command": "arcane",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-Restart Claude Code — Arcane tools will be available automatically.
-
-### Connect to Claude Desktop
-
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "arcane": {
-      "command": "arcane",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
----
-
-## MCP Tools
-
-Arcane exposes 26 MCP tools. The default `core` profile includes 13; set `ARCANE_TOOL_PROFILE=full` for all 26. See the [tool reference](docs/mcp-tools.md) for parameters and profile availability.
-
-| Tool | Purpose |
+| Area | Default tools |
 |---|---|
-| `memory_save` | Save a decision, bug, pattern, or learning |
-| `memory_search` | Semantic + keyword search across all memories |
-| `memory_context` | Load relevant memories for the current project |
-| `memory_details` | Fetch full details for a specific memory |
-| `memory_update` | Update a memory in place (use when a save warns `near_duplicate`) |
-| `memory_delete` | Remove a memory by ID |
-| `journey_start` | Begin tracking a multi-step investigation |
-| `journey_update` | Add a progress update to a journey |
-| `journey_complete` | Mark a journey done with an outcome summary |
-| `journey_abandon` | Mark a journey abandoned (dead end or superseded) |
-| `journey_delete` | Delete a journey and its relationships |
-| `journey_list` | List active or recent journeys (`stale` marks active ones with no update for 14+ days) |
-| `journey_show` | Show a journey with its memories and artifacts |
-| `artifact_search` / `artifact_details` | Search ingested artifacts and read their details |
-| `ingest_git` | Import commits from a git repository |
-| `ingest_gha` | Import CI runs from GitHub Actions |
-| `ingest_linear` | Import tickets from Linear |
-| `analyze` | Run any installed intelligence plugin (built-ins: velocity, health, usage) |
-| `plugins` | Discover or run installed ingestion, intelligence, and content plugins |
-| `insights` / `insights_ack` | View and acknowledge derived insights |
-| `link` | Create a relationship between two entities |
-| `trace` | Walk the relationship graph from an entity |
-| `draft_blog` | Generate a structured blog post brief |
-| `draft_adr` | Generate an ADR from a decision memory |
+| Memories | `memory_save`, `memory_search`, `memory_context`, `memory_details`, `memory_update` |
+| Journeys | `journey_start`, `journey_update`, `journey_complete`, `journey_abandon`, `journey_list`, `journey_show` |
+| Lookups | `artifact_search`, `insights` |
 
----
+- **Memories** are one decision, bug, pattern, learning, piece of context, spike result or milestone each. Saving a title that already exists in the same scope updates that memory, and `memory_save` warns when a new memory is close to an existing one, so the store does not fill with duplicates. A memory can also `supersedes` an older one, which search then ranks lower.
+- **Journeys** follow a multi-step investigation from problem to outcome, with memories attached as it goes.
+- **Artifacts** are git commits, GitHub Actions runs and Linear tickets you ingest, so a memory can point at the evidence.
 
-## CLI Reference
+## Use it from the terminal
 
-```bash
-# Memory
-arcane save                     # Interactive save
-arcane search "query"           # Hybrid search
-arcane context                  # Print context for agent injection
-arcane details <id-prefix>      # Full memory details
-arcane delete <id-prefix>       # Delete a memory
-arcane reindex                  # Rebuild vector index
-arcane stats                    # DB statistics
-arcane backup                   # Snapshot DB + vault to <home>/backups (--dest, --keep 14)
-arcane sessions                 # List recent sessions
+The CLI reads and writes the same store as the MCP server. `arcane <command> --help` shows every option.
 
-# Journeys
-arcane journey start            # Start a journey
-arcane journey update <id>      # Add an update
-arcane journey complete <id>    # Mark complete
-arcane journey list             # List journeys
-arcane journey show <id>        # Full journey with linked entities
+| Task | Command |
+|---|---|
+| Save a memory | `arcane save --title "..." --what "..." --category decision` |
+| Search | `arcane search "query"` |
+| Print context for an agent prompt | `arcane context` |
+| Read or delete one memory | `arcane details <id>`, `arcane delete <id>` |
+| Track an investigation | `arcane journey start --title "..."`, then `update`, `complete`, `list`, `show` |
+| Ingest evidence | `arcane ingest git`, `arcane ingest gha --owner <owner> --repo <repo>`, `arcane ingest linear --team <key>` |
+| Analyse the store | `arcane analyze velocity`, `arcane analyze health`, `arcane analyze usage` |
+| Report on a period | `arcane report --days 7`, or `--since`/`--until`, `--org`, `--format json` |
+| Draft content | `arcane draft blog`, `arcane draft adr <memory-id>` |
+| Link and trace | `arcane link <source> <target> --relation led_to`, `arcane trace <id>` |
+| Export one org | `arcane export --org <org>` |
+| Back up | `arcane backup` |
+| Find and merge split projects | `arcane projects`, `arcane merge-projects <src> <dest>` |
 
-# Ingestion
-arcane ingest git               # Ingest local git commits
-arcane ingest gha               # Ingest GitHub Actions runs
-arcane ingest linear            # Ingest Linear tickets
+`arcane ingest gha` reads `GITHUB_TOKEN` and `arcane ingest linear` reads `LINEAR_API_KEY`.
 
-# Intelligence
-arcane analyze velocity         # Engineering velocity summary
-arcane analyze health           # Store health audit — fragmentation, orphans, journey hygiene
-arcane analyze usage            # What agents recall — lookups per agent, gap searches, unused memories
+## How it works
 
-# Reports and export
-arcane report --days 7          # Shipped, decided, fixed and finished, by org and project (markdown)
-arcane report --since 2026-07-01 --until 2026-09-30 --org sunrise-robotics --format json
-arcane export --org sunrise-robotics   # One org's memories, journeys, artifacts and links as JSON
+Every memory belongs to one of three layers:
 
-# Content
-arcane draft blog               # Blog brief from memories
-arcane draft adr <memory-id>    # ADR from a decision memory
+- **Project:** the repository the agent is working in.
+- **Org:** shared by every repository with the same owner.
+- **Global:** applies everywhere.
 
-# Relationships
-arcane link <type-id> <type-id> <rel-type>   # Create link
-arcane trace <type> <id>                      # Walk graph
+Arcane works out the org and project from the git remote of the agent's working directory, so a session in `acme/payments-api` sees that project's memories, `acme`'s org memories and your global ones. Repositories without a remote fall back to the org `personal`. Agents choose the layer with `memory_save`'s `scope` argument; `arcane save` always writes to the current project. Journeys, artifacts and insights carry their org too, and `arcane export --org` includes only that org's records.
 
-# Config
-arcane config                   # Show current config
-arcane config set-home <path>   # Set custom data directory
-arcane config clear-home        # Remove custom home setting
+Search combines SQLite FTS5 keyword matching with [sqlite-vec](https://github.com/asg017/sqlite-vec) vector search. Each save is written to SQLite and mirrored to a daily Markdown file:
 
-# Server
-arcane mcp                      # Start MCP server (stdio)
-arcane -v mcp                   # With debug logging
+```text
+~/.arcane/
+├── index.db                                 # SQLite: memories, journeys, artifacts, links
+├── backups/                                 # archives from `arcane backup`
+└── vault/
+    ├── @<org>/<project>/YYYY-MM-DD-session.md   # project memories
+    ├── @<org>/YYYY-MM-DD-session.md             # org memories
+    └── @global/YYYY-MM-DD-session.md            # global memories
 ```
 
----
+Before anything is stored or embedded, text passes through four redaction layers:
+
+- explicit `<redacted>…</redacted>` spans
+- well-known token formats (GitHub, AWS, Stripe, Slack, JWT and others)
+- `password=`, `secret=` and `api_key=` style values
+- your own regular expressions in `~/.arcane/.memoryignore`
+
+[Architecture](docs/architecture.md) goes deeper.
 
 ## Configuration
 
-Config is loaded from `~/.arcane/config.yaml` (or `$ARCANE_HOME/config.yaml`):
+Arcane reads `~/.arcane/config.yaml`, or `$ARCANE_HOME/config.yaml`. Every setting is optional.
 
-```yaml
-embedding:
-  provider: ollama           # "ollama" or "openai"
-  model: nomic-embed-text    # Embedding model name
-  base_url: http://localhost:11434  # Ollama base URL (ignored for openai)
-  api_key: null              # Required when provider is openai
+| Setting | Default | What it changes |
+|---|---|---|
+| `embedding.provider` | `ollama` | `ollama`, `openai` (needs `embedding.api_key` in the file) or `none` for keyword search only |
+| `embedding.model` | `nomic-embed-text` | Embedding model. Run `arcane reindex` after changing it |
+| `embedding.base_url` | `http://localhost:11434` | Ollama address |
+| `context.semantic` | `auto` | Whether `memory_context` uses semantic search: `auto`, `always` or `never` |
+| `orgs.remotes` | none | Map a git remote owner to an org name, such as `Sunrise-Robotics: sunrise-robotics` |
+| `orgs.default` | `personal` | Org for repositories without a git remote |
+| `projects.aliases` | none | Treat two project names as one |
+| `dedup.threshold` | `0.92` | Similarity at which a save warns `near_duplicate` |
+| `usage.retention_days` | `180` | How long lookup history is kept for `arcane analyze usage` |
 
-context:
-  semantic: auto             # "auto" | "always" | "never"
-  topup_recent: true         # Supplement semantic results with recent memories
+The [configuration guide](docs/configuration.md) covers every setting and environment variable.
 
-projects:
-  aliases:                   # Merge different names for the same work into one
-    grafana-usage-report: grafana-usage-automation
+## Plugins
 
-dedup:
-  threshold: 0.92            # Cosine similarity that triggers a near_duplicate
-                             # warning on save (warn-only, never blocks)
-
-usage:
-  enabled: true              # Record each MCP lookup and what it returned
-  log_queries: true          # Keep the (redacted) search text
-  retention_days: 180        # Pruned when the MCP server starts
-```
-
-Project names are canonicalized on every save and lookup: trimmed, lowercased,
-separators collapsed (`Edition X` → `edition-x`), `owner/repo` reduced to the
-repo name, then mapped through `projects.aliases`. To heal an existing split,
-list the silos and merge them:
-
-```bash
-arcane projects                                  # distinct projects with counts
-arcane merge-projects grafana-usage-report grafana-usage-automation          # dry run
-arcane merge-projects grafana-usage-report grafana-usage-automation --apply  # commit
-```
-
-### Environment Variables
-
-| Variable | Purpose |
-|---|---|
-| `ARCANE_HOME` | Override data directory (default: `~/.arcane`) |
-| `GITHUB_TOKEN` | GitHub API auth for GHA ingestion |
-| `LINEAR_API_KEY` | Linear API key for ticket ingestion |
-| `ARCANE_LOG_LEVEL` | Log verbosity: `DEBUG`, `INFO`, `WARNING` |
-| `ARCANE_OLLAMA_AUTOSTART` | Set to `0` to stop Arcane starting a local Ollama when it is down |
-| `ARCANE_TOOL_PROFILE` | MCP tool set to advertise: `core` (default, 13 tools) or `full` (all tools) |
-
----
-
-## Semantic Search
-
-Arcane supports two embedding backends:
-
-### Ollama (default, local, free)
-
-```bash
-# Install Ollama: https://ollama.ai
-ollama pull nomic-embed-text
-
-# Config (default — no changes needed)
-embedding:
-  provider: ollama
-  model: nomic-embed-text
-```
-
-### OpenAI
-
-Set `embedding.api_key` explicitly in your config file:
-
-```yaml
-# config.yaml
-embedding:
-  provider: openai
-  model: text-embedding-3-small
-  api_key: your-api-key
-```
-
-A missing or blank key reports a configuration error. Environment variables do not supply this key.
-
-After switching models, rebuild the vector index:
-
-```bash
-arcane reindex
-```
-
----
-
-## Memory Categories
-
-| Category | Use for |
-|---|---|
-| `decision` | Architectural or design decisions (include tradeoffs in `details`) |
-| `bug` | Bugs you fixed — root cause, fix, and how to recognise it |
-| `pattern` | Reusable patterns or best practices |
-| `learning` | Things you discovered or figured out |
-| `context` | Background knowledge about a project or system |
-| `poc` | Proof-of-concept or spike findings |
-| `milestone` | Significant work shipped |
-
----
-
-## Plugin System
-
-Install a plugin package in the same Python environment as Arcane. Its entry-point names automatically become commands under `arcane ingest`, `arcane analyze`, or `arcane draft`. Built-in commands and MCP tools remain available; built-in and third-party plugins use the same registry.
+Ingestion, analysis and content plugins are Python entry points. Install a plugin package into Arcane's environment and its commands appear under `arcane ingest`, `arcane analyze` or `arcane draft`. With `ARCANE_TOOL_PROFILE=full`, agents can also run them through the `plugins` MCP tool. `arcane ingest --list` shows what is installed.
 
 ```toml
-# In your plugin package's pyproject.toml
 [project.entry-points."arcane.plugins.ingestion"]
 jira = "my_package:JiraIngestionPlugin"
-
-[project.entry-points."arcane.plugins.intelligence"]
-code_churn = "my_package:CodeChurnAnalyser"
-
-[project.entry-points."arcane.plugins.content"]
-changelog = "my_package:ChangelogGenerator"
 ```
 
-Discover installed plugins with `arcane ingest --list`, `arcane analyze --list`, or `arcane draft --list`; each group's `--help` also lists commands. For an added plugin, `<command> --help` shows its constructor signature. Pass constructor settings as JSON with `--options '{"key":"value"}'`; content commands also accept `--context '{"topic":"release"}'`.
+The [plugin guide](docs/architecture.md#plugin-system) lists the three protocols and the parameters Arcane passes in.
 
-In the full MCP profile, call `plugins` without arguments to list all three kinds. To run one, supply `kind` and `plugin_name`, plus optional `options` and content `context` objects. The `analyze` tool also accepts installed intelligence entry-point names.
+## Backups and restores
 
-Plugins implement the protocols in `arcane.plugins.protocols`. A factory can declare named repository parameters or `org` to receive Arcane's current store and scope; these injected values cannot be overridden through `options`. See [plugin architecture](docs/architecture.md#plugin-system) for the supported parameters.
+`arcane backup` copies the database with SQLite's online backup API, so it is safe while agents are writing. It checks the copy's integrity, archives it with `vault/`, and keeps the newest 14 archives. `--dest` writes them to another disk.
 
----
+To restore, stop your agents and unpack an archive into `~/.arcane` or another `ARCANE_HOME`. File paths are stored relative to the home, so a restored copy never edits the original.
 
-## Data Layout
+## Limits
 
-```
-~/.arcane/
-├── index.db           # SQLite database (memories, journeys, artifacts, relationships)
-├── backups/           # arcane-<UTC timestamp>.tar.gz from `arcane backup`
-└── vault/
-    ├── @<org>/
-    │   ├── <project>/YYYY-MM-DD-session.md  # Project memories
-    │   └── YYYY-MM-DD-session.md            # Org memories
-    └── YYYY-MM-DD-session.md                # Global memories
-```
+- **One machine.** The store is local. There is no sync between machines. Move data with `arcane backup` or `arcane export`.
+- **Semantic search needs embeddings.** Without Ollama or an OpenAI key, memories save without vectors and search uses keywords only. Some Python builds, such as the python.org installer for macOS, cannot load SQLite extensions and also fall back to keywords. Arcane says so when it starts; on Linux x86_64, `pip install "arcane-mcp[pysqlite3]"` fixes it.
+- **Lookups are logged.** By default each MCP lookup is recorded, with its redacted search text, so `arcane analyze usage` can show what agents recall. Set `usage.log_queries: false` to drop the text, or `usage.enabled: false` to record nothing.
+- **Redaction matches patterns.** It catches known token formats and the patterns you add, not every secret. Wrap anything sensitive in `<redacted>` tags, or keep it out of memories.
+- **Pre-1.0.** Storage and tools can change between minor versions.
 
-`arcane backup` snapshots the database with SQLite's online backup API (safe
-while an MCP server is writing), integrity-checks the snapshot, and archives it
-with `vault/`. It keeps the newest 14 archives; use `--dest` to write them off
-this disk. To restore, stop running agents and unpack an archive into
-`~/.arcane` or another `ARCANE_HOME`. Memory file paths stay relative to that
-home, while API responses show the current absolute path. After a restore,
-legacy absolute paths resolve only when they are inside the current vault;
-Arcane does not follow them back to the original vault.
+## Contributing
 
----
+Bug reports and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers the development setup and tests, and [AGENTS.md](AGENTS.md) covers the architecture.
 
-## Development
+## Licence
 
-```bash
-git clone https://github.com/dkelly/arcane
-cd arcane
-uv venv && source .venv/bin/activate
-uv pip install -e ".[dev]"
-pre-commit install
-
-# Run tests
-pytest
-
-# Lint + format
-ruff check --fix src/ tests/
-ruff format src/ tests/
-
-# Type check
-mypy src/arcane
-```
-
-### Project Structure
-
-```
-src/arcane/
-├── cli/            # Click CLI — one module per command group
-├── domain/         # Pydantic domain models
-├── infra/          # DB repos, config, search, embeddings, redaction
-├── mcp_server/     # MCP stdio server + tool handlers
-├── plugins/        # Plugin protocols + built-in implementations
-└── services/       # Business logic layer
-```
-
-See [AGENTS.md](./AGENTS.md) for detailed contributor and agent guidance.
-
----
-
-## License
-
-[MIT](./LICENSE)
+[MIT](LICENSE)
