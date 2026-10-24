@@ -211,8 +211,8 @@ jobs:
           set -euo pipefail
           uv venv --python 3.13 /tmp/sbom-env
           uv pip install --python /tmp/sbom-env/bin/python dist/*.whl
-          uvx --from cyclonedx-bom cyclonedx-py environment /tmp/sbom-env \
-            --output-format JSON --outfile sbom.cdx.json
+          uvx --from cyclonedx-bom==7.5.0 cyclonedx-py environment /tmp/sbom-env \
+            --output-format JSON --output-file sbom.cdx.json
           echo "SBOM components: $(jq '.components | length' sbom.cdx.json)"
 
       - name: Attest build provenance
