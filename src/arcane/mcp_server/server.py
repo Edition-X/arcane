@@ -165,6 +165,8 @@ def _create_server(container: ServiceContainer) -> Server:
                         },
                         "confidence": {
                             "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
                             "description": "Confidence in accuracy 0.0–1.0. Default: omit.",
                         },
                     },

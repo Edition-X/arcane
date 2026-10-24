@@ -40,12 +40,16 @@ Plugins are discovered via Python entry points (`arcane.plugins.ingestion`, `arc
 All MCP tool handlers are synchronous functions wrapped in `anyio.to_thread.run_sync()` to keep the async event loop free. Add new tools in `mcp_server/tools/` and register them in `mcp_server/server.py`.
 
 ### Testing
-- Unit tests in `tests/unit/` — no DB, no network, mock at boundaries
-- Integration tests in `tests/integration/` — real SQLite (`:memory:` or temp file), no network
-- CLI tests in `tests/cli/` — patch `create_container` in each CLI sub-module individually
-- Plugin tests in `tests/plugins/` — patch `_fetch_all_*` methods on plugin classes
 
-Patch targets use the full dotted path where the name is **used**, not where it is defined:
+New tests are end-to-end: they drive a real entry point against a real store. Do not add mocked unit tests.
+
+- E2E tests in `tests/e2e/` — the real `arcane mcp` server over stdio, a temp `ARCANE_HOME`, and a real git repo as its working directory. Every MCP behaviour is tested here; `tests/e2e/conftest.py` has the harness (`arcane.run(scenario)`, `Client.call`/`Client.error`, `arcane.sql`). No embedder is reachable, as in CI.
+- CLI tests in `tests/cli/` — prefer `CliRunner` with `ARCANE_HOME` set to a temp dir over patching `create_container`; older tests here still patch it.
+- Integration tests in `tests/integration/` — real SQLite (temp file), no network. `test_installed_mcp.py` builds and installs the wheel (`-m artifact`).
+- Plugin tests in `tests/plugins/` and `tests/unit/test_embeddings.py` — the only places network is faked: GitHub, Linear and Ollama need live credentials or a running server, so their HTTP calls are patched.
+- `tests/unit/` holds only pure functions with many edge cases (redaction patterns, scope and remote parsing, FTS escaping, rank fusion). Keep it that way.
+
+When you do patch, use the full dotted path where the name is **used**, not where it is defined:
 ```python
 # Correct
 @patch("arcane.cli.memory.create_container")
@@ -78,7 +82,7 @@ mypy src/arcane
 
 1. Create `src/arcane/plugins/builtin/my_plugin.py` implementing `IngestionPlugin`, `IntelligencePlugin`, or `ContentPlugin` from `plugins/protocols.py`.
 2. Register it in `pyproject.toml` under the appropriate `[project.entry-points]` section.
-3. Add tests in `tests/plugins/test_my_plugin.py` mocking network calls.
+3. Add tests in `tests/plugins/test_my_plugin.py`, faking only the network calls; cover its MCP or CLI surface in `tests/e2e/`.
 4. Wire a CLI command in `src/arcane/cli/ingest.py` (or appropriate group).
 
 ## Adding a New MCP Tool
@@ -86,6 +90,7 @@ mypy src/arcane
 1. Create or extend a file in `mcp_server/tools/`.
 2. Define a handler function `(args: dict) -> str`.
 3. Register it in `mcp_server/server.py`: add a `Tool` (name, description, JSON schema) to `list_tools()` and a `(handler, first_arg)` entry to the `handlers` dict. Add it to `CORE_TOOLS` only if it belongs in the default profile.
+4. Add it to the tool sets in `tests/e2e/test_mcp_discovery.py` and cover its success and error paths with an e2e scenario. Put value limits (enums, minimum/maximum) in the JSON schema: the MCP SDK then rejects bad input with a clear message before the handler runs.
 
 ## Commit Style
 

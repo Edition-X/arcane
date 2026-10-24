@@ -19,7 +19,10 @@ def handle_draft_blog(
     """Generate a structured blog brief from a journey or project memories."""
     if journey_id:
         js = JourneyService(container)
-        journey = js.show(journey_id)
+        try:
+            journey = js.show(journey_id)
+        except IdentifierResolutionError as exc:
+            return json.dumps({"error": str(exc)})
         if not journey:
             return json.dumps({"error": f"Journey {journey_id} not found"})
 
