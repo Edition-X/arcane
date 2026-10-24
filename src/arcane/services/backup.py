@@ -15,7 +15,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-import sqlite_vec
+from arcane.infra.db.connection import load_vec_extension
 
 ARCHIVE_PREFIX = "arcane-"
 ARCHIVE_SUFFIX = ".tar.gz"
@@ -37,16 +37,16 @@ def _check_snapshot(db_path: str) -> int:
     """Integrity-check a snapshot and return its memory count."""
     conn = sqlite3.connect(db_path)
     try:
-        conn.enable_load_extension(True)
-        sqlite_vec.load(conn)
-        conn.enable_load_extension(False)
+        vec_available = load_vec_extension(conn)
         status = conn.execute("PRAGMA integrity_check").fetchone()[0]
         if status != "ok":
             raise BackupError(f"snapshot failed integrity_check: {status}")
         count: int = conn.execute("SELECT count(*) FROM memories").fetchone()[0]
         # Reads the vector table, which a broken vec0 shadow table fails. It
-        # only exists once a memory has been embedded.
-        if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'memories_vec'").fetchone():
+        # only exists once a memory has been embedded, and can only be read
+        # where the extension loaded.
+        has_vec = conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'memories_vec'").fetchone()
+        if vec_available and has_vec:
             conn.execute("SELECT count(*) FROM memories_vec").fetchone()
         return count
     except sqlite3.Error as exc:

@@ -128,8 +128,11 @@ def arcane(tmp_path: Path) -> Arcane:
     repo.mkdir()
     git(repo, "init", "-q", "-b", "main")
     git(repo, "remote", "add", "origin", "git@github.com:Acme/widget.git")
-    for n in (1, 2):
-        (repo / f"file{n}.txt").write_text(f"change {n}\n", encoding="utf-8")
+    # Words, not digits: artifact search is a prefix match per term, and a
+    # digit also prefixes commit SHAs and timestamps, which made which commit
+    # ranked first depend on the SHAs git happened to produce.
+    for n in ("one", "two"):
+        (repo / f"file-{n}.txt").write_text(f"change {n}\n", encoding="utf-8")
         git(repo, "add", ".")
         git(repo, "commit", "-q", "-m", f"feat: change {n}")
     return Arcane(home=home, repo=repo)

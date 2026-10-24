@@ -32,7 +32,7 @@ def test_journey_lifecycle_links_memories_and_commits(arcane: Arcane) -> None:
     assert show["summary"] == "Compared SQLite and Postgres"
     assert [m["memory_id"] for m in show["linked_memories"]] == [out["memory"]["id"]]
     assert out["ingest"]["ingested"] == 2
-    assert sorted(a["title"] for a in show["linked_artifacts"]) == ["feat: change 1", "feat: change 2"]
+    assert sorted(a["title"] for a in show["linked_artifacts"]) == ["feat: change one", "feat: change two"]
     assert [e["event_type"] for e in show["events"]] == ["updated"]
 
     assert out["complete"]["completed"] is True
