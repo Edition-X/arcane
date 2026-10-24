@@ -22,7 +22,8 @@ classifiers = [
 dependencies = [
     "click>=8.0",
     "httpx>=0.24",
-    "mcp>=1.0,<2",
+    "mcp>=2.3,<3",
+    "jsonschema>=4.20",
     "pydantic>=2.0",
     "pyyaml>=6.0",
     "sqlite-vec>=0.1",
@@ -37,6 +38,7 @@ dev = [
     "mypy>=1.10",
     "pre-commit>=3.7",
     "types-PyYAML>=6.0",
+    "types-jsonschema>=4.20",
 ]
 
 [project.scripts]

@@ -51,14 +51,14 @@ class Client:
         """Call a tool that must succeed; return its decoded JSON payload."""
         result = await self.raw(name, **arguments)
         text = result.content[0].text  # type: ignore[union-attr]
-        assert result.isError is False, f"{name} failed: {text}"
+        assert result.is_error is False, f"{name} failed: {text}"
         return json.loads(text)
 
     async def error(self, name: str, **arguments: Any) -> str:
         """Call a tool that must fail; return its error message."""
         result = await self.raw(name, **arguments)
         text = result.content[0].text  # type: ignore[union-attr]
-        assert result.isError is True, f"{name} unexpectedly succeeded: {text}"
+        assert result.is_error is True, f"{name} unexpectedly succeeded: {text}"
         try:
             return str(json.loads(text)["error"])
         except (json.JSONDecodeError, KeyError, TypeError):
@@ -89,12 +89,13 @@ class Arcane:
         profile: str = "full",
         client_name: str = "E2E Client",
         cwd: Path | None = None,
+        extra_env: dict[str, str] | None = None,
     ) -> T:
         """Start the server, run *scenario* against it, and shut it down."""
 
         async def main() -> T:
             params = StdioServerParameters(
-                command=ARCANE, args=["mcp"], env=self.env(profile), cwd=str(cwd or self.repo)
+                command=ARCANE, args=["mcp"], env={**self.env(profile), **(extra_env or {})}, cwd=str(cwd or self.repo)
             )
             async with stdio_client(params) as (read, write):
                 async with ClientSession(

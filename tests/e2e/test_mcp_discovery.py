@@ -64,7 +64,7 @@ def test_full_profile_advertises_every_tool(arcane: Arcane) -> None:
 def test_server_identifies_itself(arcane: Arcane) -> None:
     async def handshake(c: Client) -> tuple[str, str]:
         # initialize() already ran; a second one returns the same server info.
-        info = (await c.session.initialize()).serverInfo
+        info = (await c.session.initialize()).server_info
         return info.name, info.version
 
     assert arcane.run(handshake) == ("arcane", __version__)
@@ -100,11 +100,11 @@ def test_prompts_render_with_their_arguments(arcane: Arcane) -> None:
 def test_project_context_resource_matches_the_context_tool(arcane: Arcane) -> None:
     async def scenario(c: Client) -> tuple[object, ...]:
         await c.call("memory_save", title="Resource check", what="Seen through the resource", category="context")
-        templates = (await c.session.list_resource_templates()).resourceTemplates
+        templates = (await c.session.list_resource_templates()).resource_templates
         resources = (await c.session.list_resources()).resources
         read = await c.session.read_resource("arcane://context/widget")  # type: ignore[arg-type]
         tool = await c.call("memory_context", project="widget")
-        return templates[0].uriTemplate, resources, json.loads(read.contents[0].text), tool  # type: ignore[union-attr]
+        return templates[0].uri_template, resources, json.loads(read.contents[0].text), tool  # type: ignore[union-attr]
 
     template, resources, resource, tool = arcane.run(scenario)
     assert template == "arcane://context/{project}"
