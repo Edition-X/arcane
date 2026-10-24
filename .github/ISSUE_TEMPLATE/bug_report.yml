@@ -1,0 +1,67 @@
+name: Bug report
+description: Something does not work the way it says it does.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If this is a security problem, close this and use
+        [a private advisory](https://github.com/Edition-X/arcane/security/advisories/new)
+        instead.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: >-
+        The commands or the MCP tool calls, in order. A failing case someone
+        else can run is worth more than a description of one.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Arcane version
+      description: Output of `arcane --version`.
+      placeholder: arcane, version 0.2.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How it was installed
+      options:
+        - uv tool install
+        - pip install
+        - container image
+        - from source
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: OS and Python
+      placeholder: macOS 15.1 arm64, Python 3.13
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >-
+        Run with `ARCANE_LOG_LEVEL=DEBUG` and paste the relevant stderr.
+        Check it for anything private before you post it.
+      render: shell
