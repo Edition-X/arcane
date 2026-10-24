@@ -91,8 +91,10 @@ def _parse_remote_url(url: str) -> tuple[str | None, str | None]:
 def git_remote_info(cwd: str) -> tuple[str | None, str | None]:
     """Return ``(owner, repo)`` from the ``origin`` remote, or ``(None, None)``.
 
-    Best-effort and fast: a short timeout, and any failure (no repo, no remote,
-    git missing) resolves to ``(None, None)`` so the caller falls back cleanly.
+    A repo with no usable remote gives ``(None, <main checkout name>)`` so its
+    worktrees share one project. Best-effort and fast: a short timeout, and any
+    failure (not a repo, git missing) resolves to ``(None, None)`` so the caller
+    falls back cleanly.
     Results are cached per directory for ``REMOTE_CACHE_TTL_SECONDS``.
     """
     now = time.monotonic()
@@ -112,20 +114,48 @@ def clear_remote_cache() -> None:
         _remote_cache.clear()
 
 
-def _read_git_remote(cwd: str) -> tuple[str | None, str | None]:
+def _git(cwd: str, *args: str) -> str | None:
+    """Run a short git command in *cwd*; its stripped stdout, or ``None`` on any failure."""
     try:
         out = subprocess.run(
-            ["git", "-C", cwd, "remote", "get-url", "origin"],
+            ["git", "-C", cwd, *args],
             capture_output=True,
             text=True,
             timeout=2,
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
-        return None, None
+        return None
     if out.returncode != 0 or not out.stdout.strip():
-        return None, None
-    return _parse_remote_url(out.stdout)
+        return None
+    return out.stdout.strip()
+
+
+def _local_repo_name(cwd: str) -> str | None:
+    """Name of the main checkout of the repo containing *cwd*, or ``None``.
+
+    For a repo with no remote, the directory name is all there is to go on, and
+    a worktree's directory (``~/.t3/worktrees/emergence/t3code-72abab4d``) says
+    nothing about the repo. The shared git dir does: ``<main checkout>/.git``.
+    """
+    common = _git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if not common:
+        return None
+    common = os.path.normpath(common)
+    if os.path.basename(common) == ".git":
+        return os.path.basename(os.path.dirname(common)) or None
+    # A bare repo: its directory is the name, minus a conventional .git suffix.
+    name = os.path.basename(common)
+    return name.removesuffix(".git") or None
+
+
+def _read_git_remote(cwd: str) -> tuple[str | None, str | None]:
+    url = _git(cwd, "remote", "get-url", "origin")
+    if url:
+        owner, repo = _parse_remote_url(url)
+        if repo:
+            return owner, repo
+    return None, _local_repo_name(cwd)
 
 
 def resolve_scope(
