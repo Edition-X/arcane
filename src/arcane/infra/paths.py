@@ -23,7 +23,15 @@ def vault_path(home: str, stored_path: str) -> Path:
         portable = PurePosixPath(*portable.parts[1:])
     else:
         raise ValueError("Memory path must be relative to the vault")
-    candidate = root.joinpath(*portable.parts).resolve()
+    if not portable.parts or portable.name in (".", ".."):
+        raise ValueError("Memory path escapes the vault or is not a Markdown file")
+    # Resolve the directory, not the file. Other processes atomically replace
+    # session files, and on Windows resolving a file mid-replace can return a
+    # \\?\-prefixed path that no longer looks inside the vault. Directories
+    # are never replaced; a symlinked file is still followed and checked.
+    candidate = root.joinpath(*portable.parts[:-1]).resolve() / portable.name
+    if candidate.is_symlink():
+        candidate = candidate.resolve()
     if not candidate.is_relative_to(root) or candidate == root or candidate.suffix != ".md":
         raise ValueError("Memory path escapes the vault or is not a Markdown file")
     return candidate
