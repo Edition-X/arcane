@@ -299,9 +299,13 @@ class MemoryService:
         vault_project_dir = str(file_path.parent)
         os.makedirs(vault_project_dir, exist_ok=True)
 
-        raw_data = redact_values(raw.model_dump(), self.c.ignore_patterns)
-        assert isinstance(raw_data, dict)
-        raw = RawMemoryInput.model_validate(raw_data)
+        # Redact in place rather than re-validating a dumped dict: redaction can
+        # only lengthen a field (a matched span becomes "[REDACTED]"), and a
+        # title pushed past its 60-character limit would fail a save that had
+        # already validated. The input was validated when it was constructed.
+        redacted = redact_values(raw.model_dump(), self.c.ignore_patterns)
+        assert isinstance(redacted, dict)
+        raw = raw.model_copy(update=redacted)
         warnings = self._details_warnings(raw)
         journey_id = self._resolve_journey(raw.journey_id, warnings)
         superseded_id = self._resolve_superseded(raw.supersedes, warnings)
