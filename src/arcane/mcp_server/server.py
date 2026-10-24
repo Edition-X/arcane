@@ -6,6 +6,8 @@ import inspect
 import json
 import logging
 import os
+import time
+import uuid
 from collections.abc import Callable
 from typing import Any, cast
 
@@ -67,6 +69,7 @@ from arcane.mcp_server.tools.memory_tools import (
     handle_update,
 )
 from arcane.mcp_server.tools.relationship_tools import handle_link, handle_trace
+from arcane.mcp_server.usage import RECORDED_TOOLS, record_tool_call
 from arcane.services.container import ServiceContainer, create_container, start_embedding_backend
 from arcane.services.journey import JourneyService
 from arcane.services.memory import MemoryService
@@ -110,6 +113,8 @@ def _create_server(container: ServiceContainer) -> Server:
     server = Server("arcane", version=__version__)
     mem_svc = MemoryService(container)
     journey_svc = JourneyService(container)
+    # One stdio server is one agent session; lookups are grouped by it.
+    session_id = str(uuid.uuid4())
 
     def _client_name() -> str | None:
         """Best-effort slug of the connecting MCP client's name (e.g. "claude-code").
@@ -479,11 +484,11 @@ def _create_server(container: ServiceContainer) -> Server:
             # ── Analysis tools ──
             Tool(
                 name="analyze",
-                description="Run an intelligence analysis plugin (velocity, health).",
+                description="Run an intelligence analysis plugin (velocity, health, usage).",
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "plugin_name": {"type": "string", "enum": ["velocity", "health"]},
+                        "plugin_name": {"type": "string", "enum": ["velocity", "health", "usage"]},
                         "project": {"type": "string"},
                     },
                     "required": ["plugin_name"],
@@ -554,6 +559,7 @@ def _create_server(container: ServiceContainer) -> Server:
 
         spec = handlers.get(name)
         is_error = False
+        started = time.monotonic()
         if spec and _tool_profile() == "core" and name not in CORE_TOOLS:
             logger.warning("Tool '%s' requested outside the core profile", name)
             result = json.dumps(
@@ -593,7 +599,26 @@ def _create_server(container: ServiceContainer) -> Server:
             except (json.JSONDecodeError, TypeError):
                 pass
 
+        if name in RECORDED_TOOLS:
+            await _record(name, args, result, is_error, started)
+
         return CallToolResult(content=[TextContent(type="text", text=result)], isError=is_error)
+
+    async def _record(tool: str, args: dict[str, Any], result: str, is_error: bool, started: float) -> None:
+        duration_ms = int((time.monotonic() - started) * 1000)
+        client = _client_name()
+        await anyio.to_thread.run_sync(
+            lambda: record_tool_call(
+                container,
+                session_id=session_id,
+                client=client,
+                tool=tool,
+                arguments=args,
+                result_text=result,
+                is_error=is_error,
+                duration_ms=duration_ms,
+            )
+        )
 
     @server.list_resource_templates()
     async def list_resource_templates() -> list[ResourceTemplate]:
@@ -614,7 +639,9 @@ def _create_server(container: ServiceContainer) -> Server:
     @server.read_resource()
     async def read_resource(uri: AnyUrl) -> list[ReadResourceContents]:
         project = _parse_project_from_uri(str(uri))
+        started = time.monotonic()
         text = await anyio.to_thread.run_sync(lambda: handle_context(mem_svc, project=project, detail="standard"))
+        await _record("resource_context", {"project": project}, text, False, started)
         return [ReadResourceContents(content=text, mime_type="application/json")]
 
     @server.list_prompts()
@@ -683,6 +710,10 @@ async def run_server() -> None:
     """Run the MCP server with stdio transport."""
     container = create_container()
     start_embedding_backend(container.config)
+    try:
+        container.retrieval_repo.prune(container.config.usage.retention_days)
+    except Exception:
+        logger.warning("Could not prune old usage records", exc_info=True)
     try:
         server = _create_server(container)
         async with stdio_server() as (read_stream, write_stream):

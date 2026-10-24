@@ -12,6 +12,7 @@ from arcane.infra.db.insight_repo import InsightRepository
 from arcane.infra.db.journey_repo import JourneyRepository
 from arcane.infra.db.memory_repo import MemoryRepository
 from arcane.infra.db.relationship_repo import RelationshipRepository
+from arcane.infra.db.retrieval_repo import RetrievalRepository
 from arcane.infra.db.schema import create_schema
 from arcane.infra.embeddings.base import EmbeddingProvider
 from arcane.infra.redaction import load_memoryignore
@@ -32,6 +33,7 @@ class ServiceContainer:
     artifact_repo: ArtifactRepository
     relationship_repo: RelationshipRepository
     insight_repo: InsightRepository
+    retrieval_repo: RetrievalRepository
 
     # Lazy
     _embedding_provider: EmbeddingProvider | None = None
@@ -82,6 +84,7 @@ def create_container(home: str | None = None) -> ServiceContainer:
         artifact_repo=ArtifactRepository(db),
         relationship_repo=RelationshipRepository(db),
         insight_repo=InsightRepository(db),
+        retrieval_repo=RetrievalRepository(db),
     )
 
 
