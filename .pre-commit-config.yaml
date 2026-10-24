@@ -20,3 +20,16 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
+
+  # Workflow syntax, expression typos, shellcheck over every `run:` block.
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
+
+  # Security audit of the workflows themselves: template injection, over-broad
+  # permissions, unpinned actions, artifact poisoning.
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: v1.31.1
+    hooks:
+      - id: zizmor
