@@ -1,4 +1,4 @@
-"""Analysis commands — velocity and health."""
+"""Analysis commands — velocity, health and usage."""
 
 from __future__ import annotations
 
@@ -30,6 +30,25 @@ def analyze_health(project: str | None) -> None:
         insights = container.insight_repo.list_all(project=result["project"], limit=result["insights_created"])
 
     for insight in insights:
+        marker = "!" if insight["severity"] != "info" else "-"
+        click.echo(f"\n{marker} [{insight['severity']}] {insight['title']}")
+        click.echo(insight["body"])
+
+
+@analyze.command("usage")
+@click.option("--days", default=30, show_default=True, help="Window to report on")
+@click.option("--project", default=None, help="Project to attach the insights to")
+def analyze_usage(days: int, project: str | None) -> None:
+    """Report what agents recall — lookups, empty searches, unused memories."""
+    from arcane.plugins.builtin.usage import UsageAnalyzer
+    from arcane.services.intelligence import IntelligenceService
+
+    with create_container() as container:
+        plugin = UsageAnalyzer(retrieval_repo=container.retrieval_repo, days=days)
+        result = IntelligenceService(container).run_plugin(plugin, project=project)
+        insights = container.insight_repo.list_all(project=result["project"], limit=result["insights_created"])
+
+    for insight in reversed(insights):
         marker = "!" if insight["severity"] != "info" else "-"
         click.echo(f"\n{marker} [{insight['severity']}] {insight['title']}")
         click.echo(insight["body"])

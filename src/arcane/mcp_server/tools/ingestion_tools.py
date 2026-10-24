@@ -95,6 +95,10 @@ def handle_analyze(
             journey_repo=container.journey_repo,
             aliases=container.config.projects.aliases,
         )
+    elif plugin_name == "usage":
+        from arcane.plugins.builtin.usage import UsageAnalyzer
+
+        plugin = UsageAnalyzer(retrieval_repo=container.retrieval_repo)
     else:
         return json.dumps({"error": f"Unknown analysis plugin: {plugin_name}"})
 
