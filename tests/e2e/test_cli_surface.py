@@ -44,3 +44,19 @@ def test_provider_none_is_keyword_search_without_warnings(arcane: Arcane) -> Non
     reindex = _cli(arcane, "reindex", check=False)
     assert reindex.returncode == 1
     assert "Embeddings are disabled (embedding.provider: none)" in reindex.stderr
+
+
+def test_unusable_id_prefixes_are_reported_not_raised(arcane: Arcane) -> None:
+    # The MCP handlers already turned these into errors; the CLI printed a
+    # traceback for every command that takes an ID.
+    for args in (
+        ("details", "abc"),
+        ("delete", "abc"),
+        ("journey", "show", "abc"),
+        ("journey", "update", "abc", "--summary", "x"),
+        ("journey", "complete", "abc"),
+    ):
+        result = _cli(arcane, *args, check=False)
+        assert result.returncode == 1, args
+        assert "Traceback" not in result.stderr, args
+        assert "ID prefix must be at least 8 characters" in result.stderr, args
