@@ -18,7 +18,10 @@ from arcane.cli import main
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "home"
     home.mkdir()
-    (home / "config.yaml").write_text("context:\n  semantic: never\n", encoding="utf-8")
+    # No embedder, as in CI, so runs don't depend on a local Ollama.
+    (home / "config.yaml").write_text(
+        "context:\n  semantic: never\nembedding:\n  base_url: http://127.0.0.1:9\n", encoding="utf-8"
+    )
     monkeypatch.setenv("ARCANE_HOME", str(home))
     return home
 

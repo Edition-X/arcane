@@ -44,8 +44,10 @@ def _check_snapshot(db_path: str) -> int:
         if status != "ok":
             raise BackupError(f"snapshot failed integrity_check: {status}")
         count: int = conn.execute("SELECT count(*) FROM memories").fetchone()[0]
-        # Reads the vector table, which a broken vec0 shadow table fails.
-        conn.execute("SELECT count(*) FROM memories_vec").fetchone()
+        # Reads the vector table, which a broken vec0 shadow table fails. It
+        # only exists once a memory has been embedded.
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'memories_vec'").fetchone():
+            conn.execute("SELECT count(*) FROM memories_vec").fetchone()
         return count
     except sqlite3.Error as exc:
         raise BackupError(f"snapshot is unreadable: {exc}") from exc
