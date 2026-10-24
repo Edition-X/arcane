@@ -3,19 +3,38 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 APP_NAME = "arcane"
 LEGACY_APP_NAME = "echovault"
+
+# An org names a vault directory and partitions every scoped read, so only
+# canonical slugs are accepted. Defined here, the lowest layer that needs it,
+# because ``arcane.domain.scope`` already imports this module — it re-exports
+# this rule as ``validate_org`` rather than keeping a second copy of the regex.
+_ORG_SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+
+
+class ConfigError(ValueError):
+    """``config.yaml`` could not be read or does not describe a valid configuration."""
+
+
+def validate_org_slug(value: str) -> str:
+    """Accept only canonical org slugs, so an org can safely name a directory."""
+    value = value.strip().lower()
+    if not _ORG_SLUG.fullmatch(value):
+        raise ValueError("Org must be a nonempty slug containing letters, digits and single hyphens")
+    return value
 
 
 class EmbeddingConfig(BaseModel):
     """Embedding provider configuration."""
 
-    provider: str = "ollama"
+    provider: Literal["ollama", "openai", "none"] = "ollama"
     model: str = "nomic-embed-text"
     base_url: str | None = "http://localhost:11434"
     api_key: str | None = None
@@ -49,6 +68,22 @@ class OrgsConfig(BaseModel):
     default: str = "personal"
 
     model_config = {"extra": "ignore"}
+
+    @field_validator("remotes", "overrides")
+    @classmethod
+    def orgs_are_slugs(cls, value: dict[str, str]) -> dict[str, str]:
+        """Check the mapped orgs at load time.
+
+        An unchecked value here reached ``validate_org`` on every save and
+        search, so one bad entry turned every call into an opaque internal
+        error that said nothing about the config.
+        """
+        return {key: validate_org_slug(org) for key, org in value.items()}
+
+    @field_validator("default")
+    @classmethod
+    def default_is_a_slug(cls, value: str) -> str:
+        return validate_org_slug(value)
 
 
 class ProjectsConfig(BaseModel):
@@ -206,11 +241,28 @@ def get_home() -> str:
 
 
 def load_config(path: str) -> ArcaneConfig:
-    """Load ``ArcaneConfig`` from a YAML file, falling back to defaults."""
+    """Load ``ArcaneConfig`` from a YAML file, falling back to defaults when absent.
+
+    A file that exists but cannot be used raises :class:`ConfigError` naming
+    the file and the problem. Silently falling back to defaults would be worse
+    than stopping: a dropped ``orgs`` mapping sends memories to a different
+    org, where scoped recall will not find them again.
+    """
     try:
         with open(path) as f:
             data = yaml.safe_load(f) or {}
     except FileNotFoundError:
         return ArcaneConfig()
+    except OSError as exc:
+        raise ConfigError(f"{path} could not be read: {exc}") from exc
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"{path} is not valid YAML: {exc}") from exc
 
-    return ArcaneConfig.model_validate(data)
+    if not isinstance(data, dict):
+        raise ConfigError(f"{path} must contain a mapping of settings, not {type(data).__name__}")
+
+    try:
+        return ArcaneConfig.model_validate(data)
+    except ValidationError as exc:
+        problems = "; ".join(f"{'.'.join(str(p) for p in e['loc']) or '(root)'}: {e['msg']}" for e in exc.errors())
+        raise ConfigError(f"{path} has invalid settings — {problems}") from exc

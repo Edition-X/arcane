@@ -40,6 +40,7 @@ from mcp.types import (
 from arcane import __version__
 from arcane.domain.enums import RelationType
 from arcane.domain.scope import slugify
+from arcane.infra.config import ConfigError
 from arcane.mcp_server.prompts import (
     PROMPTS,
     build_catchup_prompt,
@@ -741,7 +742,13 @@ def _create_server(container: ServiceContainer) -> Server:
 
 async def run_server() -> None:
     """Run the MCP server with stdio transport."""
-    container = create_container()
+    try:
+        container = create_container()
+    except ConfigError as exc:
+        # The client only sees that the server died, so the reason has to be
+        # one readable line on stderr rather than a traceback.
+        logger.error("Arcane cannot start: %s", exc)
+        raise SystemExit(1) from exc
     start_embedding_backend(container.config)
     try:
         container.retrieval_repo.prune(container.config.usage.retention_days)
