@@ -1,5 +1,7 @@
 [build-system]
-requires = ["hatchling", "hatch-vcs"]
+# Pinned: the backend decides what goes in the wheel, so a release must not
+# change with whatever version was newest that day.
+requires = ["hatchling==1.32.4", "hatch-vcs==0.5.0"]
 build-backend = "hatchling.build"
 
 [project]
