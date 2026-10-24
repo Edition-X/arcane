@@ -27,7 +27,7 @@ It communicates via stdio (JSON-RPC). For Claude Desktop / Claude Code integrati
 - **No regressions**: always run `pytest` before committing
 - **Type safety**: new public functions must have type annotations; run `mypy src/arcane` after changes
 - **DRY**: check existing services and repos before adding new logic
-- **Test at boundaries**: mock DB and network at the service/repo boundary, not deep inside
+- **Test end to end**: new tests drive the real `arcane mcp` server or CLI against a real temp store (`tests/e2e/`). No mocked unit tests; fake the network only for GitHub, Linear and Ollama (`tests/plugins/`, `tests/unit/test_embeddings.py`)
 
 ## Arcane Memory Discipline (for Claude Code)
 
@@ -87,9 +87,9 @@ One focused memory per commit is better than a large dump at session end.
 ## Running Tests
 
 ```bash
-pytest                          # all tests
-pytest tests/unit/              # fast unit tests only
-pytest tests/integration/       # DB integration tests
+pytest                          # all tests, including the built-wheel smoke test
+pytest tests/e2e/               # MCP server end to end over stdio
+pytest -m "not artifact"        # what CI's test job runs
 pytest -x -q                    # fail fast, quiet output
 ```
 
