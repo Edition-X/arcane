@@ -42,7 +42,11 @@ jobs:
         uses: github/codeql-action/init@0fda7a646fd14a20daf520829ca1ae8847000819 # codeql-bundle-v2.27.3
         with:
           languages: python
-          queries: security-and-quality
+          # Security queries only. ruff and mypy already gate code quality on
+          # every pull request; CodeQL's quality rules mostly flagged pytest
+          # asserts and Protocol stubs, and alerts nobody acts on teach people
+          # to stop reading the Security tab.
+          queries: security-extended
 
       - name: Analyse
         uses: github/codeql-action/analyze@0fda7a646fd14a20daf520829ca1ae8847000819 # codeql-bundle-v2.27.3
