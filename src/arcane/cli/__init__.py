@@ -7,6 +7,7 @@ import click
 from arcane import __version__
 from arcane.cli.analyze import analyze
 from arcane.cli.artifact import artifact
+from arcane.cli.backup import backup
 from arcane.cli.config import config
 from arcane.cli.draft import draft
 from arcane.cli.ingest import ingest
@@ -49,6 +50,7 @@ main.add_command(delete)
 main.add_command(context)
 main.add_command(reindex)
 main.add_command(stats)
+main.add_command(backup)
 main.add_command(sessions)
 main.add_command(projects)
 main.add_command(merge_projects)

@@ -119,6 +119,7 @@ arcane details <id-prefix>      # Full memory details
 arcane delete <id-prefix>       # Delete a memory
 arcane reindex                  # Rebuild vector index
 arcane stats                    # DB statistics
+arcane backup                   # Snapshot DB + vault to <home>/backups (--dest, --keep 14)
 arcane sessions                 # List recent sessions
 
 # Journeys
@@ -282,13 +283,18 @@ Plugins must implement the protocols defined in `arcane.plugins.protocols`.
 
 ```
 ~/.arcane/
-├── arcane.db          # SQLite database (memories, journeys, artifacts, relationships)
+├── index.db           # SQLite database (memories, journeys, artifacts, relationships)
+├── backups/           # arcane-<UTC timestamp>.tar.gz from `arcane backup`
 └── vault/
     └── <project>/
         └── YYYY-MM-DD-session.md   # Markdown mirror of saved memories
 ```
 
-All data lives in a single SQLite file — easy to back up, sync, or inspect with any SQLite tool.
+`arcane backup` snapshots the database with SQLite's online backup API (safe
+while an MCP server is writing), integrity-checks the snapshot, and archives it
+with `vault/`. It keeps the newest 14 archives; use `--dest` to write them off
+this disk. To restore, stop running agents and unpack an archive into
+`~/.arcane`.
 
 ---
 
