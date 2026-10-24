@@ -11,6 +11,8 @@ from typing import Any
 
 import httpx
 
+from arcane.plugins.protocols import IngestionError
+
 logger = logging.getLogger(__name__)
 
 _LINEAR_GQL_URL = "https://api.linear.app/graphql"
@@ -30,8 +32,11 @@ class LinearIngestionPlugin:
     ) -> None:
         self.api_key = api_key or os.environ.get("LINEAR_API_KEY", "")
         self.team_id = team_id
+        self._last_error = ""
 
     def ingest(self, project: str, since: datetime | None = None) -> list[dict[str, Any]]:
+        if not self.api_key:
+            raise IngestionError("LINEAR_API_KEY is not set, so Linear issues cannot be fetched.")
         issues = self._fetch_all_issues()
         artifacts: list[dict[str, Any]] = []
 
@@ -79,7 +84,10 @@ class LinearIngestionPlugin:
         for page in range(_MAX_PAGES):
             result = self._fetch_page(cursor)
             if result is None:
-                break  # hard error — stop quietly (already logged)
+                raise IngestionError(
+                    f"Linear issues for team {self.team_id} could not be fetched after "
+                    f"{_RETRY_ATTEMPTS} attempts ({self._last_error})."
+                )
 
             nodes = result.get("nodes", [])
             all_issues.extend(nodes)
@@ -143,16 +151,23 @@ class LinearIngestionPlugin:
                 if resp.status_code == 429:
                     retry_after = float(resp.headers.get("Retry-After", delay))
                     logger.warning("Linear rate-limited; waiting %.1fs (attempt %d)", retry_after, attempt)
+                    self._last_error = "HTTP 429, rate limited"
                     time.sleep(retry_after)
                     delay *= 2
                     continue
                 resp.raise_for_status()
                 data = resp.json()
-                result: dict[str, Any] | None = data.get("data", {}).get("issues")
+                if data.get("errors"):
+                    # GraphQL reports bad keys and unknown teams in a 200 response.
+                    self._last_error = "; ".join(str(e.get("message", e)) for e in data["errors"])
+                    return None
+                result: dict[str, Any] | None = (data.get("data") or {}).get("issues")
                 return result
             except httpx.HTTPStatusError as exc:
+                self._last_error = f"HTTP {exc.response.status_code}"
                 logger.warning("Linear API error %s (attempt %d)", exc.response.status_code, attempt)
             except httpx.RequestError as exc:
+                self._last_error = f"network error: {exc}"
                 logger.warning("Linear network error: %s (attempt %d)", exc, attempt)
 
             if attempt < _RETRY_ATTEMPTS:

@@ -9,24 +9,33 @@ import os
 import time
 import uuid
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any
 
 import anyio
-from mcp.server import Server
-from mcp.server.lowlevel.helper_types import ReadResourceContents
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import best_match
+from mcp.server import Server, ServerRequestContext
 from mcp.server.stdio import stdio_server
 from mcp.types import (
+    CallToolRequestParams,
     CallToolResult,
+    GetPromptRequestParams,
     GetPromptResult,
+    ListPromptsResult,
+    ListResourcesResult,
+    ListResourceTemplatesResult,
+    ListToolsResult,
+    PaginatedRequestParams,
     Prompt,
     PromptArgument,
     PromptMessage,
-    Resource,
+    ReadResourceRequestParams,
+    ReadResourceResult,
     ResourceTemplate,
     TextContent,
+    TextResourceContents,
     Tool,
 )
-from pydantic import AnyUrl
 
 from arcane import __version__
 from arcane.domain.enums import RelationType
@@ -110,34 +119,31 @@ def _tool_profile() -> str:
 
 def _create_server(container: ServiceContainer) -> Server:
     """Create and configure the MCP server with all tools."""
-    server = Server("arcane", version=__version__)
     mem_svc = MemoryService(container)
     journey_svc = JourneyService(container)
     # One stdio server is one agent session; lookups are grouped by it.
     session_id = str(uuid.uuid4())
 
-    def _client_name() -> str | None:
+    def _client_name(ctx: ServerRequestContext[Any]) -> str | None:
         """Best-effort slug of the connecting MCP client's name (e.g. "claude-code").
 
-        The initialize handshake's clientInfo.name is only available inside a
-        request context, and any attribute along the path may be missing
-        (notably in tests), so this is defensive end to end.
+        Clients on the 2026-07-28 protocol may send no client info at all, so
+        any attribute along the path may be missing.
         """
         try:
-            params = server.request_context.session.client_params
-            name = params.clientInfo.name if params and params.clientInfo else None
-        except (LookupError, AttributeError):
+            params = ctx.session.client_params
+            name = params.client_info.name if params and params.client_info else None
+        except AttributeError:
             return None
         return slugify(name) if name else None
 
-    @server.list_tools()
-    async def list_tools() -> list[Tool]:
+    def _tool_definitions() -> list[Tool]:
         all_tools = [
             # ── Memory tools (backward-compatible) ──
             Tool(
                 name="memory_save",
                 description=SAVE_DESCRIPTION,
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "title": {"type": "string", "description": "Short title, max 60 chars."},
@@ -185,7 +191,7 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="memory_search",
                 description=SEARCH_DESCRIPTION,
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "query": {"type": "string"},
@@ -211,7 +217,7 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="memory_context",
                 description=CONTEXT_DESCRIPTION,
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "project": {"type": "string"},
@@ -250,7 +256,7 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="memory_details",
                 description="Get full details for a memory by ID or prefix.",
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {"memory_id": {"type": "string"}},
                     "required": ["memory_id"],
@@ -263,7 +269,7 @@ def _create_server(container: ServiceContainer) -> Server:
                     "details. Prefer this over memory_save when a near_duplicate warning points "
                     "at an existing memory."
                 ),
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "memory_id": {"type": "string", "description": "Memory ID or prefix."},
@@ -283,7 +289,7 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="memory_delete",
                 description="Delete a memory by ID or prefix.",
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {"memory_id": {"type": "string"}},
                     "required": ["memory_id"],
@@ -293,7 +299,7 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="journey_start",
                 description="Start tracking a decision journey.",
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "title": {"type": "string"},
@@ -306,7 +312,7 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="journey_update",
                 description="Update an active journey with new context.",
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "journey_id": {"type": "string"},
@@ -318,7 +324,7 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="journey_complete",
                 description="Mark a journey as completed with a summary.",
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "journey_id": {"type": "string"},
@@ -330,7 +336,7 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="journey_abandon",
                 description="Mark a journey as abandoned (dead end, superseded, or test junk).",
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "journey_id": {"type": "string"},
@@ -342,7 +348,7 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="journey_delete",
                 description="Delete a journey and its relationships. Linked memories survive.",
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {"journey_id": {"type": "string"}},
                     "required": ["journey_id"],
@@ -351,7 +357,7 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="journey_list",
                 description="List decision journeys.",
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "project": {"type": "string"},
@@ -366,7 +372,7 @@ def _create_server(container: ServiceContainer) -> Server:
                     "Get full details for a journey — title, status, summary, append-only event history, and "
                     "all linked memories and artifacts. Use instead of trace + memory_details loops."
                 ),
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "journey_id": {"type": "string", "description": "Journey ID or prefix."},
@@ -378,7 +384,7 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="artifact_search",
                 description="Search ingested artifact titles, external IDs, and raw content.",
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "query": {"type": "string"},
@@ -392,7 +398,7 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="artifact_details",
                 description="Get full ingested artifact data by ID or prefix.",
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {"artifact_id": {"type": "string"}},
                     "required": ["artifact_id"],
@@ -402,7 +408,7 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="link",
                 description="Create a relationship between two entities.",
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "source_type": {"type": "string", "enum": ["memory", "journey", "artifact"]},
@@ -417,7 +423,7 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="trace",
                 description="Walk the relationship graph from an entity.",
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "entity_type": {"type": "string", "enum": ["memory", "journey", "artifact"]},
@@ -431,7 +437,7 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="insights",
                 description="Get recent unacknowledged insights for a project.",
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "project": {"type": "string"},
@@ -442,7 +448,7 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="insights_ack",
                 description="Acknowledge an insight.",
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {"insight_id": {"type": "string"}},
                     "required": ["insight_id"],
@@ -452,7 +458,7 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="ingest_git",
                 description="Ingest commits from a git repository as artifacts.",
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "project": {"type": "string"},
@@ -465,7 +471,7 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="ingest_gha",
                 description="Ingest CI runs from GitHub Actions.",
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "owner": {"type": "string"},
@@ -479,7 +485,7 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="ingest_linear",
                 description="Ingest tickets from Linear.",
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "team_id": {"type": "string"},
@@ -493,7 +499,7 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="analyze",
                 description="Run an intelligence analysis plugin (velocity, health, usage).",
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "plugin_name": {"type": "string", "enum": ["velocity", "health", "usage"]},
@@ -506,7 +512,7 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="draft_blog",
                 description="Generate a structured blog brief from a journey.",
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "journey_id": {"type": "string"},
@@ -517,16 +523,29 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="draft_adr",
                 description="Generate a structured ADR from a decision memory.",
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {"memory_id": {"type": "string"}},
                     "required": ["memory_id"],
                 },
             ),
         ]
-        if _tool_profile() == "core":
-            return [tool for tool in all_tools if tool.name in CORE_TOOLS]
         return all_tools
+
+    all_tools = _tool_definitions()
+    # SDK v2's low-level server no longer checks arguments against inputSchema,
+    # so enums and bounds are enforced here, before any handler runs.
+    validators = {tool.name: Draft202012Validator(tool.input_schema) for tool in all_tools}
+
+    def _schema_error(name: str, args: dict[str, Any]) -> str | None:
+        validator = validators.get(name)
+        error = best_match(validator.iter_errors(args)) if validator else None
+        return f"Input validation error: {error.message}" if error else None
+
+    async def on_list_tools(ctx: ServerRequestContext[Any], params: PaginatedRequestParams | None) -> ListToolsResult:
+        if _tool_profile() == "core":
+            return ListToolsResult(tools=[tool for tool in all_tools if tool.name in CORE_TOOLS])
+        return ListToolsResult(tools=all_tools)
 
     # Tool name → (handler, first positional argument). Every handler is a
     # synchronous function called as handler(target, **arguments).
@@ -558,12 +577,14 @@ def _create_server(container: ServiceContainer) -> Server:
         "draft_adr": (handle_draft_adr, container),
     }
 
-    @server.call_tool()
-    async def call_tool(name: str, arguments: dict[str, object] | None) -> CallToolResult:
-        args = cast(dict[str, Any], arguments or {})
+    async def on_call_tool(ctx: ServerRequestContext[Any], params: CallToolRequestParams) -> CallToolResult:
+        name = params.name
+        args: dict[str, Any] = dict(params.arguments or {})
+        client = _client_name(ctx)
+        schema_error = _schema_error(name, args)
         if name == "memory_save":
             # Stamp the connecting client as the source unless the caller set one.
-            args = {**args, "source": args.get("source") or _client_name()}
+            args = {**args, "source": args.get("source") or client}
 
         spec = handlers.get(name)
         is_error = False
@@ -573,6 +594,9 @@ def _create_server(container: ServiceContainer) -> Server:
             result = json.dumps(
                 {"error": f"Tool '{name}' is not enabled. Start the server with ARCANE_TOOL_PROFILE=full to use it."}
             )
+            is_error = True
+        elif spec and schema_error:
+            result = json.dumps({"error": schema_error})
             is_error = True
         elif spec:
             handler, target = spec
@@ -608,13 +632,14 @@ def _create_server(container: ServiceContainer) -> Server:
                 pass
 
         if name in RECORDED_TOOLS:
-            await _record(name, args, result, is_error, started)
+            await _record(name, args, result, is_error, started, client)
 
-        return CallToolResult(content=[TextContent(type="text", text=result)], isError=is_error)
+        return CallToolResult(content=[TextContent(type="text", text=result)], is_error=is_error)
 
-    async def _record(tool: str, args: dict[str, Any], result: str, is_error: bool, started: float) -> None:
+    async def _record(
+        tool: str, args: dict[str, Any], result: str, is_error: bool, started: float, client: str | None
+    ) -> None:
         duration_ms = int((time.monotonic() - started) * 1000)
-        client = _client_name()
         await anyio.to_thread.run_sync(
             lambda: record_tool_call(
                 container,
@@ -628,33 +653,40 @@ def _create_server(container: ServiceContainer) -> Server:
             )
         )
 
-    @server.list_resource_templates()
-    async def list_resource_templates() -> list[ResourceTemplate]:
-        return [
-            ResourceTemplate(
-                uriTemplate=RESOURCE_TEMPLATE_URI,
-                name="Project memory context",
-                description="Recent memories and decisions for a project. Pre-fetched by MCP hosts at session start.",
-                mimeType="application/json",
-            )
-        ]
+    async def on_list_resource_templates(
+        ctx: ServerRequestContext[Any], params: PaginatedRequestParams | None
+    ) -> ListResourceTemplatesResult:
+        return ListResourceTemplatesResult(
+            resource_templates=[
+                ResourceTemplate(
+                    uri_template=RESOURCE_TEMPLATE_URI,
+                    name="Project memory context",
+                    description=(
+                        "Recent memories and decisions for a project. Pre-fetched by MCP hosts at session start."
+                    ),
+                    mime_type="application/json",
+                )
+            ]
+        )
 
-    @server.list_resources()
-    async def list_resources() -> list[Resource]:
+    async def on_list_resources(
+        ctx: ServerRequestContext[Any], params: PaginatedRequestParams | None
+    ) -> ListResourcesResult:
         """Arcane exposes dynamic project context through resource templates."""
-        return []
+        return ListResourcesResult(resources=[])
 
-    @server.read_resource()
-    async def read_resource(uri: AnyUrl) -> list[ReadResourceContents]:
-        project = _parse_project_from_uri(str(uri))
+    async def on_read_resource(ctx: ServerRequestContext[Any], params: ReadResourceRequestParams) -> ReadResourceResult:
+        uri = str(params.uri)
+        project = _parse_project_from_uri(uri)
         started = time.monotonic()
         text = await anyio.to_thread.run_sync(lambda: handle_context(mem_svc, project=project, detail="standard"))
-        await _record("resource_context", {"project": project}, text, False, started)
-        return [ReadResourceContents(content=text, mime_type="application/json")]
+        await _record("resource_context", {"project": project}, text, False, started, _client_name(ctx))
+        return ReadResourceResult(contents=[TextResourceContents(uri=uri, mime_type="application/json", text=text)])
 
-    @server.list_prompts()
-    async def list_prompts() -> list[Prompt]:
-        return [
+    async def on_list_prompts(
+        ctx: ServerRequestContext[Any], params: PaginatedRequestParams | None
+    ) -> ListPromptsResult:
+        prompts = [
             Prompt(
                 name=p["name"],
                 description=p["description"],
@@ -669,10 +701,11 @@ def _create_server(container: ServiceContainer) -> Server:
             )
             for p in PROMPTS
         ]
+        return ListPromptsResult(prompts=prompts)
 
-    @server.get_prompt()
-    async def get_prompt(name: str, arguments: dict[str, str] | None) -> GetPromptResult:
-        args = arguments or {}
+    async def on_get_prompt(ctx: ServerRequestContext[Any], params: GetPromptRequestParams) -> GetPromptResult:
+        name = params.name
+        args = dict(params.arguments or {})
         builders = {
             "recall": build_recall_prompt,
             "catchup": build_catchup_prompt,
@@ -711,7 +744,17 @@ def _create_server(container: ServiceContainer) -> Server:
         ]
         return GetPromptResult(description=raw.get("description", ""), messages=messages)
 
-    return server
+    return Server(
+        "arcane",
+        version=__version__,
+        on_list_tools=on_list_tools,
+        on_call_tool=on_call_tool,
+        on_list_resources=on_list_resources,
+        on_list_resource_templates=on_list_resource_templates,
+        on_read_resource=on_read_resource,
+        on_list_prompts=on_list_prompts,
+        on_get_prompt=on_get_prompt,
+    )
 
 
 async def run_server() -> None:

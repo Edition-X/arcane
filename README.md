@@ -95,7 +95,7 @@ Once connected, Claude has access to these tools:
 | `journey_complete` | Mark a journey done with an outcome summary |
 | `journey_abandon` | Mark a journey abandoned (dead end or superseded) |
 | `journey_delete` | Delete a journey and its relationships |
-| `journey_list` | List active or recent journeys (stale ones are flagged) |
+| `journey_list` | List active or recent journeys (`stale` marks active ones with no update for 14+ days) |
 | `ingest_git` | Import commits from a git repository |
 | `ingest_gha` | Import CI runs from GitHub Actions |
 | `ingest_linear` | Import tickets from Linear |

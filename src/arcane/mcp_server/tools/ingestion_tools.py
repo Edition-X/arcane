@@ -6,7 +6,7 @@ import json
 import os
 
 from arcane.infra.db.ids import IdentifierResolutionError
-from arcane.plugins.protocols import IngestionPlugin, IntelligencePlugin
+from arcane.plugins.protocols import IngestionError, IngestionPlugin, IntelligencePlugin
 from arcane.services.container import ServiceContainer
 from arcane.services.ingestion import IngestionService
 
@@ -22,7 +22,7 @@ def _run_ingestion(
         result = IngestionService(container).run_plugin(
             plugin, project=project, journey_id=journey_id, repo_path=repo_path
         )
-    except IdentifierResolutionError as exc:
+    except (IdentifierResolutionError, IngestionError) as exc:
         return json.dumps({"error": str(exc)})
     return json.dumps(result)
 

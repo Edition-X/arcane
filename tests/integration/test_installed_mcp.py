@@ -69,26 +69,26 @@ def test_installed_wheel_serves_mcp_over_stdio(tmp_path: Path) -> None:
                     cwd=run_dir,
                     env=environment_vars,
                 ).stdout.strip()
-                assert initialized.serverInfo.name == "arcane"
-                assert initialized.serverInfo.version == version
+                assert initialized.server_info.name == "arcane"
+                assert initialized.server_info.version == version
 
                 tools = await session.list_tools()
                 memory_save = next(tool for tool in tools.tools if tool.name == "memory_save")
-                assert memory_save.inputSchema["required"] == ["title", "what"]
+                assert memory_save.input_schema["required"] == ["title", "what"]
                 assert (await session.list_resources()).resources == []
                 templates = await session.list_resource_templates()
-                assert templates.resourceTemplates[0].uriTemplate == "arcane://context/{project}"
+                assert templates.resource_templates[0].uri_template == "arcane://context/{project}"
                 prompts = await session.list_prompts()
                 assert "recall" in {prompt.name for prompt in prompts.prompts}
-                assert initialized.protocolVersion
+                assert initialized.protocol_version
 
                 saved = await session.call_tool(
                     "memory_save",
                     {"title": "Installed artifact", "what": "MCP stdio smoke test", "project": "smoke"},
                 )
-                assert saved.isError is False
+                assert saved.is_error is False
                 search = await session.call_tool("memory_search", {"query": "Installed artifact", "project": "smoke"})
-                assert search.isError is False
+                assert search.is_error is False
                 assert json.loads(search.content[0].text)[0]["title"] == "Installed artifact"
 
     asyncio.run(exercise_server())
