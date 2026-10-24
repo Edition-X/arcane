@@ -11,7 +11,7 @@ def test_git_ingest_makes_commits_searchable(arcane: Arcane) -> None:
     async def scenario(c: Client) -> dict[str, Any]:
         first = await c.call("ingest_git", max_count=10)
         again = await c.call("ingest_git", max_count=10)
-        hits = await c.call("artifact_search", query="change 1")
+        hits = await c.call("artifact_search", query="change one")
         return {
             "first": first,
             "again": again,
@@ -26,7 +26,7 @@ def test_git_ingest_makes_commits_searchable(arcane: Arcane) -> None:
     assert out["first"]["ingested"] == 2
     assert out["again"]["ingested"] == 0
     assert out["again"]["skipped"] == 2
-    assert out["hits"][0]["title"] == "feat: change 1"
+    assert out["hits"][0]["title"] == "feat: change one"
     assert out["hits"][0]["project"] == "widget"
     assert len(out["typed"]) == 2
     assert out["other_type"] == []
