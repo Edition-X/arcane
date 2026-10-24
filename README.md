@@ -139,6 +139,11 @@ arcane analyze velocity         # Engineering velocity summary
 arcane analyze health           # Store health audit — fragmentation, orphans, journey hygiene
 arcane analyze usage            # What agents recall — lookups per agent, gap searches, unused memories
 
+# Reports and export
+arcane report --days 7          # Shipped, decided, fixed and finished, by org and project (markdown)
+arcane report --since 2026-07-01 --until 2026-09-30 --org sunrise-robotics --format json
+arcane export --org sunrise-robotics   # One org's memories, journeys, artifacts and links as JSON
+
 # Content
 arcane draft blog               # Blog brief from memories
 arcane draft adr <memory-id>    # ADR from a decision memory
