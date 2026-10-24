@@ -22,7 +22,9 @@ class VelocityTracker:
         artifact_repo: ArtifactRepository | None = None,
         memory_repo: MemoryRepository | None = None,
         journey_repo: JourneyRepository | None = None,
+        org: str | None = None,
     ) -> None:
+        self.org = org
         self.artifact_repo = artifact_repo
         self.memory_repo = memory_repo
         self.journey_repo = journey_repo
@@ -34,15 +36,17 @@ class VelocityTracker:
         completed_journeys = 0
 
         if self.artifact_repo:
-            commits = self.artifact_repo.list_all(project=project, artifact_type="commit", limit=1000)
+            commits = self.artifact_repo.list_all(project=project, artifact_type="commit", limit=1000, org=self.org)
             commit_count = len(commits)
 
         if self.memory_repo:
-            memory_count = self.memory_repo.count(project=project)
+            memory_count = self.memory_repo.count(
+                project=project, org=self.org, include_org=False, include_global=False
+            )
 
         journeys: list[dict] = []
         if self.journey_repo:
-            journeys = self.journey_repo.list_all(project=project, limit=1000)
+            journeys = self.journey_repo.list_all(project=project, limit=1000, org=self.org)
             journey_count = len(journeys)
             completed_journeys = sum(1 for j in journeys if j.get("status") == "completed")
 

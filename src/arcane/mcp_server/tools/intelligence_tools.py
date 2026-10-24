@@ -14,8 +14,9 @@ def handle_insights(
     project: str | None = None,
     limit: int = 10,
 ) -> str:
-    project = resolve_write_scope(project, container.config).project
-    insights = container.insight_repo.list_all(project=project, unacknowledged_only=True, limit=limit)
+    scope = resolve_write_scope(project, container.config)
+    project = scope.project
+    insights = container.insight_repo.list_all(project=project, unacknowledged_only=True, limit=limit, org=scope.org)
     return json.dumps(
         [
             {
@@ -32,7 +33,7 @@ def handle_insights(
 
 def handle_insights_ack(container: ServiceContainer, insight_id: str) -> str:
     try:
-        acked = container.insight_repo.acknowledge(insight_id)
+        acked = container.insight_repo.acknowledge(insight_id, org=resolve_write_scope(None, container.config).org)
     except IdentifierResolutionError as exc:
         return json.dumps({"error": str(exc)})
     if not acked:

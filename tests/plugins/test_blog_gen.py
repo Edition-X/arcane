@@ -52,6 +52,7 @@ def journey_with_memories(container):
         title="feat: PostgreSQL migration",
         url="https://github.com/org/repo/pull/42",
         project="test-project",
+        org=result["org"],
     )
     container.artifact_repo.insert(art.model_dump())
 

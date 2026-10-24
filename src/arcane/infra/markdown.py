@@ -43,6 +43,8 @@ def render_section(mem: dict[str, Any], details: str | None = None) -> str:
         lines.append(details)
         lines.append("</details>")
 
+    if mem.get("id"):
+        lines.append(f"<!-- /arcane-memory:{mem['id']} -->")
     return "\n".join(lines)
 
 
@@ -51,12 +53,14 @@ def write_session_memory(
     mem: dict[str, Any],
     date_str: str,
     details: str | None = None,
+    *,
+    target_path: Path | None = None,
 ) -> str:
     """Create or append to a session file without losing concurrent writes."""
     mem = redact_values(mem)
     assert isinstance(mem, dict)
     details = redact(details) if details else details
-    file_path = Path(vault_project_dir) / f"{date_str}-session.md"
+    file_path = target_path or Path(vault_project_dir) / f"{date_str}-session.md"
     section_content = render_section(mem, details)
 
     with _file_lock(file_path):
@@ -64,7 +68,14 @@ def write_session_memory(
             content = _create_new_session_file(mem, date_str, section_content)
         else:
             content = file_path.read_text()
-            content = _append_to_session_file(content, mem, section_content)
+            bounds = _section_bounds(content, mem["id"], mem["title"])
+            if bounds is None:
+                content = _append_to_session_file(content, mem, section_content)
+            else:
+                start, end = bounds
+                content = content[:start] + section_content + "\n\n" + content[end:].lstrip()
+                frontmatter, body = _split_frontmatter(content)
+                content = _update_frontmatter(frontmatter, mem) + "\n" + body
         _atomic_write(file_path, content)
 
     return str(file_path)
@@ -128,27 +139,63 @@ def _atomic_write(file_path: Path, content: str) -> None:
             os.unlink(temp_path)
 
 
+def _structural_lines(content: str) -> Iterator[tuple[int, str]]:
+    """Yield lines outside fenced code and details blocks with their offsets."""
+    offset = 0
+    depth = 0
+    fence: str | None = None
+    for line in content.splitlines(keepends=True):
+        stripped = line.strip()
+        if fence is not None:
+            if stripped.startswith(fence):
+                fence = None
+        elif stripped.startswith(("```", "~~~")):
+            fence = stripped[:3]
+        elif stripped.startswith("<details"):
+            depth += 1
+        elif stripped.startswith("</details>"):
+            depth = max(0, depth - 1)
+        elif depth == 0:
+            yield offset, line.rstrip("\r\n")
+        offset += len(line)
+
+
+def _section_bounds(content: str, memory_id: str, title: str) -> tuple[int, int] | None:
+    """Locate a complete memory, supporting old files without end markers."""
+    marker = f"<!-- arcane-memory:{memory_id} -->"
+    end_marker = f"<!-- /arcane-memory:{memory_id} -->"
+    lines = list(_structural_lines(content))
+    start = next((offset for offset, line in lines if line == marker), None)
+    if start is None:
+        start = next((offset for offset, line in lines if line == f"### {title}"), None)
+    if start is None:
+        return None
+    seen_heading = False
+    for offset, line in lines:
+        if offset < start:
+            continue
+        if line == end_marker:
+            return start, offset + len(line)
+        if offset > start and (line.startswith("<!-- arcane-memory:") or line.startswith("## ")):
+            return start, offset
+        if line.startswith("### "):
+            if seen_heading:
+                return start, offset
+            seen_heading = True
+    return start, len(content)
+
+
 def remove_session_memory(file_path: str, memory_id: str, title: str) -> bool:
-    """Remove one persisted memory section from its Markdown mirror."""
+    """Remove a complete memory without mistaking headings in details for peers."""
     path = Path(file_path)
     if not path.exists():
         return False
-
     with _file_lock(path):
         content = path.read_text()
-        marker = f"<!-- arcane-memory:{memory_id} -->"
-        start = content.find(marker)
-        if start < 0:
-            # Older session files predate stable memory markers.
-            start = content.find(f"### {title}")
-        if start < 0:
+        bounds = _section_bounds(content, memory_id, title)
+        if bounds is None:
             return False
-
-        heading = content.find(f"### {title}", start)
-        if heading < 0:
-            return False
-        next_heading = re.search(r"(?m)^(?:### |## )", content[heading + len(f"### {title}") :])
-        end = heading + len(f"### {title}") + next_heading.start() if next_heading else len(content)
+        start, end = bounds
         _atomic_write(path, content[:start].rstrip() + "\n\n" + content[end:].lstrip())
     return True
 
@@ -230,56 +277,31 @@ def _insert_section_in_body(body: str, mem: dict[str, Any], section_content: str
 
     category_heading = CATEGORY_HEADINGS[category]
 
-    if f"## {category_heading}" in body:
+    if any(line == f"## {category_heading}" for _, line in _structural_lines(body)):
         return _append_under_existing_category(body, category_heading, section_content)
     else:
         return _insert_new_category(body, category, category_heading, section_content)
 
 
 def _append_under_existing_category(body: str, category_heading: str, section_content: str) -> str:
-    lines = body.split("\n")
-    result_lines = []
-    i = 0
-
-    while i < len(lines):
-        line = lines[i]
-        result_lines.append(line)
-
-        if line == f"## {category_heading}":
-            i += 1
-            while i < len(lines) and lines[i].strip() == "":
-                result_lines.append(lines[i])
-                i += 1
-            while i < len(lines) and not lines[i].startswith("## "):
-                result_lines.append(lines[i])
-                i += 1
-            result_lines.append("")
-            result_lines.append(section_content)
-            continue
-
-        i += 1
-
-    return "\n".join(result_lines) + "\n"
+    headings = [(offset, line) for offset, line in _structural_lines(body) if line.startswith("## ")]
+    start = next(offset for offset, line in headings if line == f"## {category_heading}")
+    end = next((offset for offset, _ in headings if offset > start), len(body))
+    return body[:end].rstrip() + "\n\n" + section_content + "\n\n" + body[end:].lstrip()
 
 
 def _insert_new_category(body: str, category: str, category_heading: str, section_content: str) -> str:
     category_order = [c.value for c in Category]
     target_index = category_order.index(category) if category in category_order else len(category_order)
-
-    lines = body.split("\n")
-    insert_position = len(lines)
-
-    for i, line in enumerate(lines):
-        if line.startswith("## "):
-            heading_text = line[3:].strip()
-            for cat_val, cat_heading in CATEGORY_HEADINGS.items():
-                if cat_heading == heading_text:
-                    cat_index = category_order.index(cat_val) if cat_val in category_order else len(category_order)
-                    if cat_index > target_index:
-                        insert_position = i
-                        break
-            if insert_position < len(lines):
+    insert_position = len(body)
+    for offset, line in _structural_lines(body):
+        if not line.startswith("## "):
+            continue
+        for cat_val, heading in CATEGORY_HEADINGS.items():
+            if heading == line[3:].strip() and category_order.index(cat_val) > target_index:
+                insert_position = offset
                 break
-
-    new_lines = lines[:insert_position] + [f"## {category_heading}", "", section_content, ""] + lines[insert_position:]
-    return "\n".join(new_lines).rstrip() + "\n"
+        if insert_position < len(body):
+            break
+    section = f"## {category_heading}\n\n{section_content}\n\n"
+    return body[:insert_position].rstrip() + "\n\n" + section + body[insert_position:].lstrip()

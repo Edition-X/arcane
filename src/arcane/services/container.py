@@ -15,6 +15,7 @@ from arcane.infra.db.relationship_repo import RelationshipRepository
 from arcane.infra.db.retrieval_repo import RetrievalRepository
 from arcane.infra.db.schema import create_schema
 from arcane.infra.embeddings.base import EmbeddingProvider
+from arcane.infra.embeddings.redacting import RedactingEmbedding
 from arcane.infra.redaction import load_memoryignore
 
 
@@ -42,7 +43,7 @@ class ServiceContainer:
     @property
     def embedding_provider(self) -> EmbeddingProvider:
         if self._embedding_provider is None:
-            self._embedding_provider = _create_embedding_provider(self.config)
+            self._embedding_provider = RedactingEmbedding(_create_embedding_provider(self.config), self.ignore_patterns)
         return self._embedding_provider
 
     @property
@@ -72,7 +73,14 @@ def create_container(home: str | None = None) -> ServiceContainer:
 
     config = load_config(config_path)
     db = Database(db_path)
-    create_schema(db)
+    try:
+        # Take the write lock before inspecting columns: other MCP processes
+        # must not race an add-column check during startup or migration.
+        with db.transaction():
+            create_schema(db)
+    except BaseException:
+        db.close()
+        raise
 
     return ServiceContainer(
         db=db,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import click
 
@@ -293,16 +294,14 @@ def sessions(limit: int, project: str | None) -> None:
         vault = container.vault_dir
 
     session_files = []
-    if os.path.exists(vault):
-        for proj_dir in sorted(os.listdir(vault)):
-            proj_path = os.path.join(vault, proj_dir)
-            if not os.path.isdir(proj_path) or proj_dir.startswith("."):
-                continue
-            if project and proj_dir != project:
-                continue
-            for f in sorted(os.listdir(proj_path), reverse=True):
-                if f.endswith("-session.md"):
-                    session_files.append((proj_dir, f))
+    for path in Path(vault).rglob("*-session.md"):
+        relative = path.relative_to(vault)
+        parts = relative.parts[:-1]
+        project_name = parts[-1] if parts else ""
+        if project and project_name != project:
+            continue
+        session_files.append(("/".join(parts), path.name))
+    session_files.sort(key=lambda item: (item[1], item[0]), reverse=True)
 
     if not session_files:
         click.echo("No sessions found.")

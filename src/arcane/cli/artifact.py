@@ -7,6 +7,7 @@ import json
 import click
 
 from arcane.cli._utils import create_container
+from arcane.domain.scope import resolve_write_scope
 from arcane.infra.db.ids import IdentifierResolutionError
 
 
@@ -23,7 +24,10 @@ def artifact() -> None:
 def artifact_search(query: str, project: str | None, artifact_type: str | None, limit: int) -> None:
     """Search artifact titles, IDs, and ingested raw content."""
     with create_container() as container:
-        artifacts = container.artifact_repo.fts_search(query, project=project, artifact_type=artifact_type, limit=limit)
+        scope = resolve_write_scope(project, container.config)
+        artifacts = container.artifact_repo.fts_search(
+            query, project=scope.project, org=scope.org, artifact_type=artifact_type, limit=limit
+        )
     if not artifacts:
         click.echo("No artifacts found.")
         return
@@ -37,16 +41,10 @@ def artifact_show(artifact_id: str) -> None:
     """Show complete artifact data by ID or prefix."""
     with create_container() as container:
         try:
-            item = container.artifact_repo.get(artifact_id)
+            item = container.artifact_repo.get(artifact_id, org=resolve_write_scope(None, container.config).org)
         except IdentifierResolutionError as exc:
             raise click.ClickException(str(exc)) from exc
     if not item:
         click.echo(f"Artifact {artifact_id} not found.")
         return
-    raw_data = item.get("raw_data")
-    if isinstance(raw_data, str):
-        try:
-            item["raw_data"] = json.loads(raw_data)
-        except json.JSONDecodeError:
-            pass
     click.echo(json.dumps(item, indent=2, sort_keys=True))

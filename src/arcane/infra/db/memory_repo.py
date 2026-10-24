@@ -299,46 +299,54 @@ class MemoryRepository:
         )
         return _process_row(row) if row else None
 
-    def list_projects(self) -> list[dict[str, Any]]:
-        """Distinct (project, org) pairs with counts — for backfill and audits."""
+    def list_projects(self, org: str | None = None) -> list[dict[str, Any]]:
+        """Distinct (project, org) pairs, optionally confined to one org."""
+        where = "WHERE org = ?" if org is not None else ""
         return self.db.fetchall(
-            "SELECT project, org, COUNT(*) as cnt FROM memories GROUP BY project, org ORDER BY cnt DESC"
+            f"SELECT project, org, COUNT(*) as cnt FROM memories {where} GROUP BY project, org ORDER BY cnt DESC",
+            (org,) if org is not None else (),
         )
 
-    def stats(self) -> dict[str, Any]:
-        """Store-wide aggregates for health auditing and stats displays."""
-        total_row = self.db.fetchone("SELECT COUNT(*) as cnt FROM memories")
-        empty_row = self.db.fetchone("SELECT COUNT(*) as cnt FROM memories WHERE COALESCE(project, '') = ''")
-        ttl_row = self.db.fetchone("SELECT COUNT(*) as cnt FROM memories WHERE ttl_days IS NOT NULL")
-        conf_row = self.db.fetchone("SELECT COUNT(*) as cnt FROM memories WHERE confidence IS NOT NULL")
+    def stats(self, org: str | None = None) -> dict[str, Any]:
+        """Health aggregates, confined to the requested org when supplied."""
+        where = "WHERE org = ?" if org is not None else ""
+        params: tuple[Any, ...] = (org,) if org is not None else ()
+
+        def count(condition: str = "1") -> int:
+            row = self.db.fetchone(
+                f"SELECT COUNT(*) as cnt FROM memories WHERE ({condition})"
+                + (" AND org = ?" if org is not None else ""),
+                params,
+            )
+            return row["cnt"] if row else 0
+
         categories = self.db.fetchall(
-            "SELECT COALESCE(category, '') as category, COUNT(*) as cnt FROM memories "
-            "GROUP BY COALESCE(category, '') ORDER BY cnt DESC"
+            f"SELECT COALESCE(category, '') as category, COUNT(*) as cnt FROM memories {where} "
+            "GROUP BY COALESCE(category, '') ORDER BY cnt DESC",
+            params,
         )
         duplicate_titles = self.db.fetchall(
-            "SELECT title, COUNT(*) as cnt FROM memories "
-            "GROUP BY lower(trim(title)) HAVING COUNT(*) > 1 ORDER BY cnt DESC LIMIT 20"
+            f"SELECT org, project, title, COUNT(*) as cnt FROM memories {where} "
+            "GROUP BY org, project, lower(trim(title)) HAVING COUNT(*) > 1 ORDER BY cnt DESC LIMIT 20",
+            params,
         )
         return {
-            "total": total_row["cnt"] if total_row else 0,
-            "empty_project": empty_row["cnt"] if empty_row else 0,
-            "ttl_set": ttl_row["cnt"] if ttl_row else 0,
-            "confidence_set": conf_row["cnt"] if conf_row else 0,
+            "total": count(),
+            "empty_project": count("COALESCE(project, '') = '' AND COALESCE(org, '') = ''"),
+            "ttl_set": count("ttl_days IS NOT NULL"),
+            "confidence_set": count("confidence IS NOT NULL"),
             "categories": categories,
-            "projects": self.list_projects(),
+            "projects": self.list_projects(org=org),
             "duplicate_titles": duplicate_titles,
         }
 
     def project_orgs(self) -> dict[str, str]:
-        """Each project's org: the org most of its memories carry."""
+        """Return only projects with one known owner; never guess by majority."""
         rows = self.db.fetchall(
-            "SELECT project, org, COUNT(*) AS cnt FROM memories WHERE project != '' "
-            "GROUP BY project, org ORDER BY project, cnt DESC"
+            "SELECT project, MIN(org) AS org FROM memories WHERE project != '' "
+            "GROUP BY project HAVING COUNT(DISTINCT org) = 1 AND MIN(org) != ''"
         )
-        orgs: dict[str, str] = {}
-        for row in rows:
-            orgs.setdefault(row["project"], row["org"])
-        return orgs
+        return {row["project"]: row["org"] for row in rows}
 
     def list_created_between(
         self,
@@ -488,7 +496,7 @@ class MemoryRepository:
 
         results = []
         for row in rows:
-            row["score"] = 1.0 - row.pop("distance")
+            row["score"] = 1.0 / (1.0 + max(0.0, row.pop("distance")))
             results.append(_process_row(row))
 
         if org is not None:
@@ -601,6 +609,8 @@ class MemoryRepository:
 
     def _has_vec_table(self) -> bool:
         """Return whether the vector table exists, caching the result."""
+        if not self.db.vec_available:
+            return False
         if self._vec_table_exists is None:
             row = self.db.fetchone("SELECT name FROM sqlite_master WHERE type='table' AND name='memories_vec'")
             self._vec_table_exists = row is not None

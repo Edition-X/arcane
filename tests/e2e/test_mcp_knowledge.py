@@ -80,7 +80,7 @@ def test_links_store_full_ids_and_trace_walks_them(arcane: Arcane) -> None:
 
 def test_health_insights_surface_in_context_until_acknowledged(arcane: Arcane) -> None:
     async def scenario(c: Client) -> dict[str, Any]:
-        await c.call("memory_save", title="Orphan note", what="no project", project="")
+        await c.call("memory_save", title="Org note", what="Valid org-scoped knowledge", project="")
         await c.call("memory_save", title="Widget note", what="has a project")
         await c.call("ingest_git", max_count=10)
         out: dict[str, Any] = {
@@ -101,7 +101,8 @@ def test_health_insights_surface_in_context_until_acknowledged(arcane: Arcane) -
     assert out["health"]["insights_created"] >= 1
     assert out["velocity"]["insights_created"] == 1
     types = {i["type"] for i in out["insights"]}
-    assert {"health_empty_project", "velocity"} <= types
+    assert {"health", "velocity"} <= types
+    assert "health_empty_project" not in types
     assert next(i for i in out["insights"] if i["type"] == "velocity")["title"].startswith("Velocity: 2 commits")
     assert {i["id"] for i in out["context"]["insights"]} <= {i["id"] for i in out["insights"]}
     assert out["context"]["insights"]

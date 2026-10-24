@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 
+from arcane.domain.scope import resolve_write_scope
 from arcane.infra.db.ids import IdentifierResolutionError
 from arcane.infra.redaction import redact
+from arcane.plugins.registry import create_plugin
 from arcane.services.container import ServiceContainer
 from arcane.services.journey import JourneyService
 from arcane.services.memory import MemoryService
@@ -26,7 +28,7 @@ def handle_draft_blog(
         if not journey:
             return json.dumps({"error": f"Journey {journey_id} not found"})
 
-        brief = _build_journey_brief(journey)
+        brief = create_plugin("content", "blog", container).generate({"journey": journey})
         return json.dumps({"brief": redact(brief, container.ignore_patterns), "journey_id": journey["id"]})
 
     if project:
@@ -52,100 +54,14 @@ def handle_draft_adr(
     detail = container.memory_repo.get_details(mem["id"])
     detail_body = detail["body"] if detail else ""
 
-    brief = f"""# ADR: {mem["title"]}
-
-## Status
-Accepted
-
-## Context
-{mem.get("what") or ""}
-
-## Decision
-{mem.get("why") or "See details below."}
-
-## Consequences
-{mem.get("impact") or "See details below."}
-
-## Details
-{detail_body}
-"""
+    brief = create_plugin("content", "adr", container).generate({"memory": mem, "details": detail_body})
     return json.dumps({"brief": redact(brief, container.ignore_patterns), "memory_id": mem["id"]})
 
 
 def _build_project_brief(container: ServiceContainer, project: str) -> str:
     """Build a blog brief from recent project memories when no journey is available."""
     svc = MemoryService(container)
-    memories, total = svc.get_context(limit=20, project=project)
-
-    lines = [
-        f"# Blog Brief: {project}",
-        "",
-        f"**Project:** {project}",
-        f"**Total memories:** {total}",
-        "",
-        "## Recent Decisions & Learnings",
-        "",
-    ]
-    if memories:
-        for mem in memories:
-            category = mem.get("category") or "note"
-            lines.append(f"### [{category}] {mem['title']}")
-            lines.append(f"**What:** {mem.get('what', '')}")
-            if mem.get("why"):
-                lines.append(f"**Why:** {mem['why']}")
-            if mem.get("impact"):
-                lines.append(f"**Impact:** {mem['impact']}")
-            lines.append("")
-    else:
-        lines.append("*No memories found for this project.*")
-
-    return "\n".join(lines)
-
-
-def _build_journey_brief(journey: dict) -> str:
-    lines = [
-        f"# Blog Brief: {journey['title']}",
-        "",
-        f"**Project:** {journey['project']}",
-        f"**Status:** {journey['status']}",
-        f"**Started:** {journey['started_at'][:10]}",
-    ]
-
-    if journey.get("completed_at"):
-        lines.append(f"**Completed:** {journey['completed_at'][:10]}")
-
-    if journey.get("summary"):
-        lines.append(f"\n## Summary\n{journey['summary']}")
-
-    events = journey.get("events", [])
-    if events:
-        lines.append("\n## Journey History\n")
-        for event in events:
-            summary = f": {event['summary']}" if event.get("summary") else ""
-            lines.append(f"- {event['created_at'][:10]} [{event['event_type']}]{summary}")
-
-    memories = journey.get("linked_memories", [])
-    if memories:
-        lines.append("\n## Decision Timeline\n")
-        for item in memories:
-            mem = item["memory"]
-            rel = item["relation"]
-            lines.append(f"### [{mem.get('category') or 'note'}] {mem['title']}")
-            lines.append(f"**What:** {mem['what']}")
-            if mem.get("why"):
-                lines.append(f"**Why:** {mem['why']}")
-            if mem.get("impact"):
-                lines.append(f"**Impact:** {mem['impact']}")
-            lines.append(f"*Relation: {rel}*")
-            lines.append("")
-
-    artifacts = journey.get("linked_artifacts", [])
-    if artifacts:
-        lines.append("\n## Related Artifacts\n")
-        for item in artifacts:
-            art = item["artifact"]
-            lines.append(f"- [{art['artifact_type']}] {art['title']}")
-            if art.get("url"):
-                lines.append(f"  URL: {art['url']}")
-
-    return "\n".join(lines)
+    scope = resolve_write_scope(project, container.config)
+    memories, _ = svc.get_context(limit=20, project=scope.project, org=scope.org)
+    brief = create_plugin("content", "blog", container).generate({"memories": memories, "project": scope.project})
+    return str(brief) if brief else f"# Blog Brief: {scope.project}\n\n*No memories found for this project.*"

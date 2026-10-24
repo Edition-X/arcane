@@ -48,7 +48,7 @@ class RawMemoryInput(BaseModel):
     supersedes: str | None = None
 
     ttl_days: int | None = None
-    confidence: float | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
 
     @field_validator("category", mode="before")
     @classmethod
@@ -154,6 +154,7 @@ class Journey(BaseModel):
     id: str = Field(default_factory=_generate_id)
     title: str
     project: str = ""
+    org: str = ""
     status: JourneyStatus = JourneyStatus.ACTIVE
     started_at: str = Field(default_factory=_now_iso)
     completed_at: str | None = None
@@ -178,6 +179,7 @@ class Artifact(BaseModel):
     url: str | None = None
     raw_data: dict[str, Any] = Field(default_factory=dict)
     project: str = ""
+    org: str = ""
     created_at: str = Field(default_factory=_now_iso)
 
 
@@ -212,6 +214,7 @@ class Insight(BaseModel):
     body: str
     severity: Severity = Severity.INFO
     project: str = ""
+    org: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: str = Field(default_factory=_now_iso)
     acknowledged: bool = False

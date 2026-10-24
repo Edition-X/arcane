@@ -154,12 +154,14 @@ class TestJourneyCLI:
 class TestArtifactCLI:
     def test_search_and_show(self, runner, mock_container):
         from arcane.domain.models import Artifact
+        from arcane.domain.scope import resolve_write_scope
 
         artifact = Artifact(
             artifact_type="commit",
             external_id="abc123",
             title="Fix retry behavior",
             project="test",
+            org=resolve_write_scope(None, mock_container.config).org,
             raw_data={"body": "Use exponential backoff"},
         )
         mock_container.artifact_repo.insert(artifact.model_dump())
@@ -199,10 +201,11 @@ class TestIngestCLI:
         assert "git" in result.output
 
     def test_ingest_git_runs(self, runner, mock_container, tmp_path):
-        """Ingest git in a non-git dir should report 0."""
+        """Ingest git in a non-git dir should report an actionable error."""
         result = runner.invoke(main, ["ingest", "git", "--repo-path", str(tmp_path)])
-        assert result.exit_code == 0, result.output
-        assert "0" in result.output or "ingested" in result.output.lower()
+        assert result.exit_code != 0
+        assert "not a git repository" in result.output
+        assert "--repo-path" in result.output
 
 
 class TestAnalyzeCLI:
@@ -288,10 +291,12 @@ class TestMergeProjectsCLI:
 
 class TestAnalyzeHealthCLI:
     def test_health_reports_findings(self, runner, mock_container):
+        from arcane.domain.scope import resolve_write_scope
         from tests.conftest import make_memory_dict
 
-        mock_container.memory_repo.insert(make_memory_dict(project="Edition X"))
-        mock_container.memory_repo.insert(make_memory_dict(project="edition-x"))
+        org = resolve_write_scope(None, mock_container.config).org
+        mock_container.memory_repo.insert(make_memory_dict(project="Edition X", org=org))
+        mock_container.memory_repo.insert(make_memory_dict(project="edition-x", org=org))
 
         result = runner.invoke(main, ["analyze", "health", "--project", "p"])
         assert result.exit_code == 0, result.output

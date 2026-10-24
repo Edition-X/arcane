@@ -11,10 +11,12 @@ from typing import Any
 
 from arcane.domain.enums import RelationType
 from arcane.domain.models import Memory, RawMemoryInput, Relationship
-from arcane.domain.scope import GLOBAL_ORG, resolve_read_project, resolve_write_scope, slugify
+from arcane.domain.results import MemorySaveResult
+from arcane.domain.scope import resolve_read_project, resolve_write_scope, slugify, validate_org
 from arcane.infra.db.ids import IdentifierResolutionError, resolve_entity_id
 from arcane.infra.db.schema import create_vec_table
 from arcane.infra.markdown import remove_session_memory, write_session_memory
+from arcane.infra.paths import relative_vault_path, vault_path
 from arcane.infra.redaction import redact, redact_values
 from arcane.infra.search import hybrid_search, tiered_search
 from arcane.services.container import ServiceContainer
@@ -256,14 +258,29 @@ class MemoryService:
 
     @staticmethod
     def _scope_dir(org: str, project: str) -> str:
-        """Vault subdirectory for a memory's scope (project / @org / @global)."""
+        """Vault subdirectory for a memory's org and optional project."""
+        org = validate_org(org)
         if project:
-            return project
-        if org and org != GLOBAL_ORG:
-            return f"@{org}"
-        return "@global"
+            return os.path.join(f"@{org}", project)
+        return f"@{org}"
 
-    def save(self, raw: RawMemoryInput, project: str | None = None, org: str | None = None) -> dict[str, Any]:
+    def _refresh_mirror(self, memory_id: str) -> str:
+        """Render the latest SQLite state through the same idempotent write path."""
+        memory = self.c.memory_repo.get(memory_id)
+        if memory is None:
+            raise ValueError("Memory disappeared while refreshing its Markdown mirror")
+        path = vault_path(self.c.home, memory["file_path"])
+        details = self.c.memory_repo.get_details(memory_id)
+        write_session_memory(
+            str(path.parent),
+            memory,
+            path.name.removesuffix("-session.md"),
+            details=details["body"] if details else None,
+            target_path=path,
+        )
+        return str(path)
+
+    def save(self, raw: RawMemoryInput, project: str | None = None, org: str | None = None) -> MemorySaveResult:
         """Save a memory with full pipeline: redact, write markdown, index, embed.
 
         ``project``/``org`` together set the scope. An empty ``project`` with an
@@ -271,9 +288,12 @@ class MemoryService:
         """
         resolved = resolve_write_scope(project, self.c.config)
         project = resolved.project
-        org = org if org is not None else resolved.org
+        org = validate_org(org if org is not None else resolved.org)
         today = date.today().isoformat()
         vault_project_dir = os.path.join(self.c.vault_dir, self._scope_dir(org, project))
+        # Check resolved containment before mkdir (including existing symlinks).
+        file_path = vault_path(self.c.home, os.path.join(vault_project_dir, f"{today}-session.md"))
+        vault_project_dir = str(file_path.parent)
         os.makedirs(vault_project_dir, exist_ok=True)
 
         raw_data = redact_values(raw.model_dump(), self.c.ignore_patterns)
@@ -313,61 +333,67 @@ class MemoryService:
         if near_dup:
             warnings.append(near_dup)
 
-        file_path = os.path.join(vault_project_dir, f"{today}-session.md")
-        mem = Memory.from_raw(raw, project=project, org=org, file_path=file_path)
+        mem = Memory.from_raw(raw, project=project, org=org, file_path=relative_vault_path(self.c.home, file_path))
         mem_dict = mem.model_dump()
 
         with self.c.db.transaction():
-            rowid = self.c.memory_repo.insert(mem_dict, details=raw.details)
-            if raw.journey_id:
-                from arcane.services.journey import JourneyService
+            # Other server processes may have saved this title while embedding.
+            existing = self.c.memory_repo.find_by_title(raw.title, project, org)
+            if existing is None:
+                rowid = self.c.memory_repo.insert(mem_dict, details=raw.details)
+                if raw.journey_id:
+                    from arcane.services.journey import JourneyService
 
-                JourneyService(self.c).link_memory(raw.journey_id, mem.id)
-            if embedding is not None:
-                self._store_embedding(rowid, embedding)
-            if raw.supersedes:
-                self.link_supersedes(mem.id, raw.supersedes)
-            write_session_memory(vault_project_dir, mem_dict, today, details=raw.details)
+                    JourneyService(self.c).link_memory(raw.journey_id, mem.id)
+                if embedding is not None:
+                    self._store_embedding(rowid, embedding)
+                if raw.supersedes:
+                    self.link_supersedes(mem.id, raw.supersedes)
+                self._refresh_mirror(mem.id)
+        if existing is not None:
+            return self._merge_into(existing, raw, today, warnings)
         logger.debug("Created memory id=%s project=%s", mem.id, project)
-
-        return {"id": mem.id, "file_path": file_path, "action": "created", "warnings": warnings}
+        return {"id": mem.id, "file_path": str(file_path), "action": "created", "warnings": warnings}
 
     def _merge_into(
         self, existing: dict[str, Any], raw: RawMemoryInput, today: str, warnings: list[str]
-    ) -> dict[str, Any]:
+    ) -> MemorySaveResult:
         """Fold a same-titled save into *existing* instead of creating a duplicate."""
         existing_id = existing["id"]
-        merged_tags = self._merge_tags(existing.get("tags") or [], raw.tags)
         details_append = f"--- updated {today} ---\n{raw.details}" if raw.details else None
-        embedding = self._prepare_embedding(existing["title"], raw.what, raw.why, raw.impact, merged_tags)
+        while True:
+            current = self.c.memory_repo.get(existing_id)
+            if current is None:
+                # A concurrent delete won; run the normal save path again.
+                return self.save(raw, project=existing["project"], org=existing["org"])
+            merged_tags = self._merge_tags(current.get("tags") or [], raw.tags)
+            embedding = self._prepare_embedding(current["title"], raw.what, raw.why, raw.impact, merged_tags)
+            with self.c.db.transaction():
+                latest = self.c.memory_repo.get(existing_id)
+                if latest is None or latest["updated_count"] != current["updated_count"]:
+                    continue
+                self.c.memory_repo.update(
+                    memory_id=existing_id,
+                    what=raw.what,
+                    why=raw.why,
+                    impact=raw.impact,
+                    tags=merged_tags,
+                    details_append=details_append,
+                )
+                if embedding is not None:
+                    self._store_embedding(current["rowid"], embedding)
+                if raw.journey_id and not self.c.relationship_repo.exists(
+                    "memory", existing_id, "journey", raw.journey_id, RelationType.PART_OF.value
+                ):
+                    from arcane.services.journey import JourneyService
 
-        with self.c.db.transaction():
-            self.c.memory_repo.update(
-                memory_id=existing_id,
-                what=raw.what,
-                why=raw.why,
-                impact=raw.impact,
-                tags=merged_tags,
-                details_append=details_append,
-            )
-            if embedding is not None:
-                self._store_embedding(existing["rowid"], embedding)
-            if raw.journey_id and not self.c.relationship_repo.exists(
-                "memory", existing_id, "journey", raw.journey_id, RelationType.PART_OF.value
-            ):
-                from arcane.services.journey import JourneyService
-
-                JourneyService(self.c).link_memory(raw.journey_id, existing_id)
-            if raw.supersedes:
-                self.link_supersedes(existing_id, raw.supersedes)
+                    JourneyService(self.c).link_memory(raw.journey_id, existing_id)
+                if raw.supersedes:
+                    self.link_supersedes(existing_id, raw.supersedes)
+                file_path = self._refresh_mirror(existing_id)
+            break
         logger.debug("Merged duplicate memory id=%s", existing_id)
-
-        return {
-            "id": existing_id,
-            "file_path": existing.get("file_path", ""),
-            "action": "updated",
-            "warnings": warnings,
-        }
+        return {"id": existing_id, "file_path": file_path, "action": "updated", "warnings": warnings}
 
     def search(
         self,
@@ -612,6 +638,7 @@ class MemoryService:
                 self._store_embedding(rowid, embedding)
             if supersedes:
                 self.link_supersedes(full_id, supersedes)
+            self._refresh_mirror(full_id)
         return True
 
     def get_details(self, memory_id: str) -> dict[str, Any] | None:
@@ -624,10 +651,11 @@ class MemoryService:
         memory = self.c.memory_repo.get(full_id)
         if memory is None:
             return False
+        path = vault_path(self.c.home, memory["file_path"])
         with self.c.db.transaction():
             deleted = self.c.memory_repo.delete(full_id)
             if deleted:
-                remove_session_memory(memory["file_path"], full_id, memory["title"])
+                remove_session_memory(str(path), full_id, memory["title"])
             return deleted
 
     def reindex(self, progress_callback: Any = None) -> dict[str, Any]:

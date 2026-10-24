@@ -48,7 +48,11 @@ class MigrationService:
         if os.path.exists(target_db):
             errors.append(f"Target database already exists: {target_db} (skipping copy)")
         else:
-            shutil.copy2(source_db, target_db)
+            with_source = Database(source_db)
+            try:
+                with_source.backup(target_db)
+            finally:
+                with_source.close()
 
         # 2. Run schema upgrade (additive — adds new tables, columns)
         db = Database(target_db)

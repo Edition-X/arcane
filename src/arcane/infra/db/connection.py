@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -74,9 +75,20 @@ class Database:
         self._lock = threading.RLock()
         self._transaction_depth = 0
 
-        if db_path != ":memory:":
-            self.conn.execute("PRAGMA journal_mode = WAL")
         self.conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
+        if db_path != ":memory:":
+            # Changing a fresh database's journal mode can return BUSY without
+            # invoking SQLite's busy handler when two MCP processes start at once.
+            deadline = time.monotonic() + BUSY_TIMEOUT_MS / 1000
+            while True:
+                try:
+                    self.conn.execute("PRAGMA journal_mode = WAL")
+                    break
+                except sqlite3.OperationalError as exc:
+                    if "locked" not in str(exc).lower() or time.monotonic() >= deadline:
+                        self.conn.close()
+                        raise
+                    time.sleep(0.05)
 
         self.vec_available = load_vec_extension(self.conn)
 

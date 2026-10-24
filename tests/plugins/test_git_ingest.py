@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import pytest
 
 from arcane.plugins.builtin.git_ingest import GitIngestionPlugin
+from arcane.plugins.protocols import IngestionError
 
 
 @pytest.fixture
@@ -113,8 +114,8 @@ class TestGitIngestionPlugin:
 
     def test_ingest_nonexistent_repo(self, tmp_path):
         plugin = GitIngestionPlugin(repo_path=str(tmp_path / "nope"))
-        results = plugin.ingest(project="test-project")
-        assert results == []
+        with pytest.raises(IngestionError, match="Check --repo-path"):
+            plugin.ingest(project="test-project")
 
     def test_ingest_files_changed(self, git_repo):
         plugin = GitIngestionPlugin(repo_path=git_repo)

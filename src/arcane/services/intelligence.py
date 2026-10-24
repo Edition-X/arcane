@@ -22,17 +22,20 @@ class IntelligenceService:
         project: str | None = None,
     ) -> dict[str, Any]:
         """Run a single intelligence plugin and store results."""
-        project = resolve_write_scope(project, self.c.config).project
+        scope = resolve_write_scope(project, self.c.config)
+        project = scope.project
         insights = plugin.analyze(project=project)
 
         for insight in insights:
             insight.update(redact_values(insight, self.c.ignore_patterns))
             insight["project"] = project
+            insight["org"] = scope.org
             self.c.insight_repo.insert(insight)
 
         return {
             "plugin": plugin.name,
             "project": project,
+            "org": scope.org,
             "insights_created": len(insights),
         }
 

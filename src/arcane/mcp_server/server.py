@@ -47,6 +47,7 @@ from arcane.mcp_server.prompts import (
     build_recall_prompt,
 )
 from arcane.mcp_server.resources import RESOURCE_TEMPLATE_URI, _parse_project_from_uri
+from arcane.mcp_server.schemas import memory_save_schema
 from arcane.mcp_server.tools.artifact_tools import handle_artifact_details, handle_artifact_search
 from arcane.mcp_server.tools.content_tools import handle_draft_adr, handle_draft_blog
 from arcane.mcp_server.tools.ingestion_tools import (
@@ -69,7 +70,6 @@ from arcane.mcp_server.tools.memory_tools import (
     CONTEXT_DESCRIPTION,
     SAVE_DESCRIPTION,
     SEARCH_DESCRIPTION,
-    VALID_CATEGORIES,
     handle_context,
     handle_delete,
     handle_details,
@@ -77,8 +77,10 @@ from arcane.mcp_server.tools.memory_tools import (
     handle_search,
     handle_update,
 )
+from arcane.mcp_server.tools.plugin_tools import handle_plugins
 from arcane.mcp_server.tools.relationship_tools import handle_link, handle_trace
 from arcane.mcp_server.usage import RECORDED_TOOLS, record_tool_call
+from arcane.plugins.registry import plugins_for
 from arcane.services.container import ServiceContainer, create_container, start_embedding_backend
 from arcane.services.journey import JourneyService
 from arcane.services.memory import MemoryService
@@ -143,50 +145,7 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="memory_save",
                 description=SAVE_DESCRIPTION,
-                input_schema={
-                    "type": "object",
-                    "properties": {
-                        "title": {"type": "string", "description": "Short title, max 60 chars."},
-                        "what": {"type": "string", "description": "1-2 sentences. The essence."},
-                        "why": {"type": "string", "description": "Reasoning behind it."},
-                        "impact": {"type": "string", "description": "What changed."},
-                        "tags": {"type": "array", "items": {"type": "string"}},
-                        "category": {"type": "string", "enum": list(VALID_CATEGORIES)},
-                        "related_files": {"type": "array", "items": {"type": "string"}},
-                        "details": {"type": "string", "description": "Full context."},
-                        "project": {"type": "string"},
-                        "org": {
-                            "type": "string",
-                            "description": "Company/org slug. Omit to auto-detect from the git remote owner.",
-                        },
-                        "scope": {
-                            "type": "string",
-                            "enum": ["project", "org", "global"],
-                            "default": "project",
-                            "description": (
-                                "Knowledge layer: project = this repo (default); "
-                                "org = company-wide, shared across all the org's repos; "
-                                "global = applies everywhere."
-                            ),
-                        },
-                        "journey_id": {"type": "string", "description": "Link to a journey."},
-                        "supersedes": {
-                            "type": "string",
-                            "description": "ID or prefix of an earlier memory this one replaces.",
-                        },
-                        "ttl_days": {
-                            "type": "integer",
-                            "description": "Days until this memory expires. Omit for permanent memories.",
-                        },
-                        "confidence": {
-                            "type": "number",
-                            "minimum": 0,
-                            "maximum": 1,
-                            "description": "Confidence in accuracy 0.0–1.0. Default: omit.",
-                        },
-                    },
-                    "required": ["title", "what"],
-                },
+                input_schema=memory_save_schema(),
             ),
             Tool(
                 name="memory_search",
@@ -498,14 +457,36 @@ def _create_server(container: ServiceContainer) -> Server:
             # ── Analysis tools ──
             Tool(
                 name="analyze",
-                description="Run an intelligence analysis plugin (velocity, health, usage).",
+                description=(
+                    "Run an installed intelligence analysis plugin. "
+                    "Use plugins to discover names and constructor options."
+                ),
                 input_schema={
                     "type": "object",
                     "properties": {
-                        "plugin_name": {"type": "string", "enum": ["velocity", "health", "usage"]},
+                        "plugin_name": {"type": "string", "enum": sorted(plugins_for("intelligence"))},
                         "project": {"type": "string"},
                     },
                     "required": ["plugin_name"],
+                },
+            ),
+            Tool(
+                name="plugins",
+                description=(
+                    "List installed ingestion, intelligence and content plugins with constructor options. "
+                    "Omit plugin_name to list; provide kind and plugin_name to run one. "
+                    "Pass constructor settings in options, and content generation input in context."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "kind": {"type": "string", "enum": ["ingestion", "intelligence", "content"]},
+                        "plugin_name": {"type": "string"},
+                        "options": {"type": "object", "description": "Plugin constructor keyword arguments."},
+                        "context": {"type": "object", "description": "Content plugin generation context."},
+                        "project": {"type": "string"},
+                        "journey_id": {"type": "string"},
+                    },
                 },
             ),
             # ── Content tools ──
@@ -569,6 +550,7 @@ def _create_server(container: ServiceContainer) -> Server:
         "ingest_gha": (handle_ingest_gha, container),
         "ingest_linear": (handle_ingest_linear, container),
         "analyze": (handle_analyze, container),
+        "plugins": (handle_plugins, container),
         "link": (handle_link, container),
         "trace": (handle_trace, container),
         "insights": (handle_insights, container),

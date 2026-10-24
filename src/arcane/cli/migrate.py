@@ -99,3 +99,88 @@ def migrate_org_scope(apply_: bool) -> None:
 
     click.echo(f"Backfilled {result['updated']} memories.")
     click.echo(f"Backup: {backup}")
+
+
+@migrate.command("entity-org")
+@click.option("--org", required=True, help="Verified owner of the unknown legacy entities.")
+@click.option("--project", required=True, help="Exact stored project name to recover.")
+@click.option("--apply", "apply_", is_flag=True, default=False, help="Assign ownership (default: dry run).")
+def migrate_entity_org(org: str, project: str, apply_: bool) -> None:
+    """Assign explicitly verified ownership to unknown journeys, artifacts and insights.
+
+    Shared project names cannot establish historical ownership. Inspect the
+    records and their sources before using this command; it assigns every
+    unknown entity in the selected project, and never changes a known org.
+    """
+    from arcane.domain.scope import validate_org
+    from arcane.infra.db.schema import SCOPED_INSIGHT_TYPES
+
+    try:
+        org = validate_org(org)
+    except ValueError as exc:
+        raise click.BadParameter(str(exc), param_hint="--org") from exc
+    if not project:
+        raise click.BadParameter("must be a nonempty stored project name", param_hint="--project")
+
+    tables = ("journeys", "artifacts", "insights")
+
+    def unknown(table: str) -> str:
+        """Rows in the project with no recorded owner that one org can own."""
+        where = "project = ? AND org = ''"
+        return f"{where} AND {SCOPED_INSIGHT_TYPES}" if table == "insights" else where
+
+    with create_container() as container:
+
+        def plan() -> dict[str, int]:
+            # A duplicate external key cannot be reassigned without either
+            # overwriting a known record or silently discarding the unknown one.
+            conflicts = container.db.fetchall(
+                "SELECT unknown.id, known.id AS existing_id FROM artifacts unknown JOIN artifacts known "
+                "ON known.artifact_type = unknown.artifact_type AND known.external_id = unknown.external_id "
+                "AND known.project = unknown.project AND known.org = ? "
+                "WHERE unknown.project = ? AND unknown.org = ''",
+                (org, project),
+            )
+            if conflicts:
+                ids = ", ".join(f"{r['id']} conflicts with {r['existing_id']}" for r in conflicts[:5])
+                raise click.ClickException(
+                    f"Ownership conflict: {ids}. Resolve duplicate artifacts before assigning ownership; "
+                    "nothing changed."
+                )
+            counts = {}
+            for table in tables:
+                row = container.db.fetchone(f"SELECT COUNT(*) AS n FROM {table} WHERE {unknown(table)}", (project,))
+                counts[table] = row["n"] if row else 0
+            return counts
+
+        counts = plan()
+        if not sum(counts.values()):
+            click.echo(f"No unknown-org entities in project '{project}'. Known ownership is unchanged.")
+            return
+        click.echo(f"{'Assign' if apply_ else 'Dry run'}: unknown entities in '{project}' -> {org}/{project}")
+        for table, count in counts.items():
+            click.echo(f"  {table}: {count}")
+            for row in container.db.fetchall(
+                f"SELECT id, title FROM {table} WHERE {unknown(table)} ORDER BY id LIMIT 20", (project,)
+            ):
+                click.echo(f"    {row['id']}  {row['title']}")
+            if count > 20:
+                click.echo(f"    ... {count - 20} more records")
+        click.echo("Known orgs and memories are unchanged. Verify these records belong to this org before applying.")
+        if not apply_:
+            click.echo("Pass --apply to back up the SQLite store and assign ownership atomically.")
+            return
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
+        backup = f"{container.db.db_path}.bak-entity-org-{timestamp}"
+        container.db.backup(backup)
+        with container.db.transaction():
+            # Check again under the write lock, so a concurrent ingestion cannot
+            # create a conflict between the dry run and the update.
+            plan()
+            updated = 0
+            for table in tables:
+                cursor = container.db.execute(f"UPDATE {table} SET org = ? WHERE {unknown(table)}", (org, project))
+                updated += cursor.rowcount
+    click.echo(f"Assigned {updated} entities to {org}/{project}.")
+    click.echo(f"Backup: {backup}")

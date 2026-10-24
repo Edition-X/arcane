@@ -24,9 +24,9 @@
                         │
 ┌───────────────────────▼─────────────────────────────────┐
 │              Storage                                     │
-│   ~/.arcane/arcane.db  (SQLite + FTS5 + sqlite-vec)     │
+│   ~/.arcane/index.db  (SQLite + FTS5 + sqlite-vec)        │
 │   ~/.arcane/config.yaml                                  │
-│   ~/.arcane/vault/<project>/YYYY-MM-DD-session.md       │
+│   ~/.arcane/vault/@<org>/<project>/date-session.md        │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -67,8 +67,8 @@ A derived observation produced by an intelligence plugin — for example, an eng
 Every search request goes through the hybrid search pipeline in `src/arcane/infra/search.py`:
 
 1. **FTS5 full-text search** — fast keyword matching against title, what, why, impact, and tags using SQLite FTS5.
-2. **Vector similarity search** — cosine similarity over embeddings stored with sqlite-vec, using whichever embedding provider is configured (Ollama or OpenAI).
-3. **Result fusion** — scores from both passes are merged and ranked. Recent memories receive a small recency boost when `context.topup_recent` is enabled.
+2. **Vector search** — sqlite-vec ranks embeddings by L2 (Euclidean) distance using the configured provider (Ollama or OpenAI). Distance becomes a positive score with `1 / (1 + distance)`; closer vectors score higher.
+3. **Result fusion** — each backend's scores are divided by its best score, then combined with weights of 0.3 for FTS and 0.7 for vectors. Scope specificity adds a small bonus. Context can supplement results with recent memories when `context.topup_recent` is enabled.
 
 When no embedding provider is available (provider set to `none` or API key missing), Arcane falls back to FTS5-only search.
 
@@ -76,9 +76,11 @@ When no embedding provider is available (provider set to `none` or API key missi
 
 ## Storage
 
-All persistent data lives in a single SQLite file at `~/.arcane/arcane.db` (or `$ARCANE_HOME/arcane.db`). This makes it trivial to back up, sync with a tool like `syncthing`, or inspect directly with any SQLite client.
+All persistent data lives in a single SQLite file at `~/.arcane/index.db` (or `$ARCANE_HOME/index.db`). This makes it trivial to back up, sync with a tool like `syncthing`, or inspect directly with any SQLite client.
 
-A markdown mirror of saved memories is written to `~/.arcane/vault/<project>/YYYY-MM-DD-session.md` — a human-readable record you can commit to a private git repo or read in any text editor.
+A Markdown mirror of project memories is written to `~/.arcane/vault/@<org>/<project>/YYYY-MM-DD-session.md`. Org memories omit the project directory; global memories live directly under `vault/`. These are human-readable records you can keep in a private git repo or read in any text editor.
+
+Stored file paths are relative to the data home (`vault/...`), and API responses give the current absolute path. Moving or restoring the home keeps new paths usable. Legacy absolute paths resolve only inside the current vault, so a restored copy cannot edit the original vault through an old path.
 
 ---
 
@@ -92,10 +94,16 @@ Arcane uses Python entry points for extensibility. Three plugin types are suppor
 | `arcane.plugins.intelligence` | `IntelligencePlugin` | Derive insights from stored data |
 | `arcane.plugins.content` | `ContentPlugin` | Generate structured documents |
 
-Install any package that declares the right entry point and Arcane will discover it automatically at startup.
+The registry drives both built-in and third-party execution. Install plugins into Arcane's Python environment; their entry-point names appear under `arcane ingest`, `arcane analyze`, or `arcane draft`. Existing built-in commands and tools remain available.
+
+Use a group's `--list` or `--help` to discover plugins. An added plugin command's `--help` shows its constructor signature. Supply constructor settings with `--options '{"key":"value"}'`, and content input with `--context '{"topic":"release"}'`.
+
+The full MCP profile's `plugins` tool lists all kinds when called without arguments. Supply `kind` and `plugin_name` to execute a plugin, with optional `options` and content `context` objects. The `analyze` tool also accepts installed intelligence entry-point names.
+
+Factories may declare `memory_repo`, `artifact_repo`, `journey_repo`, `retrieval_repo`, `aliases`, and `org` parameters to receive Arcane's repositories, project aliases, and resolved org. Only explicitly declared parameters receive these values; `options` cannot override them.
 
 ---
 
 ## Secret redaction
 
-Before content is persisted or embedded, `src/arcane/infra/redaction.py` removes known secret formats (API keys, tokens, private keys, JWTs, and credential assignments). User-defined regexes in `.memoryignore` are also applied by Arcane services. This is not generic PII redaction: email addresses, phone numbers, and other personal data are retained unless a user-defined pattern matches them. Redacted spans are replaced with `[REDACTED]`.
+Before content is persisted or embedded, `src/arcane/infra/redaction.py` removes known secret formats (API keys, tokens, private keys, JWTs, and credential assignments). User-defined regexes in `$ARCANE_HOME/.memoryignore` are also applied by Arcane services. Search queries and batch embeddings use the same redaction rules before they reach a provider. Explicit `<redacted>` spans support nesting; an unclosed opener hides the remaining input, and an unmatched closer hides the preceding input. This is not generic PII redaction: email addresses, phone numbers, and other personal data are retained unless a user-defined pattern matches them. Redacted spans are replaced with `[REDACTED]`.

@@ -52,18 +52,13 @@ def build_report(
     memories = container.memory_repo.list_created_between(
         start, end, categories=REPORT_CATEGORIES, org=org, project=project
     )
-    project_orgs = container.memory_repo.project_orgs()
-    journeys = [
-        j
-        for j in container.journey_repo.list_completed_between(start, end)
-        if (org is None or project_orgs.get(j["project"]) == org) and (project is None or j["project"] == project)
-    ]
+    journeys = container.journey_repo.list_completed_between(start, end, org=org, project=project)
 
     groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for m in memories:
         groups[(m["org"] or "(none)", m["project"] or "(no project)")].append(_entry_from_memory(m))
     for j in journeys:
-        key = (project_orgs.get(j["project"], "(none)"), j["project"] or "(no project)")
+        key = (j["org"] or "(none)", j["project"] or "(no project)")
         groups[key].append(
             {
                 "kind": "journey",
@@ -129,13 +124,15 @@ def render_markdown(report: dict[str, Any]) -> str:
 def export_org(container: ServiceContainer, org: str) -> dict[str, Any]:
     """Everything *org* owns: its memories (with details), and the journeys and artifacts of its projects."""
     memories = container.memory_repo.list_for_export(org)
-    project_orgs = container.memory_repo.project_orgs()
-    projects = sorted(p for p, o in project_orgs.items() if o == org)
-    journeys = container.journey_repo.list_for_projects(projects)
-    artifacts = container.artifact_repo.list_for_projects(projects)
+    journeys = container.journey_repo.list_for_projects(org=org)
+    artifacts = container.artifact_repo.list_for_projects(org=org)
+    insights = container.insight_repo.list_all(org=org, limit=-1)
+    projects = sorted({r["project"] for r in (*memories, *journeys, *artifacts, *insights) if r["project"]})
     ids = {m["id"] for m in memories} | {j["id"] for j in journeys} | {a["id"] for a in artifacts}
-    relationships = container.relationship_repo.list_touching(ids)
-    for record in (*memories, *journeys, *artifacts):
+    relationships = [
+        r for r in container.relationship_repo.list_touching(ids) if r["source_id"] in ids and r["target_id"] in ids
+    ]
+    for record in (*memories, *journeys, *artifacts, *insights):
         record.pop("rowid", None)
     return {
         "format": EXPORT_FORMAT,
@@ -149,9 +146,11 @@ def export_org(container: ServiceContainer, org: str) -> dict[str, Any]:
             "journeys": len(journeys),
             "artifacts": len(artifacts),
             "relationships": len(relationships),
+            "insights": len(insights),
         },
         "memories": memories,
         "journeys": journeys,
         "artifacts": artifacts,
         "relationships": relationships,
+        "insights": insights,
     }

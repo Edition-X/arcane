@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 from arcane.domain.models import RawMemoryInput
 from arcane.services.ingestion import IngestionService
@@ -130,7 +131,7 @@ def test_memory_save_and_update_redact_custom_patterns_before_embedding_and_mark
         OPENAI_TOKEN not in value and GITHUB_TOKEN not in value and CUSTOM_SECRET not in value
         for value in embedder.inputs
     )
-    assert CUSTOM_SECRET not in (tmp_path / "vault" / "project").glob("*.md").__next__().read_text()
+    assert CUSTOM_SECRET not in Path(created["file_path"]).read_text()
 
     assert service.update(
         created["id"],

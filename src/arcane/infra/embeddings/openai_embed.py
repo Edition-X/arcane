@@ -13,8 +13,10 @@ _MAX_BATCH = 2048
 
 class OpenAIEmbedding(EmbeddingProvider):
     def __init__(self, model: str = "text-embedding-3-small", api_key: str | None = None):
+        if not api_key or not api_key.strip():
+            raise ValueError("OpenAI embeddings require embedding.api_key in config.yaml.")
         self.model = model
-        self.api_key = api_key or ""
+        self.api_key = api_key.strip()
         self._client: httpx.Client | None = None
 
     def _http(self) -> httpx.Client:

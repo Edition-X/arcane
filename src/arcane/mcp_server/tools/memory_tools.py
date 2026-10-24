@@ -100,6 +100,13 @@ def handle_save(
                 "if this is intentionally broader knowledge."
             )
 
+    from arcane.domain.scope import validate_org
+
+    try:
+        org_final = validate_org(org_final)
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)})
+
     raw = RawMemoryInput(
         title=title[:60],
         what=what,
@@ -310,7 +317,7 @@ def handle_context(
     # Surface pending intelligence at session start (not in minimal mode —
     # that's the token-pinching path).
     if detail != "minimal" and project_final:
-        pending = svc.c.insight_repo.list_all(project=project_final, unacknowledged_only=True, limit=3)
+        pending = svc.c.insight_repo.list_all(project=project_final, unacknowledged_only=True, limit=3, org=org_final)
         if pending:
             payload["insights"] = [
                 {
@@ -326,7 +333,7 @@ def handle_context(
     # Surface active journeys idle for more than 14 days so the agent is
     # prompted to complete or abandon them instead of letting them rot.
     if detail != "minimal" and project_final:
-        stale = svc.c.journey_repo.list_stale_active(project=project_final)[:5]
+        stale = svc.c.journey_repo.list_stale_active(project=project_final, org=org_final)[:5]
         if stale:
             payload["stale_journeys"] = [
                 {"id": j["id"], "title": j["title"], "last_update": (j.get("updated_at") or "")[:10]} for j in stale

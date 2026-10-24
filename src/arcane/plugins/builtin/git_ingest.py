@@ -9,6 +9,8 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from arcane.plugins.protocols import IngestionError
+
 logger = logging.getLogger(__name__)
 
 # Record/field separators delimit commits and fields in git log output
@@ -27,7 +29,7 @@ class GitIngestionPlugin:
         # No ".git" directory check: in a linked worktree ".git" is a file, and
         # git itself reports a non-repository through its exit code.
         if not os.path.isdir(self.repo_path):
-            return []
+            raise IngestionError(f"Git repository path is not a directory: {self.repo_path}. Check --repo-path.")
 
         # One git call returns metadata and changed files for every commit.
         format_str = f"{_RS}%H{_FS}%s{_FS}%b{_FS}%an{_FS}%aI{_FS}"
@@ -52,14 +54,19 @@ class GitIngestionPlugin:
                 timeout=30,
             )
             if result.returncode != 0:
-                logger.warning("git log returned non-zero exit code %d", result.returncode)
-                return []
-        except subprocess.TimeoutExpired:
-            logger.warning("git log timed out in %s", self.repo_path)
-            return []
-        except FileNotFoundError:
-            logger.warning("git not found on PATH")
-            return []
+                reason = result.stderr.strip() or f"exit code {result.returncode}"
+                raise IngestionError(
+                    f"Cannot read git commits in {self.repo_path}: {reason}. "
+                    "Check --repo-path and that the repository has readable commits."
+                )
+        except subprocess.TimeoutExpired as exc:
+            raise IngestionError(
+                f"git log timed out after 30 seconds in {self.repo_path}. Check the repository and retry."
+            ) from exc
+        except FileNotFoundError as exc:
+            raise IngestionError("git is not available on PATH. Install git and retry.") from exc
+        except OSError as exc:
+            raise IngestionError(f"Cannot run git in {self.repo_path}: {exc}. Check the path and permissions.") from exc
 
         commits = self._parse_log(result.stdout)
         if not commits:

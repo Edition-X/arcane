@@ -26,7 +26,10 @@ def _pct(part: int, whole: int) -> str:
 class UsageAnalyzer:
     name = "usage"
 
-    def __init__(self, retrieval_repo: RetrievalRepository | None = None, days: int = 30) -> None:
+    def __init__(
+        self, retrieval_repo: RetrievalRepository | None = None, days: int = 30, org: str | None = None
+    ) -> None:
+        self.org = org
         self.retrieval_repo = retrieval_repo
         self.days = days
 
@@ -46,7 +49,7 @@ class UsageAnalyzer:
         repo = self.retrieval_repo
         if repo is None:
             return []
-        first = repo.first_recorded()
+        first = repo.first_recorded(org=self.org)
         if first is None:
             return [
                 self._insight(
@@ -59,12 +62,12 @@ class UsageAnalyzer:
             ]
 
         days = self.days
-        clients = repo.by_client(days)
+        clients = repo.by_client(days, org=self.org)
         lookups = sum(c["lookups"] for c in clients)
         sessions = sum(c["sessions"] for c in clients)
-        searches = repo.searches(days)
-        follow = repo.follow_through(days)
-        replaced = repo.replaced_hits(days)
+        searches = repo.searches(days, org=self.org)
+        follow = repo.follow_through(days, org=self.org)
+        replaced = repo.replaced_hits(days, org=self.org)
         covered_days = (datetime.now(timezone.utc) - datetime.fromisoformat(first)).days
 
         lines = [
@@ -74,7 +77,7 @@ class UsageAnalyzer:
             *[f"  {c['client']}: {c['lookups']} lookups, {c['sessions']} sessions" for c in clients],
             "",
             "By tool:",
-            *[f"  {t['tool']}: {t['lookups']}" for t in repo.by_tool(days)],
+            *[f"  {t['tool']}: {t['lookups']}" for t in repo.by_tool(days, org=self.org)],
             "",
             f"Searches with text: {searches['total']}, possible gaps: {searches['gaps']} "
             f"({_pct(searches['gaps'], searches['total'])}; {searches['empty']} returned nothing, the rest "
@@ -83,7 +86,7 @@ class UsageAnalyzer:
             f"of {follow['total']} ({_pct(follow['followed'], follow['total'])}).",
             f"Lookups that returned a replaced (superseded) memory: {replaced['lookups']} ({replaced['hits']} hits).",
         ]
-        top = repo.top_memories(days)
+        top = repo.top_memories(days, org=self.org)
         if top:
             lines += ["", "Most recalled:"]
             lines += [f"  {m['hits']}x  {m['title']} ({m['project'] or 'no project'}) [{m['id'][:8]}]" for m in top]
@@ -99,7 +102,7 @@ class UsageAnalyzer:
             )
         ]
 
-        gaps = repo.gap_queries(days)
+        gaps = repo.gap_queries(days, org=self.org)
         if gaps:
             body = ["Searches where no memory held the key words (knowledge worth saving, or a naming mismatch):"]
             body += [
@@ -118,7 +121,7 @@ class UsageAnalyzer:
             )
 
         if covered_days >= NEVER_RECALLED_DAYS:
-            never = repo.never_recalled(NEVER_RECALLED_DAYS)
+            never = repo.never_recalled(NEVER_RECALLED_DAYS, org=self.org)
             if never["count"]:
                 body = [
                     f"{never['count']} of {never['eligible']} memories older than {NEVER_RECALLED_DAYS} days "

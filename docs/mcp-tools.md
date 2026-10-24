@@ -1,6 +1,6 @@
 # MCP Tools Reference
 
-Arcane exposes 25 tools, 1 resource template, and 3 prompts to MCP-compatible agents. 13 are in the default `core` tool profile; the rest require `ARCANE_TOOL_PROFILE=full` (see `ARCANE_TOOL_PROFILE` in the environment variable table).
+Arcane exposes 26 tools, 1 resource template, and 3 prompts to MCP-compatible agents. 13 are in the default `core` tool profile; the rest require `ARCANE_TOOL_PROFILE=full` (see `ARCANE_TOOL_PROFILE` in the environment variable table).
 
 A call with an argument the tool does not accept returns an `Invalid arguments for tool '<name>'` error naming the argument.
 
@@ -384,11 +384,11 @@ Requires `LINEAR_API_KEY` to be set.
 
 **Profile:** `full`
 
-Run an intelligence analysis plugin against stored data.
+Run an installed intelligence analysis plugin against stored data. Use `plugins` to discover entry-point names and constructor options.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `plugin_name` | string | yes | `velocity`, `health` or `usage` |
+| `plugin_name` | string | yes | Installed entry-point name; built-ins are `velocity`, `health`, `usage` |
 | `project` | string | no | Project to analyse |
 
 - **`velocity`** — summarises engineering output rate from commits and closed tickets
@@ -427,6 +427,29 @@ Generate an Architecture Decision Record from a `decision` category memory.
 | `memory_id` | string | yes | ID of a decision memory |
 
 Returns a structured ADR with context, decision, consequences, and alternatives considered.
+
+---
+
+### `plugins`
+
+**Profile:** `full`
+
+Discover and run installed Python entry-point plugins. Omit `plugin_name` to list names, descriptions and constructor signatures, grouped by kind. Provide a name and kind to run one; ingestion writes artifacts and intelligence writes insights through the same services as built-ins. Content returns a redacted `brief`; its context is stamped with the resolved org, and an explicit `project` takes precedence over `context.project`.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `kind` | string | for execution | `ingestion`, `intelligence`, or `content`; omit when listing all kinds |
+| `plugin_name` | string | no | Installed entry-point name; omit to list |
+| `options` | object | no | Constructor keyword arguments; required arguments appear in discovery output |
+| `context` | object | no | Input to a content plugin's `generate(context)` |
+| `project` | string | no | Project for ingestion/analysis, or explicit project in content context |
+| `journey_id` | string | no | Link ingested artifacts to this journey |
+
+Factories can accept `memory_repo`, `artifact_repo`, `journey_repo`, `retrieval_repo`, `aliases`, and `org` as named constructor parameters. Arcane injects these dependencies; `options` cannot override them. Other constructor parameters are configured through `options`.
+
+Examples: `plugins({})`, `plugins({"kind":"ingestion","plugin_name":"git","options":{"max_count":5}})`, `plugins({"kind":"content","plugin_name":"brief","context":{"topic":"release"}})`.
+
+CLI discovery: `arcane ingest --list`, `arcane analyze --list`, `arcane draft --list`. Installed plugins appear as commands in group help; `arcane ingest <name> --help` describes constructor options passed via `--options '{"key":"value"}'`. Content commands also accept `--context '{"key":"value"}'`. Existing built-in commands and tools remain available.
 
 ---
 

@@ -74,7 +74,7 @@ def test_backup_archives_a_consistent_store_and_rotates(home: Path, tmp_path: Pa
         names = tar.getnames()
         tar.extractall(restored, filter="data")
     assert "index.db" in names
-    assert any(n.startswith("vault/demo/") for n in names)
+    assert any(n.startswith("vault/@") and "/demo/" in n for n in names)
     assert not any(n.endswith(".lock") for n in names)
 
     conn = sqlite3.connect(restored / "index.db")
