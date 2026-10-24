@@ -1,4 +1,4 @@
-"""Three-layer secret redaction pipeline."""
+"""Secret redaction for explicit spans, known tokens and custom patterns."""
 
 from __future__ import annotations
 
@@ -23,48 +23,69 @@ _EXACT_PATTERNS: list[re.Pattern] = [
     re.compile(r"eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)?"),
 ]
 
-# Layer 3: Key=value patterns — key name is preserved, only value is redacted.
-# Uses a capturing group so "password = [REDACTED]" reads naturally.
-# Value terminates at whitespace, quotes, or common delimiters — never greedy.
-_VALUE_PATTERNS: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"(password\s*[:=]\s*)[\"']?[^\s\"'<>;,]+", re.IGNORECASE), r"\1[REDACTED]"),
-    (re.compile(r"(secret\s*[:=]\s*)[\"']?[^\s\"'<>;,]+", re.IGNORECASE), r"\1[REDACTED]"),
-    (re.compile(r"(api[_-]?key\s*[:=]\s*)[\"']?[^\s\"'<>;,]+", re.IGNORECASE), r"\1[REDACTED]"),
-    (
-        re.compile(
-            r"((?:access[_-]?token|auth[_-]?token|client[_-]?secret)\s*[:=]\s*)[\"']?[^\s\"'<>;,]+",
-            re.IGNORECASE,
-        ),
-        r"\1[REDACTED]",
-    ),
-]
+# Layer 3: Credential assignments, including quoted JSON/YAML keys and values.
+# Quoted values may contain spaces, delimiters and escaped quotes. An unclosed
+# quoted value is redacted through the end of the input rather than leaked.
+_VALUE_PATTERN = re.compile(
+    r"""(["']?(?:password|secret|api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret)"""
+    r"""["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"?|'(?:\\.|[^'\\])*'?|[^\s"'<>;,}]+)""",
+    re.IGNORECASE,
+)
 
-_REDACTED_TAG_PATTERN: re.Pattern = re.compile(r"<redacted>.*?</redacted>", re.DOTALL)
+# Also recognise malformed markers (attributes, whitespace, missing final >).
+# A nesting counter is needed: a non-greedy regex leaks the outer block's tail.
+_REDACTED_TAG_PATTERN = re.compile(r"<\s*(/?)\s*redacted\b[^<>]*(?:>|(?=<)|$)", re.IGNORECASE)
+
+
+def _redact_marked_spans(text: str) -> str:
+    """Hide nested marked spans, failing closed for unmatched markers.
+
+    An unclosed opening marker hides the rest of the input. An orphan closing
+    marker hides everything before it because the opening boundary is unknown.
+    """
+    parts: list[str] = []
+    depth = 0
+    cursor = 0
+    for marker in _REDACTED_TAG_PATTERN.finditer(text):
+        if not marker.group(0).endswith(">"):
+            # Do not let a later tag supply a malformed marker's missing >.
+            # Its boundary is unknown, so discard the rest of the input.
+            if depth == 0:
+                if marker.group(1):
+                    return "[REDACTED]"
+                parts.extend((text[cursor : marker.start()], "[REDACTED]"))
+            return "".join(parts)
+        if not marker.group(1):
+            if depth == 0:
+                parts.extend((text[cursor : marker.start()], "[REDACTED]"))
+            depth += 1
+        elif depth:
+            depth -= 1
+        else:
+            parts = ["[REDACTED]"]
+        cursor = marker.end()
+    if depth == 0:
+        parts.append(text[cursor:])
+    return "".join(parts)
 
 
 def redact(text: str, extra_patterns: list[str] | None = None) -> str:
-    """Redact sensitive information using three-layer approach.
+    """Redact sensitive information using four layers.
 
     Layer 1 — explicit ``<redacted>…</redacted>`` tags.
     Layer 2 — well-known token patterns (Stripe, GitHub, AWS, Slack, JWT, …).
     Layer 3 — key=value patterns (password, secret, api_key); key is kept.
     Layer 4 — custom patterns from ``.memoryignore`` (user-defined regexes).
     """
-    # Layer 1: strip explicit <redacted> tags
-    prev = None
-    while prev != text:
-        prev = text
-        text = _REDACTED_TAG_PATTERN.sub("[REDACTED]", text)
-    # Remove any unclosed/unmatched tags left over
-    text = text.replace("<redacted>", "").replace("</redacted>", "")
+    # Layer 1: explicit markers, including nested and incomplete spans.
+    text = _redact_marked_spans(text)
 
     # Layer 2: exact token patterns
     for pattern in _EXACT_PATTERNS:
         text = pattern.sub("[REDACTED]", text)
 
     # Layer 3: key=value patterns (preserve key, redact value only)
-    for pattern, replacement in _VALUE_PATTERNS:
-        text = pattern.sub(replacement, text)
+    text = _VALUE_PATTERN.sub(r"\1[REDACTED]", text)
 
     # Layer 4: custom user patterns (compiled on-the-fly; skip malformed ones)
     for raw in extra_patterns or []:

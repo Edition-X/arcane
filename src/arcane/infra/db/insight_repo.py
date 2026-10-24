@@ -22,8 +22,8 @@ class InsightRepository:
         self.db.execute(
             """
             INSERT INTO insights (
-                id, insight_type, title, body, severity, project, metadata, created_at, acknowledged
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, insight_type, title, body, severity, project, org, metadata, created_at, acknowledged
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 insight["id"],
@@ -32,6 +32,7 @@ class InsightRepository:
                 insight["body"],
                 insight.get("severity", "info"),
                 insight["project"],
+                insight.get("org", ""),
                 json.dumps(insight.get("metadata", {})),
                 insight["created_at"],
                 0,
@@ -39,9 +40,16 @@ class InsightRepository:
         )
         self.db.commit()
 
-    def acknowledge(self, insight_id: str) -> bool:
+    def acknowledge(self, insight_id: str, *, org: str | None = None, project: str | None = None) -> bool:
         full_id = resolve_unique_id(self.db, "insights", insight_id)
         if full_id is None:
+            return False
+        row = self.db.fetchone("SELECT * FROM insights WHERE id = ?", (full_id,))
+        if (
+            row is None
+            or (org is not None and row["org"] != org)
+            or (project is not None and row["project"] != project)
+        ):
             return False
         self.db.execute("UPDATE insights SET acknowledged = 1 WHERE id = ?", (full_id,))
         self.db.commit()
@@ -52,10 +60,14 @@ class InsightRepository:
         project: str | None = None,
         unacknowledged_only: bool = False,
         limit: int = 20,
+        org: str | None = None,
     ) -> list[dict[str, Any]]:
         where_clauses: list[str] = []
         params: list[Any] = []
 
+        if org is not None:
+            where_clauses.append("org = ?")
+            params.append(org)
         if project:
             where_clauses.append("project = ?")
             params.append(project)
@@ -73,9 +85,13 @@ class InsightRepository:
             params,
         )
 
-    def count(self, project: str | None = None) -> int:
-        if project:
-            row = self.db.fetchone("SELECT COUNT(*) as cnt FROM insights WHERE project = ?", (project,))
-        else:
-            row = self.db.fetchone("SELECT COUNT(*) as cnt FROM insights")
+    def count(self, project: str | None = None, org: str | None = None) -> int:
+        clauses: list[str] = []
+        params: list[Any] = []
+        for column, value in (("project", project), ("org", org)):
+            if value is not None:
+                clauses.append(f"{column} = ?")
+                params.append(value)
+        where = "WHERE " + " AND ".join(clauses) if clauses else ""
+        row = self.db.fetchone(f"SELECT COUNT(*) AS cnt FROM insights {where}", params)
         return row["cnt"] if row else 0

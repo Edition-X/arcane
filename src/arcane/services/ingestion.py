@@ -8,7 +8,7 @@ from typing import Any
 from arcane.domain.enums import RelationType
 from arcane.domain.models import Relationship
 from arcane.domain.scope import resolve_write_scope
-from arcane.infra.db.ids import IdentifierResolutionError, resolve_entity_id
+from arcane.infra.db.ids import IdentifierResolutionError
 from arcane.infra.redaction import redact_values
 from arcane.plugins.protocols import IngestionPlugin
 from arcane.services.container import ServiceContainer
@@ -33,12 +33,13 @@ class IngestionService:
         Raises ``IdentifierResolutionError`` when *journey_id* does not
         identify exactly one journey, before any artifact is written.
         """
+        scope = resolve_write_scope(project, self.c.config, repo_path=repo_path)
         if journey_id:
-            resolved_journey = resolve_entity_id(self.c.db, "journey", journey_id)
+            resolved_journey = self.c.journey_repo.get(journey_id, org=scope.org, project=scope.project)
             if resolved_journey is None:
                 raise IdentifierResolutionError(f"Journey not found: {journey_id}")
-            journey_id = resolved_journey
-        project = resolve_write_scope(project, self.c.config, repo_path=repo_path).project
+            journey_id = resolved_journey["id"]
+        project = scope.project
         artifacts = plugin.ingest(project=project, since=since)
 
         ingested = 0
@@ -47,6 +48,7 @@ class IngestionService:
         for art in artifacts:
             art.update(redact_values(art, self.c.ignore_patterns))
             art["project"] = project
+            art["org"] = scope.org
             with self.c.db.transaction():
                 # Resolve and link inside one transaction so repeated ingestion
                 # cannot create duplicate artifacts or journey relationships.
@@ -54,6 +56,7 @@ class IngestionService:
                     art["artifact_type"],
                     art["external_id"],
                     art["project"],
+                    org=scope.org,
                 )
                 artifact_id = existing["id"] if existing else art["id"]
                 if existing:

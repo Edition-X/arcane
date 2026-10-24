@@ -4,30 +4,35 @@ from __future__ import annotations
 
 import click
 
+from arcane.cli._plugins import PluginGroup, list_plugins
 from arcane.cli._utils import create_container
+from arcane.plugins.registry import create_plugin
 
 
-@click.group()
-def analyze() -> None:
+@click.group(cls=PluginGroup, kind="intelligence", invoke_without_command=True)
+@click.option("--list", "show_plugins", is_flag=True, help="List installed entry-point plugins.")
+@click.pass_context
+def analyze(ctx: click.Context, show_plugins: bool) -> None:
     """Run intelligence analysis plugins."""
+    if show_plugins:
+        list_plugins("intelligence")
+    elif ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
 
 
 @analyze.command("health")
 @click.option("--project", default=None, help="Project to attach the insights to")
 def analyze_health(project: str | None) -> None:
     """Audit store health — fragmentation, orphans, duplicates, journey hygiene."""
-    from arcane.plugins.builtin.health_audit import HealthAuditor
 
     with create_container() as container:
-        plugin = HealthAuditor(
-            memory_repo=container.memory_repo,
-            journey_repo=container.journey_repo,
-            aliases=container.config.projects.aliases,
-        )
+        plugin = create_plugin("intelligence", "health", container)
         from arcane.services.intelligence import IntelligenceService
 
         result = IntelligenceService(container).run_plugin(plugin, project=project)
-        insights = container.insight_repo.list_all(project=result["project"], limit=result["insights_created"])
+        insights = container.insight_repo.list_all(
+            project=result["project"], org=result["org"], limit=result["insights_created"]
+        )
 
     for insight in insights:
         marker = "!" if insight["severity"] != "info" else "-"
@@ -40,13 +45,14 @@ def analyze_health(project: str | None) -> None:
 @click.option("--project", default=None, help="Project to attach the insights to")
 def analyze_usage(days: int, project: str | None) -> None:
     """Report what agents recall — lookups, empty searches, unused memories."""
-    from arcane.plugins.builtin.usage import UsageAnalyzer
     from arcane.services.intelligence import IntelligenceService
 
     with create_container() as container:
-        plugin = UsageAnalyzer(retrieval_repo=container.retrieval_repo, days=days)
+        plugin = create_plugin("intelligence", "usage", container, {"days": days})
         result = IntelligenceService(container).run_plugin(plugin, project=project)
-        insights = container.insight_repo.list_all(project=result["project"], limit=result["insights_created"])
+        insights = container.insight_repo.list_all(
+            project=result["project"], org=result["org"], limit=result["insights_created"]
+        )
 
     for insight in reversed(insights):
         marker = "!" if insight["severity"] != "info" else "-"
@@ -58,15 +64,10 @@ def analyze_usage(days: int, project: str | None) -> None:
 @click.option("--project", default=None, help="Project name")
 def analyze_velocity(project: str | None) -> None:
     """Generate engineering velocity summary."""
-    from arcane.plugins.builtin.velocity import VelocityTracker
     from arcane.services.intelligence import IntelligenceService
 
     with create_container() as container:
-        plugin = VelocityTracker(
-            artifact_repo=container.artifact_repo,
-            memory_repo=container.memory_repo,
-            journey_repo=container.journey_repo,
-        )
+        plugin = create_plugin("intelligence", "velocity", container)
         result = IntelligenceService(container).run_plugin(plugin, project=project)
 
     click.echo(f"Velocity analysis: {result['insights_created']} insight(s) created")

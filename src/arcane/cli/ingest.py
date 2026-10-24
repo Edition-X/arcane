@@ -7,9 +7,11 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
+from arcane.cli._plugins import PluginGroup, list_plugins
 from arcane.cli._utils import create_container
 from arcane.infra.db.ids import IdentifierResolutionError
 from arcane.plugins.protocols import IngestionError
+from arcane.plugins.registry import create_plugin
 
 if TYPE_CHECKING:
     from arcane.plugins.protocols import IngestionPlugin
@@ -29,9 +31,15 @@ def _run(
         raise click.ClickException(str(exc)) from exc
 
 
-@click.group()
-def ingest() -> None:
+@click.group(cls=PluginGroup, kind="ingestion", invoke_without_command=True)
+@click.option("--list", "show_plugins", is_flag=True, help="List installed entry-point plugins.")
+@click.pass_context
+def ingest(ctx: click.Context, show_plugins: bool) -> None:
     """Ingest data from external sources."""
+    if show_plugins:
+        list_plugins("ingestion")
+    elif ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
 
 
 @ingest.command("git")
@@ -41,12 +49,12 @@ def ingest() -> None:
 @click.option("--journey-id", default=None, help="Link artifacts to a journey")
 def ingest_git(project: str | None, repo_path: str | None, max_count: int, journey_id: str | None) -> None:
     """Ingest commits from a git repository."""
-    from arcane.plugins.builtin.git_ingest import GitIngestionPlugin
     from arcane.services.ingestion import IngestionService
 
-    plugin = GitIngestionPlugin(repo_path=repo_path or os.getcwd(), max_count=max_count)
-
     with create_container() as container:
+        plugin = create_plugin(
+            "ingestion", "git", container, {"repo_path": repo_path or os.getcwd(), "max_count": max_count}
+        )
         result = _run(IngestionService(container), plugin, project, journey_id, repo_path)
 
     click.echo(f"Git ingestion: {result['ingested']} ingested, {result['skipped']} skipped")
@@ -59,12 +67,10 @@ def ingest_git(project: str | None, repo_path: str | None, max_count: int, journ
 @click.option("--journey-id", default=None, help="Link artifacts to a journey")
 def ingest_gha(owner: str, repo: str, project: str | None, journey_id: str | None) -> None:
     """Ingest CI runs from GitHub Actions."""
-    from arcane.plugins.builtin.gha_ingest import GHAIngestionPlugin
     from arcane.services.ingestion import IngestionService
 
-    plugin = GHAIngestionPlugin(owner=owner, repo=repo)
-
     with create_container() as container:
+        plugin = create_plugin("ingestion", "github_actions", container, {"owner": owner, "repo": repo})
         result = _run(IngestionService(container), plugin, project, journey_id)
 
     click.echo(f"GHA ingestion: {result['ingested']} ingested, {result['skipped']} skipped")
@@ -76,12 +82,10 @@ def ingest_gha(owner: str, repo: str, project: str | None, journey_id: str | Non
 @click.option("--journey-id", default=None, help="Link artifacts to a journey")
 def ingest_linear(team: str, project: str | None, journey_id: str | None) -> None:
     """Ingest tickets from Linear."""
-    from arcane.plugins.builtin.linear_ingest import LinearIngestionPlugin
     from arcane.services.ingestion import IngestionService
 
-    plugin = LinearIngestionPlugin(team_id=team)
-
     with create_container() as container:
+        plugin = create_plugin("ingestion", "linear", container, {"team_id": team})
         result = _run(IngestionService(container), plugin, project, journey_id)
 
     click.echo(f"Linear ingestion: {result['ingested']} ingested, {result['skipped']} skipped")

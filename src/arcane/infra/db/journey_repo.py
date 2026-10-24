@@ -27,14 +27,15 @@ class JourneyRepository:
         cursor = self.db.execute(
             """
             INSERT INTO journeys (
-                id, title, project, status, started_at, completed_at,
+                id, title, project, org, status, started_at, completed_at,
                 summary, linear_issue_id, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 journey["id"],
                 journey["title"],
                 journey["project"],
+                journey.get("org", ""),
                 journey.get("status", "active"),
                 journey["started_at"],
                 journey.get("completed_at"),
@@ -47,11 +48,18 @@ class JourneyRepository:
         self.db.commit()
         return cursor.lastrowid  # type: ignore[no-any-return]
 
-    def get(self, journey_id: str) -> dict[str, Any] | None:
+    def get(self, journey_id: str, *, org: str | None = None, project: str | None = None) -> dict[str, Any] | None:
         full_id = resolve_unique_id(self.db, "journeys", journey_id)
         if full_id is None:
             return None
-        return self.db.fetchone("SELECT * FROM journeys WHERE id = ?", (full_id,))
+        row = self.db.fetchone("SELECT * FROM journeys WHERE id = ?", (full_id,))
+        if (
+            row is None
+            or (org is not None and row["org"] != org)
+            or (project is not None and row["project"] != project)
+        ):
+            return None
+        return row
 
     def update(
         self,
@@ -109,10 +117,14 @@ class JourneyRepository:
         project: str | None = None,
         status: str | None = None,
         limit: int = 20,
+        org: str | None = None,
     ) -> list[dict[str, Any]]:
         where_clauses: list[str] = []
         params: list[Any] = []
 
+        if org is not None:
+            where_clauses.append("org = ?")
+            params.append(org)
         if project:
             where_clauses.append("project = ?")
             params.append(project)
@@ -131,33 +143,48 @@ class JourneyRepository:
             params,
         )
 
-    def list_completed_between(self, since: str, until: str) -> list[dict[str, Any]]:
+    def list_completed_between(
+        self, since: str, until: str, *, org: str | None = None, project: str | None = None
+    ) -> list[dict[str, Any]]:
         """Journeys completed in ``[since, until)`` (ISO dates), oldest first."""
-        return self.db.fetchall(
-            "SELECT * FROM journeys WHERE status = 'completed' AND completed_at >= ? AND completed_at < ? "
-            "ORDER BY completed_at",
-            (since, until),
-        )
+        clauses = ["status = 'completed'", "completed_at >= ?", "completed_at < ?"]
+        params: list[Any] = [since, until]
+        for column, value in (("org", org), ("project", project)):
+            if value is not None:
+                clauses.append(f"{column} = ?")
+                params.append(value)
+        return self.db.fetchall(f"SELECT * FROM journeys WHERE {' AND '.join(clauses)} ORDER BY completed_at", params)
 
-    def list_for_projects(self, projects: list[str]) -> list[dict[str, Any]]:
+    def list_for_projects(self, projects: list[str] | None = None, *, org: str | None = None) -> list[dict[str, Any]]:
         """Every journey in *projects*, each with its event history."""
-        if not projects:
+        if projects == []:
             return []
-        journeys = self.db.fetchall(
-            f"SELECT * FROM journeys WHERE project IN ({','.join('?' * len(projects))}) ORDER BY created_at",
-            projects,
-        )
+        clauses: list[str] = []
+        params: list[Any] = []
+        if projects is not None:
+            clauses.append(f"project IN ({','.join('?' * len(projects))})")
+            params.extend(projects)
+        if org is not None:
+            clauses.append("org = ?")
+            params.append(org)
+        where = "WHERE " + " AND ".join(clauses) if clauses else ""
+        journeys = self.db.fetchall(f"SELECT * FROM journeys {where} ORDER BY created_at", params)
         for journey in journeys:
             journey["events"] = self.list_events(journey["id"])
         return journeys
 
-    def list_stale_active(self, days: int = IDLE_JOURNEY_DAYS, project: str | None = None) -> list[dict[str, Any]]:
+    def list_stale_active(
+        self, days: int = IDLE_JOURNEY_DAYS, project: str | None = None, org: str | None = None
+    ) -> list[dict[str, Any]]:
         """Active journeys with no update for more than *days* days (falls back to started_at)."""
         where_clauses = [
             "status = 'active'",
             "(unixepoch('now') - unixepoch(COALESCE(updated_at, started_at))) > ? * 86400",
         ]
         params: list[Any] = [days]
+        if org is not None:
+            where_clauses.append("org = ?")
+            params.append(org)
         if project:
             where_clauses.append("project = ?")
             params.append(project)
@@ -176,11 +203,15 @@ class JourneyRepository:
         self.db.commit()
         return True
 
-    def count(self, project: str | None = None) -> int:
-        if project:
-            row = self.db.fetchone("SELECT COUNT(*) as cnt FROM journeys WHERE project = ?", (project,))
-        else:
-            row = self.db.fetchone("SELECT COUNT(*) as cnt FROM journeys")
+    def count(self, project: str | None = None, org: str | None = None) -> int:
+        clauses: list[str] = []
+        params: list[Any] = []
+        for column, value in (("project", project), ("org", org)):
+            if value is not None:
+                clauses.append(f"{column} = ?")
+                params.append(value)
+        where = "WHERE " + " AND ".join(clauses) if clauses else ""
+        row = self.db.fetchone(f"SELECT COUNT(*) AS cnt FROM journeys {where}", params)
         return row["cnt"] if row else 0
 
     def _insert_event(self, journey_id: str, event_type: str, summary: str | None) -> None:

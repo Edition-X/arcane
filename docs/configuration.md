@@ -10,7 +10,7 @@ embedding:
   model: nomic-embed-text       # Model name (provider-specific)
   base_url: http://localhost:11434  # Ollama API base URL (ignored for openai)
   autostart: true               # Start a local Ollama when it is not running (ollama only)
-  api_key: null                 # OpenAI API key — prefer OPENAI_API_KEY env var
+  api_key: null                 # Required when provider is openai
 
 context:
   semantic: auto                # When to use vector search: "auto", "always", or "never"
@@ -51,18 +51,16 @@ embedding:
 
 ### OpenAI
 
-Uses OpenAI's embedding API. Set your API key via environment variable or in the config file:
-
-```bash
-export OPENAI_API_KEY=sk-...
-```
+Uses OpenAI's embedding API. Set `embedding.api_key` explicitly in the config file:
 
 ```yaml
 embedding:
   provider: openai
   model: text-embedding-3-small
-  api_key: null   # reads OPENAI_API_KEY if null
+  api_key: your-api-key
 ```
+
+A missing or blank key reports a configuration error. Environment variables do not supply this key.
 
 Recommended models: `text-embedding-3-small` (fast, cheap) or `text-embedding-3-large` (higher quality).
 
@@ -121,7 +119,6 @@ Environment variables take precedence over the config file.
 | Variable | Purpose | Default |
 |---|---|---|
 | `ARCANE_HOME` | Override data directory | `~/.arcane` |
-| `OPENAI_API_KEY` | OpenAI API key for embeddings | — |
 | `ARCANE_LOG_LEVEL` | Log verbosity: `DEBUG`, `INFO`, `WARNING` | `INFO` |
 | `ARCANE_OLLAMA_AUTOSTART` | Set to `0` to stop Arcane starting a local Ollama (overrides `embedding.autostart`) | on |
 | `GITHUB_TOKEN` | GitHub API auth for GHA ingestion | — |

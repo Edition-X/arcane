@@ -92,27 +92,30 @@ class RetrievalRepository:
         row = self.db.fetchone("SELECT count(*) AS n FROM retrievals")
         return int(row["n"]) if row else 0
 
-    def first_recorded(self) -> str | None:
-        row = self.db.fetchone("SELECT min(created_at) AS first FROM retrievals")
+    def first_recorded(self, *, org: str | None = None) -> str | None:
+        row = self.db.fetchone(
+            "SELECT min(created_at) AS first FROM retrievals WHERE (? IS NULL OR org = ?)", (org, org)
+        )
         return row["first"] if row else None
 
     # ── usage aggregates ────────────────────────────────────────────────
 
-    def by_client(self, days: int) -> list[dict[str, Any]]:
+    def by_client(self, days: int, *, org: str | None = None) -> list[dict[str, Any]]:
         return self.db.fetchall(
             """
             SELECT coalesce(client, 'unknown') AS client, count(*) AS lookups,
                    count(DISTINCT session_id) AS sessions
-            FROM retrievals WHERE created_at >= ?
+            FROM retrievals WHERE created_at >= ? AND (? IS NULL OR org = ?)
             GROUP BY 1 ORDER BY lookups DESC
             """,
-            (_since(days),),
+            (_since(days), org, org),
         )
 
-    def by_tool(self, days: int) -> list[dict[str, Any]]:
+    def by_tool(self, days: int, *, org: str | None = None) -> list[dict[str, Any]]:
         return self.db.fetchall(
-            "SELECT tool, count(*) AS lookups FROM retrievals WHERE created_at >= ? GROUP BY 1 ORDER BY 2 DESC",
-            (_since(days),),
+            "SELECT tool, count(*) AS lookups FROM retrievals WHERE created_at >= ? "
+            "AND (? IS NULL OR org = ?) GROUP BY 1 ORDER BY 2 DESC",
+            (_since(days), org, org),
         )
 
     # A search is a possible gap when it returned nothing, or when no memory
@@ -123,33 +126,33 @@ class RetrievalRepository:
         "AND query IS NOT NULL AND query != '' AND is_error = 0"
     )
 
-    def searches(self, days: int) -> dict[str, int]:
+    def searches(self, days: int, *, org: str | None = None) -> dict[str, int]:
         """Searches with text, how many returned nothing, and how many were possible gaps."""
         row = self.db.fetchone(
             f"""
             SELECT count(*) AS total, coalesce(sum(result_count = 0), 0) AS empty,
                    coalesce(sum({self._GAP}), 0) AS gaps
-            FROM retrievals WHERE {self._SEARCHED}
+            FROM retrievals WHERE {self._SEARCHED} AND (? IS NULL OR org = ?)
             """,
-            (_since(days),),
+            (_since(days), org, org),
         )
         if not row:
             return {"total": 0, "empty": 0, "gaps": 0}
         return {"total": int(row["total"]), "empty": int(row["empty"]), "gaps": int(row["gaps"])}
 
-    def gap_queries(self, days: int, limit: int = 10) -> list[dict[str, Any]]:
+    def gap_queries(self, days: int, limit: int = 10, *, org: str | None = None) -> list[dict[str, Any]]:
         """Possible-gap search text, most frequent first."""
         return self.db.fetchall(
             f"""
             SELECT query, count(*) AS times, max(created_at) AS last_at, max(project) AS project,
                    max(result_count) AS results
-            FROM retrievals WHERE {self._SEARCHED} AND {self._GAP}
+            FROM retrievals WHERE {self._SEARCHED} AND (? IS NULL OR org = ?) AND {self._GAP}
             GROUP BY lower(query) ORDER BY times DESC, last_at DESC LIMIT ?
             """,
-            (_since(days), limit),
+            (_since(days), org, org, limit),
         )
 
-    def follow_through(self, days: int) -> dict[str, int]:
+    def follow_through(self, days: int, *, org: str | None = None) -> dict[str, int]:
         """Recall lookups with results, and how many led to opening or updating one of them."""
         row = self.db.fetchone(
             f"""
@@ -159,60 +162,63 @@ class RetrievalRepository:
                 JOIN retrieval_hits h2 ON h2.entity_type = 'memory' AND h2.entity_id = h.entity_id
                 JOIN retrievals r2 ON r2.id = h2.retrieval_id
                 WHERE h.retrieval_id = r.id AND h.entity_type = 'memory'
-                  AND r2.session_id = r.session_id AND r2.created_at >= r.created_at
+                  AND r2.org IS r.org AND r2.session_id = r.session_id AND r2.created_at >= r.created_at
                   AND r2.tool IN ({",".join("?" * len(FOLLOW_UP_TOOLS))})
             )), 0) AS followed
             FROM retrievals r
-            WHERE r.created_at >= ? AND r.result_count > 0
+            WHERE r.created_at >= ? AND (? IS NULL OR r.org = ?) AND r.result_count > 0
               AND r.tool IN ({",".join("?" * len(RECALL_TOOLS))})
             """,
-            (*FOLLOW_UP_TOOLS, _since(days), *RECALL_TOOLS),
+            (*FOLLOW_UP_TOOLS, _since(days), org, org, *RECALL_TOOLS),
         )
         return {"total": int(row["total"]), "followed": int(row["followed"])} if row else {"total": 0, "followed": 0}
 
-    def replaced_hits(self, days: int) -> dict[str, int]:
+    def replaced_hits(self, days: int, *, org: str | None = None) -> dict[str, int]:
         """Lookups that returned a memory a newer one has replaced, and how many such hits."""
         row = self.db.fetchone(
             """
             SELECT count(DISTINCT h.retrieval_id) AS lookups, count(*) AS hits
             FROM retrieval_hits h JOIN retrievals r ON r.id = h.retrieval_id
-            WHERE h.entity_type = 'memory' AND r.created_at >= ? AND h.entity_id IN (
+            WHERE h.entity_type = 'memory' AND r.created_at >= ? AND (? IS NULL OR r.org = ?) AND h.entity_id IN (
                 SELECT target_id FROM relationships WHERE relation = 'supersedes' AND target_type = 'memory'
             )
             """,
-            (_since(days),),
+            (_since(days), org, org),
         )
         return {"lookups": int(row["lookups"]), "hits": int(row["hits"])} if row else {"lookups": 0, "hits": 0}
 
-    def top_memories(self, days: int, limit: int = 10) -> list[dict[str, Any]]:
+    def top_memories(self, days: int, limit: int = 10, *, org: str | None = None) -> list[dict[str, Any]]:
         return self.db.fetchall(
             """
             SELECT m.id, m.title, m.project, count(*) AS hits
             FROM retrieval_hits h
             JOIN retrievals r ON r.id = h.retrieval_id
             JOIN memories m ON m.id = h.entity_id
-            WHERE h.entity_type = 'memory' AND r.created_at >= ?
+            WHERE h.entity_type = 'memory' AND r.created_at >= ? AND (? IS NULL OR (r.org = ? AND m.org = ?))
             GROUP BY m.id ORDER BY hits DESC, m.created_at DESC LIMIT ?
             """,
-            (_since(days), limit),
+            (_since(days), org, org, org, limit),
         )
 
-    def never_recalled(self, older_than_days: int) -> dict[str, Any]:
+    def never_recalled(self, older_than_days: int, *, org: str | None = None) -> dict[str, Any]:
         """Memories older than *older_than_days* that no recorded lookup has returned."""
         cutoff = _since(older_than_days)
         where = """
             FROM memories m
-            WHERE m.created_at < ? AND NOT EXISTS (
-                SELECT 1 FROM retrieval_hits h WHERE h.entity_type = 'memory' AND h.entity_id = m.id
+            WHERE m.created_at < ? AND (? IS NULL OR m.org = ?) AND NOT EXISTS (
+                SELECT 1 FROM retrieval_hits h JOIN retrievals r ON r.id = h.retrieval_id
+                WHERE h.entity_type = 'memory' AND h.entity_id = m.id AND (? IS NULL OR r.org = ?)
             )
         """
-        total = self.db.fetchone(f"SELECT count(*) AS n {where}", (cutoff,))
+        total = self.db.fetchone(f"SELECT count(*) AS n {where}", (cutoff, org, org, org, org))
         by_project = self.db.fetchall(
             f"SELECT coalesce(nullif(m.project, ''), '(none)') AS project, count(*) AS n {where} "
             "GROUP BY 1 ORDER BY n DESC LIMIT 10",
-            (cutoff,),
+            (cutoff, org, org, org, org),
         )
-        eligible = self.db.fetchone("SELECT count(*) AS n FROM memories WHERE created_at < ?", (cutoff,))
+        eligible = self.db.fetchone(
+            "SELECT count(*) AS n FROM memories WHERE created_at < ? AND (? IS NULL OR org = ?)", (cutoff, org, org)
+        )
         return {
             "count": int(total["n"]) if total else 0,
             "eligible": int(eligible["n"]) if eligible else 0,

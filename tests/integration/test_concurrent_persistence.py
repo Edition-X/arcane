@@ -112,7 +112,7 @@ def test_concurrent_processes_preserve_every_memory_and_markdown_section(tmp_pat
     with create_container(home) as container:
         assert container.memory_repo.count() == len(workers)
 
-    session_files = list(Path(home, "vault", "shared-project").glob("*-session.md"))
+    session_files = list(Path(home, "vault", "@test-org", "shared-project").glob("*-session.md"))
     assert len(session_files) == 1
     content = session_files[0].read_text()
     for index in range(len(workers)):

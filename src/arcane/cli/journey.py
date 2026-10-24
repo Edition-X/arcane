@@ -5,6 +5,7 @@ from __future__ import annotations
 import click
 
 from arcane.cli._utils import create_container
+from arcane.domain.scope import resolve_write_scope
 
 
 @click.group()
@@ -33,7 +34,9 @@ def journey_update(journey_id: str, summary: str | None) -> None:
     from arcane.services.journey import JourneyService
 
     with create_container() as container:
-        updated = JourneyService(container).update(journey_id, summary=summary)
+        updated = JourneyService(container).update(
+            journey_id, summary=summary, org=resolve_write_scope(None, container.config).org
+        )
     click.echo("Updated." if updated else f"Journey {journey_id} not found.")
 
 
@@ -45,7 +48,9 @@ def journey_complete(journey_id: str, summary: str | None) -> None:
     from arcane.services.journey import JourneyService
 
     with create_container() as container:
-        completed = JourneyService(container).complete(journey_id, summary=summary)
+        completed = JourneyService(container).complete(
+            journey_id, summary=summary, org=resolve_write_scope(None, container.config).org
+        )
     click.echo("Completed." if completed else f"Journey {journey_id} not found.")
 
 
@@ -59,12 +64,15 @@ def journey_list(project: bool, status: str | None, limit: int) -> None:
 
     with create_container() as container:
         if project:
-            from arcane.domain.scope import resolve_write_scope
-
             project_name = resolve_write_scope(None, container.config).project
         else:
             project_name = None
-        journeys = JourneyService(container).list(project=project_name, status=status, limit=limit)
+        journeys = JourneyService(container).list(
+            project=project_name,
+            status=status,
+            limit=limit,
+            org=resolve_write_scope(None, container.config).org if project else None,
+        )
 
     if not journeys:
         click.echo("No journeys found.")
@@ -82,7 +90,7 @@ def journey_show(journey_id: str) -> None:
     from arcane.services.journey import JourneyService
 
     with create_container() as container:
-        journey_data = JourneyService(container).show(journey_id)
+        journey_data = JourneyService(container).show(journey_id, org=resolve_write_scope(None, container.config).org)
 
     if not journey_data:
         click.echo(f"Journey {journey_id} not found.")

@@ -14,7 +14,7 @@ import threading
 import time
 from collections.abc import Mapping
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from arcane.infra.config import ArcaneConfig
 
@@ -39,6 +39,19 @@ class Scope(BaseModel):
 
     org: str = DEFAULT_ORG
     project: str = ""
+
+    @field_validator("org")
+    @classmethod
+    def safe_org(cls, value: str) -> str:
+        return validate_org(value)
+
+
+def validate_org(value: str) -> str:
+    """Accept only canonical org slugs, so an org can safely name a directory."""
+    value = value.strip().lower()
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", value):
+        raise ValueError("Org must be a nonempty slug containing letters, digits and single hyphens")
+    return value
 
 
 def slugify(name: str) -> str:

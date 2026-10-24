@@ -69,7 +69,7 @@ class ProjectsConfig(BaseModel):
 class DedupConfig(BaseModel):
     """Near-duplicate detection on save.
 
-    ``threshold`` is the minimum vector-similarity score (``1 - distance``)
+    ``threshold`` is the minimum cosine similarity (computed from the vectors)
     at which a new memory triggers a ``near_duplicate`` warning against an
     existing one. Raise it towards 1.0 to warn less. Warnings never block
     a save.

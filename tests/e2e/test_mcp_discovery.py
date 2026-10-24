@@ -35,6 +35,7 @@ FULL_ONLY_TOOLS = {
     "ingest_gha",
     "ingest_linear",
     "analyze",
+    "plugins",
     "draft_blog",
     "draft_adr",
 }

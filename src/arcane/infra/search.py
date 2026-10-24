@@ -31,7 +31,12 @@ def merge_results(
     vec_weight: float = 0.7,
     limit: int = 5,
 ) -> list[dict[str, Any]]:
-    """Merge FTS5 and vector search results with weighted scoring."""
+    """Normalise positive per-backend scores by their maximum, then weight.
+
+    Vector scores are reciprocal L2 distance, ``1 / (1 + distance)``, rather
+    than cosine similarity. Maximum normalisation preserves their ordering
+    and relative strengths before combining them with positive FTS ranks.
+    """
     if fts_results:
         max_fts = max(r["score"] for r in fts_results) or 1.0
         for r in fts_results:

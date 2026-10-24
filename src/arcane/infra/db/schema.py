@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from arcane.infra.db.connection import Database
 from arcane.infra.db.ids import ENTITY_TABLES, IdentifierResolutionError, resolve_unique_id
 
@@ -237,6 +239,8 @@ def create_schema(db: Database) -> None:
         )
     """)
 
+    _migrate_entity_orgs(db)
+
     # ── retrievals ──────────────────────────────────────────────────────
     # One row per MCP lookup, and one hit per entity it returned, so usage
     # analysis can tell recalled memories from ones nobody ever reads.
@@ -289,6 +293,8 @@ def create_schema(db: Database) -> None:
     db.execute("CREATE INDEX IF NOT EXISTS idx_journey_events_journey ON journey_events(journey_id, created_at)")
 
     db.execute("CREATE INDEX IF NOT EXISTS idx_insights_project ON insights(project)")
+    for table in ("journeys", "artifacts", "insights"):
+        db.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_org_project ON {table}(org, project)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_insights_ack ON insights(acknowledged, project)")
 
     db.execute("CREATE INDEX IF NOT EXISTS idx_retrievals_created ON retrievals(created_at)")
@@ -376,6 +382,79 @@ def _add_column_if_missing(db: Database, table: str, column: str, definition: st
     columns = {row["name"] for row in rows}
     if column not in columns:
         db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def _migrate_entity_orgs(db: Database) -> None:
+    """Record ownership once, without guessing the owner of shared project names.
+
+    Empty org means unknown for legacy entities. Even a majority of memories
+    cannot establish ownership: every memory for the project must agree on one
+    nonempty org. Do not revisit unknown rows on subsequent startups, when the
+    evidence may have changed or been deleted.
+    """
+    key = "entity_orgs_migrated"
+    if _get_meta(db, key) is not None:
+        return
+    db.commit()
+    with db.transaction():
+        # Recheck after acquiring the write lock: another process may migrate.
+        if _get_meta(db, key) is not None:
+            return
+        for table in ("journeys", "artifacts", "insights"):
+            _add_column_if_missing(db, table, "org", "TEXT NOT NULL DEFAULT ''")
+            # Legacy health/usage bodies describe the whole vault, even when
+            # their attached project has a unique owner. They need review via
+            # `migrate entity-org`, rather than silently entering an org export.
+            safe_insight = (
+                " AND insight_type NOT IN ('health', 'usage') "
+                "AND substr(insight_type, 1, 7) != 'health_' AND substr(insight_type, 1, 6) != 'usage_'"
+                if table == "insights"
+                else ""
+            )
+            db.execute(f"""
+                UPDATE {table} SET org = (
+                    SELECT MIN(m.org) FROM memories m WHERE m.project = {table}.project
+                ) WHERE org = '' AND project <> '' AND project IN (
+                    SELECT project FROM memories GROUP BY project
+                    HAVING COUNT(DISTINCT org) = 1 AND MIN(org) <> ''
+                ){safe_insight}
+            """)
+
+        # SQLite cannot drop an inline UNIQUE constraint. Rebuild the ordinary
+        # table, preserving rowids (FTS references them), indexes and triggers.
+        # The external-content FTS table itself must keep its original name.
+        old_unique = any(
+            [c["name"] for c in db.fetchall("SELECT name FROM pragma_index_info(?)", (index["name"],))]
+            == ["artifact_type", "external_id", "project"]
+            for index in db.fetchall("PRAGMA index_list(artifacts)")
+            if index["unique"]
+        )
+        if old_unique:
+            sequence = db.fetchone("SELECT seq FROM sqlite_sequence WHERE name = 'artifacts'")
+            row = db.fetchone("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'artifacts'")
+            assert row is not None
+            ddl, count = re.subn(
+                r"UNIQUE\s*\(\s*artifact_type\s*,\s*external_id\s*,\s*project\s*\)",
+                "UNIQUE(artifact_type, external_id, project, org)",
+                row["sql"],
+                flags=re.IGNORECASE,
+            )
+            if count != 1:
+                raise RuntimeError("Cannot safely migrate artifacts ownership constraint")
+            ddl = re.sub(r"\bartifacts\b", "artifacts_org_migration", ddl, count=1)
+            objects = db.fetchall(
+                "SELECT sql FROM sqlite_master WHERE tbl_name = 'artifacts' "
+                "AND type IN ('index', 'trigger') AND sql IS NOT NULL"
+            )
+            db.execute(ddl)
+            db.execute("INSERT INTO artifacts_org_migration SELECT * FROM artifacts")
+            db.execute("DROP TABLE artifacts")
+            db.execute("ALTER TABLE artifacts_org_migration RENAME TO artifacts")
+            if sequence is not None:
+                db.execute("UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = 'artifacts'", (sequence["seq"],))
+            for obj in objects:
+                db.execute(obj["sql"])
+        db.execute("INSERT INTO meta (key, value) VALUES (?, '1')", (key,))
 
 
 def _get_meta(db: Database, key: str) -> str | None:

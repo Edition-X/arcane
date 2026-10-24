@@ -26,7 +26,7 @@ def handle_journey_update(
     summary: str | None = None,
 ) -> str:
     try:
-        updated = svc.update(journey_id, summary=summary)
+        updated = svc.update(journey_id, summary=summary, org=resolve_write_scope(None, svc.c.config).org)
     except IdentifierResolutionError as exc:
         return json.dumps({"error": str(exc)})
     if not updated:
@@ -40,7 +40,7 @@ def handle_journey_complete(
     summary: str | None = None,
 ) -> str:
     try:
-        completed = svc.complete(journey_id, summary=summary)
+        completed = svc.complete(journey_id, summary=summary, org=resolve_write_scope(None, svc.c.config).org)
     except IdentifierResolutionError as exc:
         return json.dumps({"error": str(exc)})
     if not completed:
@@ -54,7 +54,7 @@ def handle_journey_abandon(
     reason: str | None = None,
 ) -> str:
     try:
-        abandoned = svc.abandon(journey_id, reason=reason)
+        abandoned = svc.abandon(journey_id, reason=reason, org=resolve_write_scope(None, svc.c.config).org)
     except IdentifierResolutionError as exc:
         return json.dumps({"error": str(exc)})
     if not abandoned:
@@ -67,7 +67,7 @@ def handle_journey_delete(
     journey_id: str,
 ) -> str:
     try:
-        deleted = svc.delete(journey_id)
+        deleted = svc.delete(journey_id, org=resolve_write_scope(None, svc.c.config).org)
     except IdentifierResolutionError as exc:
         return json.dumps({"error": str(exc)})
     if not deleted:
@@ -81,7 +81,7 @@ def handle_journey_show(
 ) -> str:
     svc = JourneyService(container)
     try:
-        journey = svc.show(journey_id)
+        journey = svc.show(journey_id, org=resolve_write_scope(None, container.config).org)
     except IdentifierResolutionError as exc:
         return json.dumps({"error": str(exc)})
     if not journey:
@@ -125,9 +125,10 @@ def handle_journey_list(
     status: str | None = None,
     limit: int = 10,
 ) -> str:
-    project = resolve_write_scope(project, svc.c.config).project
-    journeys = svc.list(project=project, status=status, limit=limit)
-    idle = {j["id"] for j in svc.c.journey_repo.list_stale_active(project=project or None)}
+    scope = resolve_write_scope(project, svc.c.config)
+    project = scope.project
+    journeys = svc.list(project=project, status=status, limit=limit, org=scope.org)
+    idle = {j["id"] for j in svc.c.journey_repo.list_stale_active(project=project or None, org=scope.org)}
     return json.dumps(
         [
             {

@@ -94,7 +94,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ## MCP Tools
 
-Once connected, Claude has access to these tools:
+Arcane exposes 26 MCP tools. The default `core` profile includes 13; set `ARCANE_TOOL_PROFILE=full` for all 26. See the [tool reference](docs/mcp-tools.md) for parameters and profile availability.
 
 | Tool | Purpose |
 |---|---|
@@ -110,10 +110,13 @@ Once connected, Claude has access to these tools:
 | `journey_abandon` | Mark a journey abandoned (dead end or superseded) |
 | `journey_delete` | Delete a journey and its relationships |
 | `journey_list` | List active or recent journeys (`stale` marks active ones with no update for 14+ days) |
+| `journey_show` | Show a journey with its memories and artifacts |
+| `artifact_search` / `artifact_details` | Search ingested artifacts and read their details |
 | `ingest_git` | Import commits from a git repository |
 | `ingest_gha` | Import CI runs from GitHub Actions |
 | `ingest_linear` | Import tickets from Linear |
-| `analyze` | Run intelligence plugins (velocity, health, usage) |
+| `analyze` | Run any installed intelligence plugin (built-ins: velocity, health, usage) |
+| `plugins` | Discover or run installed ingestion, intelligence, and content plugins |
 | `insights` / `insights_ack` | View and acknowledge derived insights |
 | `link` | Create a relationship between two entities |
 | `trace` | Walk the relationship graph from an entity |
@@ -187,7 +190,7 @@ embedding:
   provider: ollama           # "ollama" or "openai"
   model: nomic-embed-text    # Embedding model name
   base_url: http://localhost:11434  # Ollama base URL (ignored for openai)
-  api_key: null              # OpenAI API key (or set OPENAI_API_KEY env var)
+  api_key: null              # Required when provider is openai
 
 context:
   semantic: auto             # "auto" | "always" | "never"
@@ -225,7 +228,6 @@ arcane merge-projects grafana-usage-report grafana-usage-automation --apply  # c
 | `ARCANE_HOME` | Override data directory (default: `~/.arcane`) |
 | `GITHUB_TOKEN` | GitHub API auth for GHA ingestion |
 | `LINEAR_API_KEY` | Linear API key for ticket ingestion |
-| `OPENAI_API_KEY` | OpenAI API key (alternative to config file) |
 | `ARCANE_LOG_LEVEL` | Log verbosity: `DEBUG`, `INFO`, `WARNING` |
 | `ARCANE_OLLAMA_AUTOSTART` | Set to `0` to stop Arcane starting a local Ollama when it is down |
 | `ARCANE_TOOL_PROFILE` | MCP tool set to advertise: `core` (default, 13 tools) or `full` (all tools) |
@@ -250,17 +252,17 @@ embedding:
 
 ### OpenAI
 
-```bash
-# Set API key
-export OPENAI_API_KEY=sk-...
-```
+Set `embedding.api_key` explicitly in your config file:
 
 ```yaml
 # config.yaml
 embedding:
   provider: openai
   model: text-embedding-3-small
+  api_key: your-api-key
 ```
+
+A missing or blank key reports a configuration error. Environment variables do not supply this key.
 
 After switching models, rebuild the vector index:
 
@@ -286,7 +288,7 @@ arcane reindex
 
 ## Plugin System
 
-Arcane uses Python entry points for extensibility. Install any package that declares the right entry point and Arcane will discover it automatically.
+Install a plugin package in the same Python environment as Arcane. Its entry-point names automatically become commands under `arcane ingest`, `arcane analyze`, or `arcane draft`. Built-in commands and MCP tools remain available; built-in and third-party plugins use the same registry.
 
 ```toml
 # In your plugin package's pyproject.toml
@@ -300,7 +302,11 @@ code_churn = "my_package:CodeChurnAnalyser"
 changelog = "my_package:ChangelogGenerator"
 ```
 
-Plugins must implement the protocols defined in `arcane.plugins.protocols`.
+Discover installed plugins with `arcane ingest --list`, `arcane analyze --list`, or `arcane draft --list`; each group's `--help` also lists commands. For an added plugin, `<command> --help` shows its constructor signature. Pass constructor settings as JSON with `--options '{"key":"value"}'`; content commands also accept `--context '{"topic":"release"}'`.
+
+In the full MCP profile, call `plugins` without arguments to list all three kinds. To run one, supply `kind` and `plugin_name`, plus optional `options` and content `context` objects. The `analyze` tool also accepts installed intelligence entry-point names.
+
+Plugins implement the protocols in `arcane.plugins.protocols`. A factory can declare named repository parameters or `org` to receive Arcane's current store and scope; these injected values cannot be overridden through `options`. See [plugin architecture](docs/architecture.md#plugin-system) for the supported parameters.
 
 ---
 
@@ -311,15 +317,20 @@ Plugins must implement the protocols defined in `arcane.plugins.protocols`.
 ├── index.db           # SQLite database (memories, journeys, artifacts, relationships)
 ├── backups/           # arcane-<UTC timestamp>.tar.gz from `arcane backup`
 └── vault/
-    └── <project>/
-        └── YYYY-MM-DD-session.md   # Markdown mirror of saved memories
+    ├── @<org>/
+    │   ├── <project>/YYYY-MM-DD-session.md  # Project memories
+    │   └── YYYY-MM-DD-session.md            # Org memories
+    └── YYYY-MM-DD-session.md                # Global memories
 ```
 
 `arcane backup` snapshots the database with SQLite's online backup API (safe
 while an MCP server is writing), integrity-checks the snapshot, and archives it
 with `vault/`. It keeps the newest 14 archives; use `--dest` to write them off
 this disk. To restore, stop running agents and unpack an archive into
-`~/.arcane`.
+`~/.arcane` or another `ARCANE_HOME`. Memory file paths stay relative to that
+home, while API responses show the current absolute path. After a restore,
+legacy absolute paths resolve only when they are inside the current vault;
+Arcane does not follow them back to the original vault.
 
 ---
 
