@@ -13,6 +13,8 @@ from arcane.infra.redaction import redact
 
 
 class ADRGenerator:
+    """Generate a structured ADR from a decision memory."""
+
     name = "adr"
 
     def generate(self, context: dict[str, Any]) -> str:

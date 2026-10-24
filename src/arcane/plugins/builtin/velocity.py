@@ -15,6 +15,8 @@ from arcane.infra.db.memory_repo import MemoryRepository
 
 
 class VelocityTracker:
+    """Summarise engineering velocity."""
+
     name = "velocity"
 
     def __init__(

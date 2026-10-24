@@ -24,6 +24,8 @@ def _pct(part: int, whole: int) -> str:
 
 
 class UsageAnalyzer:
+    """Report what agents recall: lookups, empty searches and unused memories."""
+
     name = "usage"
 
     def __init__(

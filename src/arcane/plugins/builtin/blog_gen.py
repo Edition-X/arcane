@@ -14,6 +14,8 @@ from arcane.infra.redaction import redact
 
 
 class BlogGenerator:
+    """Generate a structured blog brief."""
+
     name = "blog"
 
     def generate(self, context: dict[str, Any]) -> str:

@@ -16,6 +16,15 @@ logger = logging.getLogger(__name__)
 
 PLUGIN_KINDS = ("ingestion", "intelligence", "content")
 
+# Built-in CLI commands named differently from the entry point they run.
+COMMAND_ALIASES: dict[str, dict[str, str]] = {"ingestion": {"gha": "github_actions"}}
+
+
+def command_name(kind: str, entry_point: str) -> str:
+    """The CLI command that runs *entry_point*: its alias, or its own name."""
+    aliases = {target: alias for alias, target in COMMAND_ALIASES.get(kind, {}).items()}
+    return aliases.get(entry_point, entry_point)
+
 
 class PluginError(ValueError):
     """An installed plugin could not be selected or configured."""
@@ -48,7 +57,7 @@ def create_plugin(
     Only explicitly declared parameters receive dependencies; arbitrary **kwargs
     never gives a plugin accidental access to every repository.
     """
-    name = "github_actions" if kind == "ingestion" and name == "gha" else name
+    name = COMMAND_ALIASES.get(kind, {}).get(name, name)
     factories = plugins_for(kind)
     if name not in factories:
         raise PluginError(f"Unknown {kind} plugin: {name}. Available: {', '.join(sorted(factories)) or '(none)'}.")

@@ -12,7 +12,7 @@ from arcane.domain.scope import resolve_write_scope
 from arcane.infra.db.ids import IdentifierResolutionError
 from arcane.infra.redaction import redact
 from arcane.plugins.protocols import IngestionError
-from arcane.plugins.registry import PluginError, create_plugin, describe_plugins, plugins_for
+from arcane.plugins.registry import PluginError, command_name, create_plugin, describe_plugins, plugins_for
 
 
 def json_object(value: str) -> dict[str, Any]:
@@ -29,7 +29,7 @@ def json_object(value: str) -> dict[str, Any]:
 def list_plugins(kind: str) -> None:
     for plugin in describe_plugins(kind):
         description = plugin["description"].splitlines()[0] if plugin["description"] else "(no description)"
-        click.echo(f"{plugin['name']}: {description}")
+        click.echo(f"{command_name(kind, plugin['name'])}: {description}")
 
 
 class PluginGroup(click.Group):
@@ -46,7 +46,8 @@ class PluginGroup(click.Group):
             raise click.ClickException(str(exc)) from exc
 
     def list_commands(self, ctx: click.Context) -> list[str]:
-        return sorted(set(super().list_commands(ctx)) | set(plugins_for(self.kind)))
+        discovered = {command_name(self.kind, name) for name in plugins_for(self.kind)}
+        return sorted(set(super().list_commands(ctx)) | discovered)
 
     def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
         existing = super().get_command(ctx, cmd_name)

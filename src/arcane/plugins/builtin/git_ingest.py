@@ -19,6 +19,8 @@ _FS = "\x1f"  # field separator
 
 
 class GitIngestionPlugin:
+    """Ingest commits from a git repository."""
+
     name = "git"
 
     def __init__(self, repo_path: str | None = None, max_count: int = 100) -> None:
