@@ -242,7 +242,13 @@ def test_explicit_legacy_recovery_is_backed_up_atomic_and_dry_by_default(arcane:
     )
     arcane.sql(
         "INSERT INTO insights (id,insight_type,title,body,project,org,created_at) "
-        "VALUES ('unknown-insight','health','Recover insight','Body','widget','','2026-01-01')"
+        "VALUES ('unknown-insight','velocity','Recover insight','Body','widget','','2026-01-01')"
+    )
+    # Legacy health bodies summarise every org's memories, so recovery must
+    # not hand them to one org's export.
+    arcane.sql(
+        "INSERT INTO insights (id,insight_type,title,body,project,org,created_at) "
+        "VALUES ('vault-health','health_fragmentation','Whole vault','Body','widget','','2026-01-01')"
     )
     args = ("migrate", "entity-org", "--org", "acme", "--project", "widget")
     preview = _cli(arcane, *args)
@@ -255,8 +261,9 @@ def test_explicit_legacy_recovery_is_backed_up_atomic_and_dry_by_default(arcane:
     with sqlite3.connect(backup) as conn:
         assert conn.execute("SELECT org FROM artifacts WHERE id = 'unknown-artifact'").fetchone() == ("",)
     conn.close()
-    for table in ("journeys", "artifacts", "insights"):
+    for table in ("journeys", "artifacts"):
         assert arcane.sql(f"SELECT COUNT(*) FROM {table} WHERE org = ''") == [(0,)]
+    assert arcane.sql("SELECT id FROM insights WHERE org = ''") == [("vault-health",)]
     assert "No unknown-org entities" in _cli(arcane, *args, "--apply")
     shown = json.loads(_cli(arcane, "artifact", "show", "unknown-artifact"))
     assert shown["raw_data"] == {"body": "Recover content"}

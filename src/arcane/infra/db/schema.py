@@ -9,6 +9,13 @@ from arcane.infra.db.ids import ENTITY_TABLES, IdentifierResolutionError, resolv
 
 RELATIONSHIP_REPAIR_KEY = "relationship_ids_repaired"
 
+# Legacy health and usage insights summarise the whole vault, so no single
+# org owns them. Ownership backfill and recovery both skip them.
+SCOPED_INSIGHT_TYPES = (
+    "insight_type NOT IN ('health', 'usage') "
+    "AND substr(insight_type, 1, 7) != 'health_' AND substr(insight_type, 1, 6) != 'usage_'"
+)
+
 
 def create_schema(db: Database) -> None:
     """Create all tables, triggers, and indexes. Idempotent."""
@@ -405,12 +412,7 @@ def _migrate_entity_orgs(db: Database) -> None:
             # Legacy health/usage bodies describe the whole vault, even when
             # their attached project has a unique owner. They need review via
             # `migrate entity-org`, rather than silently entering an org export.
-            safe_insight = (
-                " AND insight_type NOT IN ('health', 'usage') "
-                "AND substr(insight_type, 1, 7) != 'health_' AND substr(insight_type, 1, 6) != 'usage_'"
-                if table == "insights"
-                else ""
-            )
+            safe_insight = f" AND {SCOPED_INSIGHT_TYPES}" if table == "insights" else ""
             db.execute(f"""
                 UPDATE {table} SET org = (
                     SELECT MIN(m.org) FROM memories m WHERE m.project = {table}.project

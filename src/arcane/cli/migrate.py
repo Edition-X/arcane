@@ -113,6 +113,7 @@ def migrate_entity_org(org: str, project: str, apply_: bool) -> None:
     unknown entity in the selected project, and never changes a known org.
     """
     from arcane.domain.scope import validate_org
+    from arcane.infra.db.schema import SCOPED_INSIGHT_TYPES
 
     try:
         org = validate_org(org)
@@ -122,6 +123,12 @@ def migrate_entity_org(org: str, project: str, apply_: bool) -> None:
         raise click.BadParameter("must be a nonempty stored project name", param_hint="--project")
 
     tables = ("journeys", "artifacts", "insights")
+
+    def unknown(table: str) -> str:
+        """Rows in the project with no recorded owner that one org can own."""
+        where = "project = ? AND org = ''"
+        return f"{where} AND {SCOPED_INSIGHT_TYPES}" if table == "insights" else where
+
     with create_container() as container:
 
         def plan() -> dict[str, int]:
@@ -142,9 +149,7 @@ def migrate_entity_org(org: str, project: str, apply_: bool) -> None:
                 )
             counts = {}
             for table in tables:
-                row = container.db.fetchone(
-                    f"SELECT COUNT(*) AS n FROM {table} WHERE project = ? AND org = ''", (project,)
-                )
+                row = container.db.fetchone(f"SELECT COUNT(*) AS n FROM {table} WHERE {unknown(table)}", (project,))
                 counts[table] = row["n"] if row else 0
             return counts
 
@@ -156,7 +161,7 @@ def migrate_entity_org(org: str, project: str, apply_: bool) -> None:
         for table, count in counts.items():
             click.echo(f"  {table}: {count}")
             for row in container.db.fetchall(
-                f"SELECT id, title FROM {table} WHERE project = ? AND org = '' ORDER BY id LIMIT 20", (project,)
+                f"SELECT id, title FROM {table} WHERE {unknown(table)} ORDER BY id LIMIT 20", (project,)
             ):
                 click.echo(f"    {row['id']}  {row['title']}")
             if count > 20:
@@ -175,9 +180,7 @@ def migrate_entity_org(org: str, project: str, apply_: bool) -> None:
             plan()
             updated = 0
             for table in tables:
-                cursor = container.db.execute(
-                    f"UPDATE {table} SET org = ? WHERE project = ? AND org = ''", (org, project)
-                )
+                cursor = container.db.execute(f"UPDATE {table} SET org = ? WHERE {unknown(table)}", (org, project))
                 updated += cursor.rowcount
     click.echo(f"Assigned {updated} entities to {org}/{project}.")
     click.echo(f"Backup: {backup}")
