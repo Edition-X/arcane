@@ -7,6 +7,7 @@ import sqlite3
 import subprocess
 import tarfile
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -127,6 +128,24 @@ def test_org_traversal_is_rejected_without_creating_outside_files(arcane: Arcane
 
     arcane.run(scenario)
     assert not (tmp_path / "escaped").exists()
+    assert arcane.sql("SELECT COUNT(*) FROM memories") == [(0,)]
+
+
+def test_symlinked_session_file_outside_the_vault_is_refused(arcane: Arcane, tmp_path: Path) -> None:
+    outside = tmp_path / "outside.md"
+    outside.write_text("untouched\n", encoding="utf-8")
+    session_dir = arcane.home / "vault" / "@acme" / "widget"
+    session_dir.mkdir(parents=True)
+    try:
+        (session_dir / f"{date.today().isoformat()}-session.md").symlink_to(outside)
+    except OSError:
+        pytest.skip("this platform does not let the test create symlinks")
+
+    async def scenario(c: Client) -> None:
+        await c.error("memory_save", title="Through a symlink", what="must not land outside the vault")
+
+    arcane.run(scenario)
+    assert outside.read_text(encoding="utf-8") == "untouched\n"
     assert arcane.sql("SELECT COUNT(*) FROM memories") == [(0,)]
 
 
