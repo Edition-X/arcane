@@ -49,8 +49,8 @@ class HealthAuditor:
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
 
-    def _fragmentation_clusters(self, projects: list[dict[str, Any]]) -> list[list[str]]:
-        """Group raw project names that canonicalize to the same slug."""
+    def _fragmentation_clusters(self, projects: list[dict[str, Any]]) -> list[tuple[str, list[str]]]:
+        """Group raw project names that canonicalize to the same slug, per org."""
         groups: dict[tuple[str, str], set[str]] = defaultdict(set)
         for row in projects:
             raw = row["project"] or ""
@@ -58,7 +58,7 @@ class HealthAuditor:
                 continue
             org = row.get("org") or ""
             groups[(org, canonicalize_project(raw, self.aliases))].add(raw)
-        return [sorted(names) for names in groups.values() if len(names) > 1]
+        return [(org, sorted(names)) for (org, _), names in groups.items() if len(names) > 1]
 
     def analyze(self, project: str) -> list[dict[str, Any]]:
         insights: list[dict[str, Any]] = []
@@ -70,9 +70,9 @@ class HealthAuditor:
         clusters = self._fragmentation_clusters(stats.get("projects", []))
         if clusters:
             lines = ["Project names that resolve to the same canonical project:"]
-            for cluster in clusters:
-                lines.append("  " + " / ".join(f"'{name}'" for name in cluster))
-            lines.append("Heal with: arcane merge-projects <src> <dest> --apply")
+            for org, cluster in clusters:
+                lines.append(f"  {org or '<no org>'}: " + " / ".join(f"'{name}'" for name in cluster))
+            lines.append("Heal with: arcane merge-projects <src> <dest> --org <org> --apply")
             insights.append(
                 self._insight(
                     "health_fragmentation",
@@ -92,8 +92,9 @@ class HealthAuditor:
                     "health_empty_project",
                     f"{empty} legacy memories have no org or project",
                     f"{empty} memories have neither an org nor a project and are invisible to "
-                    "project-scoped context and search. Reassign them with "
-                    "arcane merge-projects '' <project> --apply.",
+                    "scoped context and search. Give them an org with `arcane migrate org-scope` "
+                    "(a dry run; add --apply to write). Merging the empty project into another "
+                    "does not help: they keep no org, and org-level memories share that empty name.",
                     "warning",
                     project,
                 )

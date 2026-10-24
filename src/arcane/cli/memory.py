@@ -223,15 +223,17 @@ def projects() -> None:
 @click.command(name="merge-projects")
 @click.argument("src")
 @click.argument("dest")
+@click.option("--org", default=None, help="Org that owns SRC. Required when several orgs have a project of that name.")
 @click.option("--apply", "apply_", is_flag=True, default=False, help="Write the change (default: dry run).")
-def merge_projects(src: str, dest: str, apply_: bool) -> None:
-    """Merge all memories from project SRC into DEST.
+def merge_projects(src: str, dest: str, org: str | None, apply_: bool) -> None:
+    """Merge one org's memories from project SRC into DEST.
 
     SRC must match the stored project string exactly; DEST is canonicalized
     (normalised, aliases applied) so merges always heal towards the canonical
-    name. Dry-run by default — pass --apply to commit.
+    name. Only one org's memories move: when several orgs have a project
+    called SRC, --org says which. Dry-run by default — pass --apply to commit.
     """
-    from arcane.domain.scope import canonicalize_project
+    from arcane.domain.scope import canonicalize_project, validate_org
 
     with create_container() as container:
         dest_canon = canonicalize_project(dest, container.config.projects.aliases)
@@ -240,14 +242,26 @@ def merge_projects(src: str, dest: str, apply_: bool) -> None:
         if dest_canon != dest:
             click.echo(f"Destination canonicalized: '{dest}' → '{dest_canon}'")
 
-        if apply_:
-            moved = container.memory_repo.reassign_project(src, dest_canon)
-            click.echo(f"Moved {moved} memories from '{src}' into '{dest_canon}'.")
-        else:
-            count = sum(r["cnt"] for r in container.memory_repo.list_projects() if r["project"] == src)
+        owners = {r["org"]: r["cnt"] for r in container.memory_repo.list_projects() if r["project"] == src}
+        if org is not None:
+            try:
+                org = validate_org(org)
+            except ValueError as exc:
+                raise click.BadParameter(str(exc), param_hint="--org") from exc
+            owners = {org: owners.get(org, 0)}
+        elif len(owners) > 1:
+            listed = ", ".join(f"{name or '<no org>'} ({count})" for name, count in sorted(owners.items()))
+            raise click.UsageError(f"Project '{src}' exists in several orgs: {listed}. Pass --org to choose one.")
+        source_org, count = next(iter(owners.items()), (None, 0))
+        where = f"'{src}'" + (f" in org {source_org or '<no org>'}" if source_org is not None else "")
+
+        if not apply_:
             click.echo(
-                f"Dry run: would move {count} memories from '{src}' into '{dest_canon}'. Pass --apply to commit."
+                f"Dry run: would move {count} memories from {where} into '{dest_canon}'. Pass --apply to commit."
             )
+            return
+        moved = container.memory_repo.reassign_project(src, dest_canon, org=source_org) if source_org is not None else 0
+        click.echo(f"Moved {moved} memories from {where} into '{dest_canon}'.")
 
 
 @click.command()

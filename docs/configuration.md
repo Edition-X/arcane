@@ -137,6 +137,8 @@ arcane merge-projects grafana-usage-report grafana-usage-automation          # d
 arcane merge-projects grafana-usage-report grafana-usage-automation --apply  # write the change
 ```
 
+A merge moves one org's memories. When more than one org has a project with the source name, the command lists them and asks for `--org`.
+
 ---
 
 ## Near-duplicate warnings

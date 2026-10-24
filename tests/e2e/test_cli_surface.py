@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 
-from tests.e2e.conftest import ARCANE, Arcane
+from tests.e2e.conftest import ARCANE, Arcane, Client
 
 
 def _cli(arcane: Arcane, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -60,3 +60,46 @@ def test_unusable_id_prefixes_are_reported_not_raised(arcane: Arcane) -> None:
         assert result.returncode == 1, args
         assert "Traceback" not in result.stderr, args
         assert "ID prefix must be at least 8 characters" in result.stderr, args
+
+
+def test_merge_projects_moves_one_orgs_memories_only(arcane: Arcane) -> None:
+    # reassign_project once had no org filter, so merging alpha's "widget" also
+    # moved beta's "widget" — two unrelated orgs merged by a name collision.
+
+    async def seed(client: Client) -> None:
+        for org in ("alpha", "beta"):
+            await client.call("memory_save", title=f"{org} note", what="shared name", project="widget", org=org)
+
+    arcane.run(seed)
+
+    def orgs_in(project: str) -> list[str]:
+        return [row[0] for row in arcane.sql("SELECT org FROM memories WHERE project = ? ORDER BY org", (project,))]
+
+    ambiguous = _cli(arcane, "merge-projects", "widget", "gadget", "--apply", check=False)
+    assert ambiguous.returncode == 2
+    assert "exists in several orgs: alpha (1), beta (1)" in ambiguous.stderr
+    assert orgs_in("widget") == ["alpha", "beta"]
+
+    dry_run = _cli(arcane, "merge-projects", "widget", "gadget", "--org", "alpha").stdout
+    assert "would move 1 memories from 'widget' in org alpha" in dry_run
+    assert orgs_in("widget") == ["alpha", "beta"]
+
+    applied = _cli(arcane, "merge-projects", "widget", "gadget", "--org", "alpha", "--apply").stdout
+    assert "Moved 1 memories from 'widget' in org alpha into 'gadget'" in applied
+    assert orgs_in("widget") == ["beta"]
+    assert orgs_in("gadget") == ["alpha"]
+
+
+def test_health_advice_for_orgless_memories_actually_repairs_them(arcane: Arcane) -> None:
+    # The insight used to recommend `merge-projects '' <project>`, which left
+    # org empty (still invisible) and would also sweep in every org-level memory.
+    _cli(arcane, "save", "--title", "Legacy", "--what", "predates orgs")
+    arcane.sql("UPDATE memories SET org = '', project = '' WHERE title = 'Legacy'")
+
+    _cli(arcane, "analyze", "health")
+    [(body,)] = arcane.sql("SELECT body FROM insights WHERE insight_type = 'health_empty_project'")
+    assert "arcane migrate org-scope" in body
+
+    _cli(arcane, "migrate", "org-scope", "--apply")
+    [(org,)] = arcane.sql("SELECT org FROM memories WHERE title = 'Legacy'")
+    assert org == "personal"
