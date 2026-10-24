@@ -26,16 +26,15 @@ Arcane runs as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io
 ## Install
 
 ```bash
-# Install a pinned GitHub release with uv (recommended)
-uv tool install --from "git+https://github.com/Edition-X/arcane.git@v0.2.0-beta.11" arcane-mcp
+# With uv (recommended)
+uv tool install arcane-mcp
 
 # Or with pip
-pip install "git+https://github.com/Edition-X/arcane.git@v0.2.0-beta.11"
+pip install arcane-mcp
 ```
 
-beta.10 is incompatible with `arcane-mcp` because its distribution metadata is
-`arcane`. Use `v0.2.0-beta.11` or newer, then replace that tag with the later
-release you want.
+The distribution is `arcane-mcp`. PyPI's `arcane` is an unrelated project — do
+not install that one.
 
 Then initialise your data directory and connect to your AI agent:
 

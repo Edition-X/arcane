@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 
 from arcane import __version__
 from tests.e2e.conftest import Arcane, Client
@@ -180,3 +182,31 @@ def test_unknown_ids_and_odd_limits(arcane: Arcane) -> None:
     assert trace_missing.startswith("Journey not found")
     assert len(search) == 5  # a non-positive limit falls back to the default
     assert context["showing"] == 7
+
+
+def test_tool_reference_documents_exactly_the_tools_the_server_exposes(arcane: Arcane) -> None:
+    """``docs/mcp-tools.md`` is the contract readers see; drift from it is a lie.
+
+    The reference once missed five tools entirely while still claiming a total
+    that happened to be right.
+    """
+    reference = (Path(__file__).resolve().parents[2] / "docs" / "mcp-tools.md").read_text(encoding="utf-8")
+    tool_section = reference.split("## MCP Resources", 1)[0]
+    documented = {
+        name: profile
+        for name, profile in re.findall(r"^### `([a-z_]+)`\n\n\*\*Profile:\*\* `(core|full)`", tool_section, re.M)
+    }
+
+    async def scenario(client: Client) -> dict[str, str]:
+        tools = (await client.session.list_tools()).tools
+        return {tool.name: ("core" if tool.name in CORE_TOOLS else "full") for tool in tools}
+
+    exposed = arcane.run(scenario, profile="full")
+
+    assert documented.keys() == exposed.keys(), (
+        f"undocumented: {sorted(exposed.keys() - documented.keys())}; "
+        f"documented but absent: {sorted(documented.keys() - exposed.keys())}"
+    )
+    wrong = {name: (documented[name], exposed[name]) for name in exposed if documented[name] != exposed[name]}
+    assert not wrong, f"profile documented incorrectly (documented, actual): {wrong}"
+    assert f"Arcane exposes {len(exposed)} tools" in reference
