@@ -229,6 +229,20 @@ jobs:
       - name: Build and exercise the installed wheel
         run: uv run pytest tests/integration/test_installed_mcp.py -q --tb=short
 
+      # The test above installs onto the interpreter uv chose. Ubuntu users
+      # mostly have the one apt installed, so the wheel goes through the release
+      # check on that too.
+      - name: Build the wheel
+        run: uv build --wheel --out-dir dist
+
+      - name: Install and exercise the wheel on Ubuntu's own Python
+        run: |
+          set -euo pipefail
+          wheel=$(find dist -name '*.whl' | head -1)
+          test -n "$wheel"
+          uv run --no-project --with "mcp>=2.3,<3" python scripts/verify_release.py \
+            --target wheel --wheel "$wheel" --python /usr/bin/python3
+
   docker:
     name: Docker image
     needs: changes
