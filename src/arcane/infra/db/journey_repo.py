@@ -127,6 +127,26 @@ class JourneyRepository:
             params,
         )
 
+    def list_completed_between(self, since: str, until: str) -> list[dict[str, Any]]:
+        """Journeys completed in ``[since, until)`` (ISO dates), oldest first."""
+        return self.db.fetchall(
+            "SELECT * FROM journeys WHERE status = 'completed' AND completed_at >= ? AND completed_at < ? "
+            "ORDER BY completed_at",
+            (since, until),
+        )
+
+    def list_for_projects(self, projects: list[str]) -> list[dict[str, Any]]:
+        """Every journey in *projects*, each with its event history."""
+        if not projects:
+            return []
+        journeys = self.db.fetchall(
+            f"SELECT * FROM journeys WHERE project IN ({','.join('?' * len(projects))}) ORDER BY created_at",
+            projects,
+        )
+        for journey in journeys:
+            journey["events"] = self.list_events(journey["id"])
+        return journeys
+
     def list_stale_active(self, days: int, project: str | None = None) -> list[dict[str, Any]]:
         """Active journeys with no update for more than *days* days (falls back to started_at)."""
         where_clauses = [

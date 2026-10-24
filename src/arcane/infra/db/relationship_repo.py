@@ -106,6 +106,13 @@ class RelationshipRepository:
 
         return result
 
+    def list_touching(self, entity_ids: set[str]) -> list[dict[str, Any]]:
+        """Relationships with either end in *entity_ids*."""
+        if not entity_ids:
+            return []
+        rows = self.db.fetchall("SELECT * FROM relationships ORDER BY created_at")
+        return [r for r in rows if r["source_id"] in entity_ids or r["target_id"] in entity_ids]
+
     def delete(self, rel_id: str) -> bool:
         row = self.db.fetchone("SELECT id FROM relationships WHERE id = ?", (rel_id,))
         if not row:

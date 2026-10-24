@@ -329,6 +329,50 @@ class MemoryRepository:
             "duplicate_titles": duplicate_titles,
         }
 
+    def project_orgs(self) -> dict[str, str]:
+        """Each project's org: the org most of its memories carry."""
+        rows = self.db.fetchall(
+            "SELECT project, org, COUNT(*) AS cnt FROM memories WHERE project != '' "
+            "GROUP BY project, org ORDER BY project, cnt DESC"
+        )
+        orgs: dict[str, str] = {}
+        for row in rows:
+            orgs.setdefault(row["project"], row["org"])
+        return orgs
+
+    def list_created_between(
+        self,
+        since: str,
+        until: str,
+        *,
+        categories: tuple[str, ...] | None = None,
+        org: str | None = None,
+        project: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Memories created in ``[since, until)`` (ISO dates), oldest first, expired ones included."""
+        where = ["created_at >= ?", "created_at < ?"]
+        params: list[Any] = [since, until]
+        if categories:
+            where.append(f"category IN ({','.join('?' * len(categories))})")
+            params.extend(categories)
+        if org:
+            where.append("org = ?")
+            params.append(org)
+        if project:
+            where.append("project = ?")
+            params.append(project)
+        rows = self.db.fetchall(f"SELECT * FROM memories WHERE {' AND '.join(where)} ORDER BY created_at", params)
+        return [_process_row(r) for r in rows]
+
+    def list_for_export(self, org: str) -> list[dict[str, Any]]:
+        """Every memory in *org*, with its details body, oldest first."""
+        rows = self.db.fetchall(
+            "SELECT m.*, d.body AS details FROM memories m LEFT JOIN memory_details d ON d.memory_id = m.id "
+            "WHERE m.org = ? ORDER BY m.created_at",
+            (org,),
+        )
+        return [_process_row(r) for r in rows]
+
     def reassign_project(self, old: str, new: str) -> int:
         """Move every memory in project *old* to *new*; return rows updated.
 

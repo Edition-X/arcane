@@ -31,6 +31,7 @@ _CLI_MODULES_WITH_CONTAINER = [
     "arcane.cli.ingest",
     "arcane.cli.relationship",
     "arcane.cli.draft",
+    "arcane.cli.report",
 ]
 
 _GET_HOME_PATCH = "arcane.cli.memory.get_home"
