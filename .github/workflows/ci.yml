@@ -283,9 +283,17 @@ jobs:
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: high
-          allow-licenses: >-
-            MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC, Python-2.0,
-            PSF-2.0, MPL-2.0, Unlicense, CC0-1.0, 0BSD, BSD-3-Clause-Clear
+          # A deny list rather than an allow list. GitHub's dependency graph
+          # cannot resolve a licence for much of the Python ecosystem, and what
+          # it does resolve is often a compound string — typing-extensions
+          # reports "Python-2.0 AND GPL-1.0-or-later AND BSD-3-Clause AND 0BSD",
+          # and cffi reports MIT-0. An allow list fails all of that, which is
+          # noise rather than signal. Name the licences that would actually be
+          # a problem for an MIT project instead.
+          deny-licenses: >-
+            AGPL-1.0-only, AGPL-1.0-or-later, AGPL-3.0-only, AGPL-3.0-or-later,
+            GPL-2.0-only, GPL-2.0-or-later, GPL-3.0-only, GPL-3.0-or-later,
+            SSPL-1.0, BUSL-1.1
 
   # The one required status check on main. Every other job may be skipped by the
   # path filter without stranding a pull request, but none of them may fail.
