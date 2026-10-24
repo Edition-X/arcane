@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import IO, Any
 
+import yaml
+
 if sys.platform == "win32":  # pragma: no cover - exercised by the Windows CI leg
     import msvcrt
 else:
@@ -207,9 +209,9 @@ def _create_new_session_file(mem: dict[str, Any], date_str: str, section_content
 
     lines = ["---"]
     lines.append(f"project: {mem['project']}")
-    lines.append(f"sources: [{', '.join(sources)}]")
+    lines.append(f"sources: {_flow_list(sources)}")
     lines.append(f"created: {now}")
-    lines.append(f"tags: [{', '.join(tags)}]")
+    lines.append(f"tags: {_flow_list(tags)}")
     lines.append("---")
     lines.append("")
     lines.append(f"# {date_str} Session")
@@ -238,6 +240,34 @@ def _split_frontmatter(content: str) -> tuple[str, str]:
     return "", content
 
 
+def _flow_list(items: list[str]) -> str:
+    """Render *items* as a one-line YAML flow sequence, quoting only what needs it.
+
+    Plain values keep the ``[a, b]`` form older files use. A tag containing a
+    comma, a bracket or ``: `` used to be written bare, which made the
+    frontmatter invalid YAML and lost tags on the next re-parse.
+    """
+    return yaml.safe_dump(list(items), default_flow_style=True, allow_unicode=True, width=sys.maxsize).strip()
+
+
+def _parse_flow_list(line: str) -> list[str]:
+    """Read a ``key: [..]`` frontmatter line back into strings.
+
+    ``BaseLoader`` keeps every item a string, so files written before values
+    were quoted read back unchanged (a bare ``no`` stays ``"no"``, not False).
+    A line those older files left unparseable falls back to the old split.
+    """
+    value = line.split(":", 1)[1]
+    try:
+        parsed = yaml.load(value, Loader=yaml.BaseLoader)
+    except yaml.YAMLError:
+        parsed = None
+    if isinstance(parsed, list):
+        return [item for item in parsed if isinstance(item, str)]
+    match = re.search(r"\[(.*?)\]", value)
+    return [item.strip() for item in match.group(1).split(",")] if match and match.group(1).strip() else []
+
+
 def _update_frontmatter(frontmatter: str, mem: dict[str, Any]) -> str:
     lines = frontmatter.split("\n")
     existing_tags: list[str] = []
@@ -245,13 +275,9 @@ def _update_frontmatter(frontmatter: str, mem: dict[str, Any]) -> str:
 
     for line in lines:
         if line.startswith("tags:"):
-            match = re.search(r"\[(.*?)\]", line)
-            if match and match.group(1).strip():
-                existing_tags = [t.strip() for t in match.group(1).split(",")]
+            existing_tags = _parse_flow_list(line)
         elif line.startswith("sources:"):
-            match = re.search(r"\[(.*?)\]", line)
-            if match and match.group(1).strip():
-                existing_sources = [s.strip() for s in match.group(1).split(",")]
+            existing_sources = _parse_flow_list(line)
 
     all_tags = sorted(set(existing_tags + mem.get("tags", [])))
     new_source = mem.get("source")
@@ -262,9 +288,9 @@ def _update_frontmatter(frontmatter: str, mem: dict[str, Any]) -> str:
     updated_lines = []
     for line in lines:
         if line.startswith("tags:"):
-            updated_lines.append(f"tags: [{', '.join(all_tags)}]")
+            updated_lines.append(f"tags: {_flow_list(all_tags)}")
         elif line.startswith("sources:"):
-            updated_lines.append(f"sources: [{', '.join(all_sources)}]")
+            updated_lines.append(f"sources: {_flow_list(all_sources)}")
         else:
             updated_lines.append(line)
     return "\n".join(updated_lines)
