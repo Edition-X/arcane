@@ -1,14 +1,13 @@
 [build-system]
 # Pinned: the backend decides what goes in the wheel, so a release must not
 # change with whatever version was newest that day.
-requires = ["hatchling==1.32.4", "hatch-vcs==0.5.0"]
+requires = ["hatchling==1.32.4", "hatch-vcs==0.5.0", "hatch-fancy-pypi-readme==25.1.0"]
 build-backend = "hatchling.build"
 
 [project]
 name = "arcane-mcp"
-dynamic = ["version"]
-description = "Unified engineering intelligence platform — agent memory, decision journeys, and knowledge capture"
-readme = "README.md"
+dynamic = ["version", "readme"]
+description = "Persistent memory for AI coding agents, shared across every project and harness."
 license = "MIT"
 requires-python = ">=3.11"
 authors = [{ name = "Dan Kelly" }]
@@ -117,3 +116,24 @@ files = ["src/arcane"]
 [[tool.mypy.overrides]]
 module = ["sqlite_vec", "mcp.*", "pysqlite3", "pysqlite3.dbapi2"]
 ignore_missing_imports = true
+
+# PyPI renders the README without the repository around it, so relative links
+# and images would break there. The build rewrites them to absolute GitHub URLs;
+# the README in the repository stays relative.
+[tool.hatch.metadata.hooks.fancy-pypi-readme]
+content-type = "text/markdown"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.fragments]]
+path = "README.md"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = '(src|srcset)="(?!https?://)([^"]+)"'
+replacement = '\1="https://raw.githubusercontent.com/Edition-X/arcane/main/\2"'
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = 'href="(?!https?://|#)([^"]+)"'
+replacement = 'href="https://github.com/Edition-X/arcane/blob/main/\1"'
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = '\]\((?!https?://|#)([^)]+)\)'
+replacement = '](https://github.com/Edition-X/arcane/blob/main/\1)'
