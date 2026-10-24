@@ -22,6 +22,8 @@ _MAX_PAGES = 10
 
 
 class GHAIngestionPlugin:
+    """Ingest CI runs from GitHub Actions."""
+
     name = "github_actions"
 
     def __init__(

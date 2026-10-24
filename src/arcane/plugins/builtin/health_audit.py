@@ -19,6 +19,8 @@ from arcane.infra.db.memory_repo import MemoryRepository
 
 
 class HealthAuditor:
+    """Audit store health: fragmentation, orphans, duplicates and stale journeys."""
+
     name = "health"
 
     def __init__(

@@ -15,6 +15,7 @@ from arcane.domain.results import MemorySaveResult
 from arcane.domain.scope import resolve_read_project, resolve_write_scope, slugify, validate_org
 from arcane.infra.db.ids import IdentifierResolutionError, resolve_entity_id
 from arcane.infra.db.schema import create_vec_table
+from arcane.infra.embeddings.base import EmbeddingsDisabled
 from arcane.infra.markdown import remove_session_memory, write_session_memory
 from arcane.infra.paths import relative_vault_path, vault_path
 from arcane.infra.redaction import redact, redact_values
@@ -244,6 +245,8 @@ class MemoryService:
         text = _embedding_text(title, what, why, impact, tags, self.c.ignore_patterns)
         try:
             return self.c.embedding_provider.embed(text)
+        except EmbeddingsDisabled:
+            return None
         except Exception as exc:
             # One line per failure: an unreachable provider (e.g. Ollama not
             # running) is routine, and a traceback per save floods MCP logs.
@@ -490,7 +493,7 @@ class MemoryService:
             return False
 
     def _should_use_semantic(self, semantic_mode: str) -> bool:
-        if semantic_mode == "never":
+        if semantic_mode == "never" or self.c.config.embedding.provider == "none":
             return False
         if semantic_mode == "always":
             return True
