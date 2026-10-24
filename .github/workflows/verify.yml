@@ -36,7 +36,7 @@ permissions:
 
 jobs:
   install:
-    name: ${{ inputs.source }} · ${{ matrix.os }} · py${{ matrix.python }} · ${{ matrix.installer }}
+    name: ${{ inputs.source }} · ${{ matrix.os }} · ${{ matrix.label || format('py{0}', matrix.python) }} · ${{ matrix.installer }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
@@ -45,10 +45,12 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python: ["3.11", "3.13"]
         installer: [uv]
-        # Plenty of people will reach for pip, so one leg proves that path too.
+        # The most common install outside this matrix: pip into a venv on the
+        # Python Ubuntu ships, not one a setup action or uv provided.
         include:
           - os: ubuntu-latest
-            python: "3.13"
+            python: /usr/bin/python3
+            label: apt python
             installer: pip
     steps:
       # Only the verification script. The package under test comes from the

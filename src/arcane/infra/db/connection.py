@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -14,11 +15,57 @@ except ImportError:
 
 import sqlite_vec
 
+logger = logging.getLogger(__name__)
+
 BUSY_TIMEOUT_MS = 10_000
+
+# pysqlite3-binary only ships Linux x86_64 wheels, so it cannot be the only
+# advice: the python.org build for macOS is the usual way to land here.
+_NO_EXTENSIONS_WARNING = (
+    "This Python cannot load SQLite extensions, so sqlite-vec is unavailable and "
+    "search will use keyword matching only. To restore semantic search, reinstall "
+    "Arcane on a Python that can, such as one from Homebrew or `uv python install`, "
+    'or on Linux x86_64 add the pysqlite3 extra: pip install "arcane-mcp[pysqlite3]"'
+)
+
+_warned_about_extensions = False
+
+
+def load_vec_extension(conn: Any) -> bool:
+    """Load sqlite-vec into *conn*, returning whether it is usable.
+
+    Several Python distributions — the python.org installer for macOS among
+    them — are compiled without ``--enable-loadable-sqlite-extensions``, so
+    ``enable_load_extension`` does not exist. Arcane stays useful without vectors: search falls back to FTS5,
+    exactly as it already does when no embedder is reachable. Failing to start
+    at all would be the wrong trade.
+    """
+    global _warned_about_extensions
+    try:
+        conn.enable_load_extension(True)
+    except AttributeError:
+        if not _warned_about_extensions:
+            logger.warning(_NO_EXTENSIONS_WARNING)
+            _warned_about_extensions = True
+        return False
+    try:
+        sqlite_vec.load(conn)
+    except sqlite3.Error as exc:
+        if not _warned_about_extensions:
+            logger.warning("sqlite-vec failed to load (%s). %s", exc, _NO_EXTENSIONS_WARNING)
+            _warned_about_extensions = True
+        return False
+    finally:
+        conn.enable_load_extension(False)
+    return True
 
 
 class Database:
-    """Manages a SQLite connection with extensions loaded."""
+    """Manages a SQLite connection with extensions loaded.
+
+    ``vec_available`` reports whether sqlite-vec loaded. When it did not, the
+    store works normally minus vector similarity.
+    """
 
     def __init__(self, db_path: str = ":memory:") -> None:
         self.db_path = db_path
@@ -31,9 +78,7 @@ class Database:
             self.conn.execute("PRAGMA journal_mode = WAL")
         self.conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
 
-        self.conn.enable_load_extension(True)
-        sqlite_vec.load(self.conn)
-        self.conn.enable_load_extension(False)
+        self.vec_available = load_vec_extension(self.conn)
 
     def execute(self, sql: str, params: tuple | list = ()) -> sqlite3.Cursor:
         with self._lock:

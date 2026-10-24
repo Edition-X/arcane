@@ -102,7 +102,7 @@ def test_export_holds_everything_one_org_owns(arcane: Arcane, tmp_path: Path) ->
     assert memories[ids["decided"]]["tags"] == []
     [journey] = data["journeys"]
     assert journey["status"] == "completed" and [e["event_type"] for e in journey["events"]] == ["completed"]
-    assert {a["title"] for a in data["artifacts"]} == {"feat: change 1", "feat: change 2"}
+    assert {a["title"] for a in data["artifacts"]} == {"feat: change one", "feat: change two"}
     assert all(isinstance(a["raw_data"], dict) for a in data["artifacts"])
     assert (ids["shipped"], ids["journey"]) in {(r["source_id"], r["target_id"]) for r in data["relationships"]}
     assert all("rowid" not in record for record in (*data["memories"], *data["journeys"], *data["artifacts"]))
