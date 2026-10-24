@@ -1,0 +1,13 @@
+# Gitleaks' default rules, plus one exception: the redaction tests.
+# Those files hold fake credentials on purpose, one per token shape Arcane must
+# scrub. Allowing the two files, rather than individual findings, keeps
+# the full-history scan green when a newer gitleaks reports them differently.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fake credentials in redaction test fixtures"
+paths = [
+  '''^tests/unit/test_redaction\.py$''',
+  '''^tests/integration/test_redaction_persistence\.py$''',
+]
