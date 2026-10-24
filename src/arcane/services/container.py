@@ -127,4 +127,8 @@ def _create_embedding_provider(config: ArcaneConfig) -> EmbeddingProvider:
             model=config.embedding.model,
             api_key=config.embedding.api_key,
         )
+    elif provider == "none":
+        from arcane.infra.embeddings.base import NoEmbedding
+
+        return NoEmbedding()
     raise ValueError(f"Unknown embedding provider: {provider}")
