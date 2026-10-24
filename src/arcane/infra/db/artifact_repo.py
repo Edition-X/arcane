@@ -122,6 +122,21 @@ class ArtifactRepository:
             params,
         )
 
+    def list_for_projects(self, projects: list[str]) -> list[dict[str, Any]]:
+        """Every artifact in *projects*, with ``raw_data`` parsed, oldest first."""
+        if not projects:
+            return []
+        rows = self.db.fetchall(
+            f"SELECT * FROM artifacts WHERE project IN ({','.join('?' * len(projects))}) ORDER BY created_at",
+            projects,
+        )
+        for row in rows:
+            try:
+                row["raw_data"] = json.loads(row["raw_data"]) if row.get("raw_data") else {}
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return rows
+
     def count(self, project: str | None = None) -> int:
         if project:
             row = self.db.fetchone("SELECT COUNT(*) as cnt FROM artifacts WHERE project = ?", (project,))

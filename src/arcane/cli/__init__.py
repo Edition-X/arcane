@@ -27,6 +27,7 @@ from arcane.cli.memory import (
 )
 from arcane.cli.migrate import migrate
 from arcane.cli.relationship import link, trace
+from arcane.cli.report import export, report
 
 
 @click.group()
@@ -63,6 +64,8 @@ main.add_command(ingest)
 main.add_command(analyze)
 main.add_command(artifact)
 main.add_command(draft)
+main.add_command(report)
+main.add_command(export)
 
 
 @main.command()
