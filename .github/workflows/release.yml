@@ -1,148 +1,449 @@
 name: Release
 
+# Cutting a release is a decision, so it is a button rather than a side effect
+# of merging. The order matters: everything irreversible happens last.
+#
+#   plan → build → attest → verify the wheel on 3 OSes → tag → publish → verify
+#   what was published
+#
+# By the time anything reaches PyPI it has already been installed and driven
+# over MCP stdio on Linux, macOS and Windows, so a publish is the least likely
+# step to surprise anyone.
+
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
+    inputs:
+      level:
+        description: Semver level to bump when no explicit version is given.
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      version:
+        description: Explicit version without the leading v, for example 0.2.0. Overrides level.
+        type: string
+        default: ""
+      dry-run:
+        description: Build, attest and verify, but publish nothing.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
 
 concurrency:
   group: release
   cancel-in-progress: false
 
-permissions:
-  contents: write
+env:
+  IMAGE: ghcr.io/edition-x/arcane
 
 jobs:
-  release:
-    name: Cut release
+  plan:
+    name: Plan
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Refuse to release from anywhere but main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Releases are cut from main. This run is on ${GITHUB_REF}." >&2
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0  # full history needed for git-cliff and tag inspection
+          fetch-depth: 0
+          persist-credentials: false
 
-      - uses: astral-sh/setup-uv@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
-          enable-cache: true
+          # No cache restore in a workflow that publishes: a run that produces
+          # artifacts other people consume should build from the index, not
+          # from anything a previous run left behind.
+          enable-cache: false
 
-      - name: Set up Python
-        run: uv python install 3.11
-
-      - name: Install dependencies
-        run: uv sync --extra dev
-
-      - name: Install git-cliff
-        run: |
-          curl -sSfL https://github.com/orhun/git-cliff/releases/download/v2.6.1/git-cliff-2.6.1-x86_64-unknown-linux-gnu.tar.gz \
-            | tar -xz --strip-components=1 -C /usr/local/bin git-cliff-2.6.1/git-cliff
-
-      - name: Determine next version
-        id: version
-        run: |
-          # Source of truth is git tags, not pyproject.toml.
-          # This avoids needing to commit back to main (which branch protection blocks).
-          LATEST_TAG=$(git tag --sort=-version:refname | grep '^v' | head -1 || echo "")
-          echo "Latest tag: $LATEST_TAG"
-
-          # Collect commits since last tag (or all commits if no tag yet)
-          if [ -z "$LATEST_TAG" ]; then
-            COMMITS=$(git log --oneline --format="%s" | head -20)
-            BASE="0.1.0"
-            BETA_NUM=""
-          else
-            COMMITS=$(git log "${LATEST_TAG}..HEAD" --oneline --format="%s")
-            CURRENT="${LATEST_TAG#v}"
-            BASE=$(echo "$CURRENT" | sed 's/-beta\..*//')
-            BETA_NUM=$(echo "$CURRENT" | grep -oP '(?<=-beta\.)\d+' || echo "")
-          fi
-
-          if [ -z "$COMMITS" ]; then
-            echo "No new commits since last release — skipping."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "skip=false" >> "$GITHUB_OUTPUT"
-
-          if [ -n "$BETA_NUM" ]; then
-            # Already in a beta series — just increment the beta number
-            NEXT_VERSION="${BASE}-beta.$((BETA_NUM + 1))"
-          else
-            # No beta tag yet — determine bump type from conventional commits
-            if echo "$COMMITS" | grep -qiE "^(feat|fix|perf|refactor|docs)(\(.+\))?!:"; then
-              BUMP="major"
-            elif echo "$COMMITS" | grep -qiE "^feat(\(.+\))?:"; then
-              BUMP="minor"
-            else
-              BUMP="patch"
-            fi
-            echo "Bump type: $BUMP"
-
-            MAJOR=$(echo "$BASE" | cut -d. -f1)
-            MINOR=$(echo "$BASE" | cut -d. -f2)
-            PATCH=$(echo "$BASE" | cut -d. -f3)
-
-            case "$BUMP" in
-              major) NEXT_VERSION="$((MAJOR + 1)).0.0-beta.1" ;;
-              minor) NEXT_VERSION="${MAJOR}.$((MINOR + 1)).0-beta.1" ;;
-              patch) NEXT_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))-beta.1" ;;
-            esac
-          fi
-
-          echo "Next version: $NEXT_VERSION"
-          echo "next=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$NEXT_VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Generate release notes
-        if: steps.version.outputs.skip != 'true'
-        run: |
-          # Generates notes for just this release (unreleased commits since last tag)
-          git-cliff --config cliff.toml \
-            --tag "${{ steps.version.outputs.tag }}" \
-            --unreleased --strip all \
-            -o release-notes.md
-
-      - name: Create local release tag
-        if: steps.version.outputs.skip != 'true'
-        run: |
-          # Hatch derives release version from this local tag. Do not expose it
-          # until package and protocol validation succeed.
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "${{ steps.version.outputs.tag }}"
-
-      - name: Smoke test installed artifact
-        if: steps.version.outputs.skip != 'true'
-        run: uv run pytest tests/integration/test_installed_mcp.py -q --tb=short
-
-      - name: Build release artifacts
-        if: steps.version.outputs.skip != 'true'
-        run: uv build --out-dir dist
-
-      - name: Verify release artifact
-        if: steps.version.outputs.skip != 'true'
-        run: |
-          WHEEL=$(find dist -name '*.whl' -print -quit)
-          EXPECTED=$(echo "${{ steps.version.outputs.next }}" | sed -E 's/-beta\.([0-9]+)/b\1/')
-          ACTUAL=$(uv tool run --from "$WHEEL" arcane --version | awk '{print $3}')
-          test "$ACTUAL" = "$EXPECTED"
-
-      - name: Push release tag
-        if: steps.version.outputs.skip != 'true'
-        run: git push origin "${{ steps.version.outputs.tag }}"
-
-      - name: Create GitHub release
-        if: steps.version.outputs.skip != 'true'
+      # Only a commit the Main workflow has already built and verified may be
+      # released. Stable can never be something nobody has installed.
+      - name: Require a green Main run for this commit
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
-          TAG="${{ steps.version.outputs.tag }}"
-          if echo "$TAG" | grep -q "beta"; then
-            PRE="--prerelease"
-          else
-            PRE=""
+          set -euo pipefail
+          count=$(gh api \
+            "repos/${REPO}/actions/workflows/main.yml/runs?head_sha=${GITHUB_SHA}&status=success" \
+            --jq '.total_count')
+          if [ "$count" -eq 0 ]; then
+            echo "No successful Main run for ${GITHUB_SHA}." >&2
+            echo "Run the Main workflow on this commit and let it pass before releasing." >&2
+            exit 1
           fi
+          echo "Main verified ${GITHUB_SHA} in $count run(s)."
+
+      - name: Resolve the version
+        id: resolve
+        env:
+          EXPLICIT: ${{ inputs.version }}
+          LEVEL: ${{ inputs.level }}
+        run: |
+          set -euo pipefail
+          if [ -n "$EXPLICIT" ]; then
+            version="${EXPLICIT#v}"
+            echo "Version given explicitly: $version"
+          else
+            version=$(uvx git-cliff@2.10.1 --config cliff.toml --bump "$LEVEL" --bumped-version)
+            version="${version#v}"
+            echo "git-cliff bumped $LEVEL to: $version"
+          fi
+
+          if ! printf '%s' "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Refusing to release '$version': this pipeline cuts stable X.Y.Z only." >&2
+            exit 1
+          fi
+
+          tag="v$version"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "Tag $tag already exists." >&2
+            exit 1
+          fi
+
+          # Never go backwards. The abandoned v0.2.0-beta.N tags are not stable
+          # releases and are deliberately excluded from this comparison.
+          latest=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -V | tail -1 || true)
+          if [ -n "$latest" ]; then
+            newest=$(printf '%s\n%s\n' "${latest#v}" "$version" | sort -V | tail -1)
+            if [ "$newest" != "$version" ] || [ "${latest#v}" = "$version" ]; then
+              echo "$version does not come after the current latest release $latest." >&2
+              exit 1
+            fi
+          fi
+
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: uvx git-cliff@2.10.1 --config cliff.toml --tag "$TAG" --unreleased --strip all -o release-notes.md
+
+      - name: Summarise the plan
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          {
+            echo "## Releasing $TAG"
+            echo
+            echo "- commit: \`${GITHUB_SHA}\`"
+            echo "- dry run: $DRY_RUN"
+            echo
+            cat release-notes.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload release notes
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-notes
+          path: release-notes.md
+          if-no-files-found: error
+
+  build:
+    name: Build and attest
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          # No cache restore in a workflow that publishes: a run that produces
+          # artifacts other people consume should build from the index, not
+          # from anything a previous run left behind.
+          enable-cache: false
+
+      # hatch-vcs takes the version from the nearest tag. The tag is created
+      # locally and only published once the build has been verified, so a
+      # failed release leaves no tag behind for anyone to install.
+      - name: Tag locally so the build is stamped with the release version
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "$TAG"
+
+      - name: Build wheel and sdist
+        run: uv build --out-dir dist
+
+      - name: Check the built version is the planned version
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          wheel=$(find dist -name '*.whl' | head -1)
+          built=$(basename "$wheel" | cut -d- -f2)
+          echo "wheel: $(basename "$wheel")"
+          if [ "$built" != "$VERSION" ]; then
+            echo "Built $built but planned $VERSION — the local tag did not take." >&2
+            exit 1
+          fi
+
+      - name: Generate SBOM
+        run: |
+          set -euo pipefail
+          uv venv --python 3.13 /tmp/sbom-env
+          uv pip install --python /tmp/sbom-env/bin/python dist/*.whl
+          uvx --from cyclonedx-bom cyclonedx-py environment /tmp/sbom-env \
+            --output-format JSON --outfile sbom.cdx.json
+          echo "SBOM components: $(jq '.components | length' sbom.cdx.json)"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
+
+      - name: Upload distribution
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom
+          path: sbom.cdx.json
+          if-no-files-found: error
+
+  verify:
+    name: Verify the wheel
+    needs: [plan, build]
+    uses: ./.github/workflows/verify.yml
+    with:
+      source: wheel
+      version: ${{ needs.plan.outputs.version }}
+
+  github-release:
+    name: Tag and publish the GitHub release
+    needs: [plan, build, verify]
+    if: ${{ !inputs.dry-run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download distribution
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
+
+      - name: Download SBOM
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sbom
+          path: .
+
+      - name: Download release notes
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-notes
+          path: .
+
+      # `gh release create --target` creates the tag itself, so this job never
+      # needs a checkout with push credentials.
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          set -euo pipefail
           gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
             --title "$TAG" \
             --notes-file release-notes.md \
-            dist/* \
-            $PRE
+            --latest \
+            dist/* sbom.cdx.json
+
+  pypi:
+    name: Publish to PyPI
+    needs: [plan, build, verify, github-release]
+    if: ${{ !inputs.dry-run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: pypi
+      url: https://pypi.org/p/arcane-mcp
+    permissions:
+      # Trusted publishing: PyPI trusts this workflow's OIDC identity, so there
+      # is no API token in this repository to leak or rotate.
+      id-token: write
+    steps:
+      - name: Download distribution
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
+
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          print-hash: true
+
+  image:
+    name: Publish the container image
+    needs: [plan, build, verify, github-release]
+    if: ${{ !inputs.dry-run && github.repository == 'Edition-X/arcane' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The image installs the same wheel that went to PyPI, so the two can
+      # never drift apart.
+      - name: Download distribution
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ needs.plan.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.plan.outputs.tag }}
+            type=raw,value=latest
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Attest image provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+  await-pypi:
+    name: Wait for PyPI
+    needs: [plan, pypi]
+    if: ${{ !inputs.dry-run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Poll the index until the version is installable
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            if curl -fsS "https://pypi.org/pypi/arcane-mcp/${VERSION}/json" -o /dev/null; then
+              echo "arcane-mcp ${VERSION} is on the index (attempt ${attempt})."
+              exit 0
+            fi
+            echo "not yet visible (attempt ${attempt}) — waiting"
+            sleep 10
+          done
+          echo "arcane-mcp ${VERSION} never appeared on PyPI." >&2
+          exit 1
+
+  verify-published:
+    name: Verify what was published
+    needs: [plan, await-pypi, image]
+    if: ${{ !inputs.dry-run }}
+    uses: ./.github/workflows/verify.yml
+    with:
+      source: pypi
+      version: ${{ needs.plan.outputs.version }}
+      image: ghcr.io/edition-x/arcane:${{ needs.plan.outputs.version }}
+
+  # The wheel was verified on every platform before anything was published, so
+  # reaching here is rare — a packaging-metadata or registry problem rather
+  # than a code one. PyPI cannot be unpublished, only yanked, and yanking needs
+  # a human; what this can do is stop the release being the one people find.
+  quarantine:
+    name: Quarantine the release
+    needs: [plan, verify-published]
+    if: ${{ always() && !inputs.dry-run && needs.verify-published.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - name: Un-latest the release and raise an issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --prerelease --latest=false
+          gh issue create \
+            --title "Release $TAG failed post-publish verification" \
+            --body "$(printf '%s\n' \
+              "\`$TAG\` published but failed verification against PyPI and the container image." \
+              "" \
+              "The GitHub release has been marked as a prerelease and is no longer latest." \
+              "" \
+              "Still to do by hand:" \
+              "" \
+              "- [ ] \`yank\` \`arcane-mcp==$VERSION\` on PyPI" \
+              "- [ ] retag \`$IMAGE:latest\` to the previous good release" \
+              "" \
+              "Failing run: $RUN_URL")"
