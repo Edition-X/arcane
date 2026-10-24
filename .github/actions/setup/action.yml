@@ -28,6 +28,8 @@ runs:
     - name: Install uv
       uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
       with:
+        # Keep in step with the uv image in the Dockerfile.
+        version: "0.13.5"
         enable-cache: ${{ inputs.cache == 'true' }}
         # The resolution strategy changes the resolved set, so it has to be part
         # of the key or a lowest-direct job would restore the highest-pin cache.
