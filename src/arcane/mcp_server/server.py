@@ -164,6 +164,10 @@ def _create_server(container: ServiceContainer) -> Server:
                             ),
                         },
                         "journey_id": {"type": "string", "description": "Link to a journey."},
+                        "supersedes": {
+                            "type": "string",
+                            "description": "ID or prefix of an earlier memory this one replaces.",
+                        },
                         "ttl_days": {
                             "type": "integer",
                             "description": "Days until this memory expires. Omit for permanent memories.",
@@ -268,6 +272,10 @@ def _create_server(container: ServiceContainer) -> Server:
                         "impact": {"type": "string"},
                         "tags": {"type": "array", "items": {"type": "string"}},
                         "details_append": {"type": "string", "description": "Text appended to details."},
+                        "supersedes": {
+                            "type": "string",
+                            "description": "ID or prefix of an earlier memory this one replaces.",
+                        },
                     },
                     "required": ["memory_id"],
                 },

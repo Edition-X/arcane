@@ -27,11 +27,13 @@ Save when you:
 - Learned something about the codebase
 - Set up infrastructure, tooling, or configuration
 
-When filling `details`, prefer: Context, Options considered, Decision, Tradeoffs, Follow-up."""
+When filling `details`, prefer: Context, Options considered, Decision, Tradeoffs, Follow-up.
+
+When this memory replaces an earlier one (a reversed decision, a newer fix), pass `supersedes` with the old memory's ID: search then marks the old one as replaced and ranks it below the new one, and context leaves it out."""
 
 SEARCH_DESCRIPTION = """Search memories using keyword and semantic search. Call this at session start and when the user's request relates to a topic with prior context.
 
-Results omit why/impact by default; call memory_details for the full body."""
+Results omit why/impact by default; call memory_details for the full body. A result with `superseded_by` has been replaced by a newer memory; prefer the newer one."""
 
 CONTEXT_DESCRIPTION = """Get memory context for the current project. Call this at session start to load prior decisions, bugs, and context.
 
@@ -58,6 +60,7 @@ def handle_save(
     ttl_days: int | None = None,
     confidence: float | None = None,
     source: str | None = None,
+    supersedes: str | None = None,
 ) -> str:
     handler_warnings: list[str] = []
 
@@ -108,6 +111,7 @@ def handle_save(
         details=details,
         source=source,
         journey_id=journey_id,
+        supersedes=supersedes,
         ttl_days=ttl_days,
         confidence=confidence,
     )
@@ -143,12 +147,15 @@ def _search_hit(r: dict, detail: str) -> dict:
     # unifying them would need per-field branching that reads worse than
     # two short builders.
     score = round(r.get("score", 0), 2)
+    # Shown at every detail level: acting on a replaced decision is the costly mistake.
+    replaced = {"superseded_by": r["superseded_by"]} if r.get("superseded_by") else {}
     if detail == "minimal":
         return {
             "id": r["id"],
             "title": r["title"],
             "category": r.get("category"),
             "score": score,
+            **replaced,
         }
     if detail == "full":
         return {
@@ -166,6 +173,7 @@ def _search_hit(r: dict, detail: str) -> dict:
             "has_details": bool(r.get("has_details")),
             "ttl_days": r.get("ttl_days"),
             "confidence": r.get("confidence"),
+            **replaced,
         }
     # standard (default)
     return {
@@ -178,6 +186,7 @@ def _search_hit(r: dict, detail: str) -> dict:
         "project": r.get("project"),
         "date": r.get("created_at", "")[:10],
         "has_details": bool(r.get("has_details")),
+        **replaced,
     }
 
 
@@ -336,7 +345,15 @@ def handle_details(svc: MemoryService, memory_id: str) -> str:
         return json.dumps({"error": str(exc)})
     if not detail:
         return json.dumps({"error": f"No details found for {memory_id}"})
-    return json.dumps({"memory_id": detail["memory_id"], "body": detail["body"]})
+    full_id = detail["memory_id"]
+    payload: dict = {"memory_id": full_id, "body": detail["body"]}
+    replaced_by = svc.c.relationship_repo.superseded_by([full_id]).get(full_id)
+    if replaced_by:
+        payload["superseded_by"] = replaced_by
+    replaces = svc.c.relationship_repo.supersedes(full_id)
+    if replaces:
+        payload["supersedes"] = replaces
+    return json.dumps(payload)
 
 
 def handle_update(
@@ -347,8 +364,12 @@ def handle_update(
     impact: str | None = None,
     tags: list[str] | None = None,
     details_append: str | None = None,
+    supersedes: str | None = None,
 ) -> str:
     try:
+        superseded_id = svc.c.memory_repo.resolve_prefix(supersedes) if supersedes else None
+        if supersedes and superseded_id is None:
+            return json.dumps({"error": f"Superseded memory not found: {supersedes}"})
         updated = svc.update(
             memory_id,
             what=what,
@@ -356,6 +377,7 @@ def handle_update(
             impact=impact,
             tags=tags,
             details_append=details_append,
+            supersedes=superseded_id,
         )
     except IdentifierResolutionError as exc:
         return json.dumps({"error": str(exc)})

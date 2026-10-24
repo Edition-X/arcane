@@ -64,6 +64,7 @@ class UsageAnalyzer:
         sessions = sum(c["sessions"] for c in clients)
         searches = repo.searches(days)
         follow = repo.follow_through(days)
+        replaced = repo.replaced_hits(days)
         covered_days = (datetime.now(timezone.utc) - datetime.fromisoformat(first)).days
 
         lines = [
@@ -80,6 +81,7 @@ class UsageAnalyzer:
             "only weak matches with none of the search's key words).",
             f"Recall lookups followed by opening or updating a returned memory: {follow['followed']} "
             f"of {follow['total']} ({_pct(follow['followed'], follow['total'])}).",
+            f"Lookups that returned a replaced (superseded) memory: {replaced['lookups']} ({replaced['hits']} hits).",
         ]
         top = repo.top_memories(days)
         if top:
