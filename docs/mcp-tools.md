@@ -301,11 +301,12 @@ Run an intelligence analysis plugin against stored data.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `plugin_name` | string | yes | `velocity` or `health` |
+| `plugin_name` | string | yes | `velocity`, `health` or `usage` |
 | `project` | string | no | Project to analyse |
 
 - **`velocity`** — summarises engineering output rate from commits and closed tickets
 - **`health`** — audits store health: fragmentation, orphans, duplicates, journey hygiene
+- **`usage`** — reports what agents recall: lookups per agent and tool, searches that found nothing relevant, how often a returned memory was then opened or updated, the most recalled memories and, after 30 days of history, memories no lookup has returned
 
 Results are stored as Insights and returned in the response.
 

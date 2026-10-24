@@ -100,6 +100,20 @@ The `context` section controls how `memory_context` and resource reads work.
 
 ---
 
+## Usage recording
+
+The MCP server records every lookup (`memory_search`, `memory_context`, `memory_details`, `memory_update`, `journey_show`, `artifact_search`, `artifact_details` and the project context resource) with the agent, session, project and the IDs it returned. `arcane analyze usage` reports on it. The log stays in the local `index.db`.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | boolean | `true` | Record lookups at all. |
+| `log_queries` | boolean | `true` | Keep the search text, redacted like every other stored field. Off stores the lookup without it. |
+| `retention_days` | integer | `180` | Lookups older than this are deleted when the MCP server starts. |
+
+A search counts as a possible gap when it returned nothing, or when no memory contains its key words (all of them for up to three, all but one for longer searches), since vector search always returns its nearest neighbours.
+
+---
+
 ## Environment variable reference
 
 Environment variables take precedence over the config file.
