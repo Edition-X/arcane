@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # Layer 2: Exact token patterns — entire match is redacted.
 # Compiled once at module level for performance.
@@ -90,11 +93,33 @@ def redact_values(value: Any, extra_patterns: list[str] | None = None) -> Any:
 
 
 def load_memoryignore(path: str) -> list[str]:
-    """Load custom redaction patterns from a ``.memoryignore`` file."""
+    """Load custom redaction patterns from a ``.memoryignore`` file.
+
+    A pattern that is not a valid regex is dropped with a warning naming its
+    line. Without one, a typo would leave whatever it was meant to catch
+    stored in clear, and nothing would say so.
+    """
     try:
         with open(path) as f:
             lines = f.readlines()
     except FileNotFoundError:
         return []
 
-    return [line.strip() for line in lines if line.strip() and not line.startswith("#")]
+    patterns: list[str] = []
+    for number, line in enumerate(lines, start=1):
+        pattern = line.strip()
+        if not pattern or pattern.startswith("#"):
+            continue
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            logger.warning(
+                "%s line %d: %r is not a valid regex (%s), so nothing it matches is redacted",
+                path,
+                number,
+                pattern,
+                exc,
+            )
+            continue
+        patterns.append(pattern)
+    return patterns
