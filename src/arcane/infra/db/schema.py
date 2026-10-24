@@ -307,7 +307,13 @@ def create_schema(db: Database) -> None:
 
 
 def create_vec_table(db: Database, dim: int) -> None:
-    """Create the vector similarity table with given dimension."""
+    """Create the vector similarity table with given dimension.
+
+    A no-op where sqlite-vec could not be loaded: the caller has an embedding
+    but nowhere to put it, and search falls back to FTS5.
+    """
+    if not db.vec_available:
+        return
     db.execute(f"""
         CREATE VIRTUAL TABLE IF NOT EXISTS memories_vec USING vec0(
             rowid INTEGER PRIMARY KEY,

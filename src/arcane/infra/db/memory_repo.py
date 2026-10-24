@@ -450,7 +450,7 @@ class MemoryRepository:
         brute-force scan whose cost barely depends on ``k``, so the candidate
         pool is always wide.
         """
-        if not self._has_vec_table():
+        if not self.db.vec_available or not self._has_vec_table():
             return []
 
         fetch_k = min(max(limit * 5, KNN_MIN_CANDIDATES), VEC0_MAX_K)
