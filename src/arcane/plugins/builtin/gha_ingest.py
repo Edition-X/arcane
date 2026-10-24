@@ -11,6 +11,8 @@ from typing import Any
 
 import httpx
 
+from arcane.plugins.protocols import IngestionError
+
 logger = logging.getLogger(__name__)
 
 _GH_API = "https://api.github.com"
@@ -33,6 +35,7 @@ class GHAIngestionPlugin:
         self.repo = repo
         self.token = token or os.environ.get("GITHUB_TOKEN")
         self.per_page = per_page
+        self._last_error = ""
 
     def ingest(self, project: str, since: datetime | None = None) -> list[dict[str, Any]]:
         runs = self._fetch_all_runs()
@@ -84,7 +87,11 @@ class GHAIngestionPlugin:
                 break
             result = self._fetch_page(url, params)
             if result is None:
-                break
+                hint = "" if self.token else " GITHUB_TOKEN is not set, which private repos need."
+                raise IngestionError(
+                    f"GitHub Actions runs for {self.owner}/{self.repo} could not be fetched after "
+                    f"{_RETRY_ATTEMPTS} attempts ({self._last_error}).{hint}"
+                )
 
             runs, next_url = result
             all_runs.extend(runs)
@@ -118,6 +125,7 @@ class GHAIngestionPlugin:
                         retry_after,
                         attempt,
                     )
+                    self._last_error = f"HTTP {resp.status_code}, rate limited or forbidden"
                     time.sleep(retry_after)
                     delay *= 2
                     continue
@@ -128,8 +136,10 @@ class GHAIngestionPlugin:
                 return runs, next_url
 
             except httpx.HTTPStatusError as exc:
+                self._last_error = f"HTTP {exc.response.status_code}"
                 logger.warning("GitHub API error %s (attempt %d)", exc.response.status_code, attempt)
             except httpx.RequestError as exc:
+                self._last_error = f"network error: {exc}"
                 logger.warning("GitHub network error: %s (attempt %d)", exc, attempt)
 
             if attempt < _RETRY_ATTEMPTS:

@@ -6,6 +6,14 @@ from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
 
+class IngestionError(RuntimeError):
+    """An ingestion source could not be read (missing credentials, API or network failure).
+
+    Raised instead of returning an empty list, so a failed import is reported
+    as an error rather than as "0 ingested".
+    """
+
+
 @runtime_checkable
 class IngestionPlugin(Protocol):
     """Pulls data from an external source into Arcane."""

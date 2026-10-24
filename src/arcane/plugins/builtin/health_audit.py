@@ -14,10 +14,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from arcane.domain.scope import canonicalize_project
-from arcane.infra.db.journey_repo import JourneyRepository
+from arcane.infra.db.journey_repo import IDLE_JOURNEY_DAYS, JourneyRepository
 from arcane.infra.db.memory_repo import MemoryRepository
-
-STALE_JOURNEY_DAYS = 30
 
 
 class HealthAuditor:
@@ -28,7 +26,7 @@ class HealthAuditor:
         memory_repo: MemoryRepository | None = None,
         journey_repo: JourneyRepository | None = None,
         aliases: dict[str, str] | None = None,
-        stale_days: int = STALE_JOURNEY_DAYS,
+        stale_days: int = IDLE_JOURNEY_DAYS,
     ) -> None:
         self.memory_repo = memory_repo
         self.journey_repo = journey_repo

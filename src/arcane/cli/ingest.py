@@ -9,6 +9,7 @@ import click
 
 from arcane.cli._utils import create_container
 from arcane.infra.db.ids import IdentifierResolutionError
+from arcane.plugins.protocols import IngestionError
 
 if TYPE_CHECKING:
     from arcane.plugins.protocols import IngestionPlugin
@@ -24,7 +25,7 @@ def _run(
 ) -> dict[str, Any]:
     try:
         return svc.run_plugin(plugin, project=project, journey_id=journey_id, repo_path=repo_path)
-    except IdentifierResolutionError as exc:
+    except (IdentifierResolutionError, IngestionError) as exc:
         raise click.ClickException(str(exc)) from exc
 
 
