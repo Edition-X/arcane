@@ -2,20 +2,19 @@
 
 ## Connect to Claude Code
 
-Add Arcane to your Claude Code MCP config. You can do this globally (`~/.claude/config.json`) or per-project (`.claude/config.json` in a project directory):
+Register Arcane for every project with the Claude Code CLI:
 
-```json
-{
-  "mcpServers": {
-    "arcane": {
-      "command": "arcane",
-      "args": ["mcp"]
-    }
-  }
-}
+```bash
+claude mcp add --scope user arcane -- arcane mcp
 ```
 
-Restart Claude Code — the Arcane tools will be available automatically.
+Use `--scope project` instead to write it to the repository's `.mcp.json` and share it with the team. Start a new Claude Code session to load the tools.
+
+## Connect to Codex
+
+```bash
+codex mcp add arcane -- arcane mcp
+```
 
 ---
 

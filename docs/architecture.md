@@ -78,7 +78,7 @@ When no embedding provider is available (provider set to `none` or API key missi
 
 All persistent data lives in a single SQLite file at `~/.arcane/index.db` (or `$ARCANE_HOME/index.db`). This makes it trivial to back up, sync with a tool like `syncthing`, or inspect directly with any SQLite client.
 
-A Markdown mirror of project memories is written to `~/.arcane/vault/@<org>/<project>/YYYY-MM-DD-session.md`. Org memories omit the project directory; global memories live directly under `vault/`. These are human-readable records you can keep in a private git repo or read in any text editor.
+A Markdown mirror of project memories is written to `~/.arcane/vault/@<org>/<project>/YYYY-MM-DD-session.md`. Org memories omit the project directory, and global memories live under `vault/@global/`. These are human-readable records you can keep in a private git repo or read in any text editor.
 
 Stored file paths are relative to the data home (`vault/...`), and API responses give the current absolute path. Moving or restoring the home keeps new paths usable. Legacy absolute paths resolve only inside the current vault, so a restored copy cannot edit the original vault through an old path.
 
