@@ -98,7 +98,14 @@ def redact(text: str, extra_patterns: list[str] | None = None) -> str:
 
 
 def redact_values(value: Any, extra_patterns: list[str] | None = None) -> Any:
-    """Recursively redact strings in JSON-like values before serialisation."""
+    """Recursively redact strings in JSON-like values before serialisation.
+
+    Mapping keys are left alone. Every caller passes a dict whose keys are
+    structure, not content — model dumps, column names, artifact ``raw_data``
+    and insight ``metadata`` — so rewriting a key silently drops the field it
+    names. A ``.memoryignore`` pattern matching ``journey_id`` once cost a save
+    its journey link, and one matching ``title`` failed the save outright.
+    """
     if isinstance(value, str):
         return redact(value, extra_patterns)
     if isinstance(value, list):
@@ -106,10 +113,7 @@ def redact_values(value: Any, extra_patterns: list[str] | None = None) -> Any:
     if isinstance(value, tuple):
         return tuple(redact_values(item, extra_patterns) for item in value)
     if isinstance(value, dict):
-        return {
-            redact(key, extra_patterns) if isinstance(key, str) else key: redact_values(item, extra_patterns)
-            for key, item in value.items()
-        }
+        return {key: redact_values(item, extra_patterns) for key, item in value.items()}
     return value
 
 

@@ -312,11 +312,11 @@ class MemoryRepository:
         where = "WHERE org = ?" if org is not None else ""
         params: tuple[Any, ...] = (org,) if org is not None else ()
 
-        def count(condition: str = "1") -> int:
+        def count(condition: str = "1", *, scoped: bool = True) -> int:
+            in_org = scoped and org is not None
             row = self.db.fetchone(
-                f"SELECT COUNT(*) as cnt FROM memories WHERE ({condition})"
-                + (" AND org = ?" if org is not None else ""),
-                params,
+                f"SELECT COUNT(*) as cnt FROM memories WHERE ({condition})" + (" AND org = ?" if in_org else ""),
+                params if in_org else (),
             )
             return row["cnt"] if row else 0
 
@@ -332,7 +332,9 @@ class MemoryRepository:
         )
         return {
             "total": count(),
-            "empty_project": count("COALESCE(project, '') = '' AND COALESCE(org, '') = ''"),
+            # Rows with no org belong to no org, so an org filter would always
+            # hide them; an org-scoped audit is the only place they surface.
+            "empty_project": count("COALESCE(project, '') = '' AND COALESCE(org, '') = ''", scoped=False),
             "ttl_set": count("ttl_days IS NOT NULL"),
             "confidence_set": count("confidence IS NOT NULL"),
             "categories": categories,
@@ -381,12 +383,14 @@ class MemoryRepository:
         )
         return [_process_row(r) for r in rows]
 
-    def reassign_project(self, old: str, new: str) -> int:
-        """Move every memory in project *old* to *new*; return rows updated.
+    def reassign_project(self, old: str, new: str, *, org: str) -> int:
+        """Move every memory in *org*'s project *old* to *new*; return rows updated.
 
-        The FTS index follows via the ``memories_au`` trigger.
+        Confined to one org: two orgs can each have a project of the same name,
+        and an empty *old* also matches every org-level memory. The FTS index
+        follows via the ``memories_au`` trigger.
         """
-        cursor = self.db.execute("UPDATE memories SET project = ? WHERE project = ?", (new, old))
+        cursor = self.db.execute("UPDATE memories SET project = ? WHERE project = ? AND org = ?", (new, old, org))
         self.db.commit()
         return int(cursor.rowcount)
 

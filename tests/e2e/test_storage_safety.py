@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from tests.e2e.conftest import ARCANE, Arcane, Client
 
@@ -188,3 +189,22 @@ def test_sessions_lists_new_org_layout_and_legacy_files(arcane: Arcane) -> None:
     assert "@acme/widget" in output and "legacy" in output
     output = cli(arcane, "sessions", "--project", "widget")
     assert "@acme/widget" in output and "legacy" not in output
+
+
+def test_session_frontmatter_stays_valid_yaml_and_keeps_every_tag(arcane: Arcane) -> None:
+    # Tags were joined into `tags: [..]` unquoted, so "a, b" or "c]d" made the
+    # frontmatter invalid YAML, and the next save to the file re-parsed it with
+    # a bracket regex that dropped every tag after the first "]".
+
+    awkward = ["a, b", "c]d", "issue: 25", "no"]
+
+    async def scenario(client: Client) -> str:
+        first = await client.call("memory_save", title="Awkward tags", what="x", tags=awkward)
+        await client.call("memory_save", title="Plain tags", what="y", tags=["zeta"])
+        return str(first["file_path"])
+
+    path = Path(arcane.run(scenario))
+    frontmatter = yaml.safe_load(path.read_text(encoding="utf-8").split("---\n")[1])
+
+    assert sorted(frontmatter["tags"]) == sorted([*awkward, "zeta"])
+    assert frontmatter["sources"] == ["e2e-client"]

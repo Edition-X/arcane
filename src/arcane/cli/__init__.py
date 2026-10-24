@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import click
 
 from arcane import __version__
@@ -30,7 +32,24 @@ from arcane.cli.relationship import link, trace
 from arcane.cli.report import export, report
 
 
-@click.group()
+class ArcaneGroup(click.Group):
+    """Report a broken ``config.yaml`` or an unusable ID as a message, not a traceback.
+
+    Every command opens a store, and most take an ID or prefix, so the one
+    place that can catch these for all of them is the group itself.
+    """
+
+    def invoke(self, ctx: click.Context) -> Any:
+        from arcane.infra.config import ConfigError
+        from arcane.infra.db.ids import IdentifierResolutionError
+
+        try:
+            return super().invoke(ctx)
+        except (ConfigError, IdentifierResolutionError) as exc:
+            raise click.ClickException(str(exc)) from exc
+
+
+@click.group(cls=ArcaneGroup)
 @click.version_option(__version__, prog_name="arcane")
 @click.option("--verbose", "-v", is_flag=True, default=False, help="Enable debug logging.")
 @click.pass_context

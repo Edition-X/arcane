@@ -29,7 +29,17 @@ def vault_path(home: str, stored_path: str) -> Path:
     # session files, and on Windows resolving a file mid-replace can return a
     # \\?\-prefixed path that no longer looks inside the vault. Directories
     # are never replaced; a symlinked file is still followed and checked.
-    candidate = root.joinpath(*portable.parts[:-1]).resolve() / portable.name
+    # Resolve only the deepest directory that already exists: saves check the
+    # path before creating it, and if another process creates part of a
+    # missing directory between realpath's two lookups, the prefix stays too.
+    directory = root.joinpath(*portable.parts[:-1])
+    existing = directory
+    while existing != root and not existing.exists():
+        existing = existing.parent
+    missing = directory.relative_to(existing).parts
+    if any(part in (".", "..") for part in missing):
+        raise ValueError("Memory path escapes the vault or is not a Markdown file")
+    candidate = existing.resolve().joinpath(*missing, portable.name)
     if candidate.is_symlink():
         candidate = candidate.resolve()
     if not candidate.is_relative_to(root) or candidate == root or candidate.suffix != ".md":

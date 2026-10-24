@@ -230,7 +230,7 @@ class TestMemoryRepoReassignProject:
         for m in (m1, m2, m3):
             memory_repo.insert(m)
 
-        moved = memory_repo.reassign_project("old-name", "new-name")
+        moved = memory_repo.reassign_project("old-name", "new-name", org="")
 
         assert moved == 2
         assert memory_repo.get(m1["id"])["project"] == "new-name"
@@ -241,7 +241,7 @@ class TestMemoryRepoReassignProject:
         mem = make_memory_dict(title="ReassignFTS", what="UniqueReassignBody", project="old-name")
         memory_repo.insert(mem)
 
-        memory_repo.reassign_project("old-name", "new-name")
+        memory_repo.reassign_project("old-name", "new-name", org="")
 
         hits_new = memory_repo.fts_search("UniqueReassignBody", project="new-name")
         hits_old = memory_repo.fts_search("UniqueReassignBody", project="old-name")
@@ -252,7 +252,7 @@ class TestMemoryRepoReassignProject:
         mem = make_memory_dict(project="keep-me")
         memory_repo.insert(mem)
 
-        assert memory_repo.reassign_project("does-not-exist", "new-name") == 0
+        assert memory_repo.reassign_project("does-not-exist", "new-name", org="") == 0
         assert memory_repo.get(mem["id"])["project"] == "keep-me"
 
 

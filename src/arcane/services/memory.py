@@ -19,7 +19,7 @@ from arcane.infra.embeddings.base import EmbeddingsDisabled
 from arcane.infra.markdown import remove_session_memory, write_session_memory
 from arcane.infra.paths import relative_vault_path, vault_path
 from arcane.infra.redaction import redact, redact_values
-from arcane.infra.search import hybrid_search, tiered_search
+from arcane.infra.search import tiered_search
 from arcane.services.container import ServiceContainer
 
 logger = logging.getLogger(__name__)
@@ -299,9 +299,13 @@ class MemoryService:
         vault_project_dir = str(file_path.parent)
         os.makedirs(vault_project_dir, exist_ok=True)
 
-        raw_data = redact_values(raw.model_dump(), self.c.ignore_patterns)
-        assert isinstance(raw_data, dict)
-        raw = RawMemoryInput.model_validate(raw_data)
+        # Redact in place rather than re-validating a dumped dict: redaction can
+        # only lengthen a field (a matched span becomes "[REDACTED]"), and a
+        # title pushed past its 60-character limit would fail a save that had
+        # already validated. The input was validated when it was constructed.
+        redacted = redact_values(raw.model_dump(), self.c.ignore_patterns)
+        assert isinstance(redacted, dict)
+        raw = raw.model_copy(update=redacted)
         warnings = self._details_warnings(raw)
         journey_id = self._resolve_journey(raw.journey_id, warnings)
         superseded_id = self._resolve_superseded(raw.supersedes, warnings)
@@ -439,20 +443,7 @@ class MemoryService:
     ) -> list[dict[str, Any]]:
         if project:
             project = resolve_read_project(project, self.c.config)
-        if not use_vectors:
-            return hybrid_search(
-                self.c.memory_repo,
-                None,
-                query,
-                limit=limit,
-                project=project,
-                source=source,
-                org=org,
-                include_org=include_org,
-                include_global=include_global,
-            )
-
-        if self.vectors_available:
+        if use_vectors and self.vectors_available:
             try:
                 return tiered_search(
                     self.c.memory_repo,

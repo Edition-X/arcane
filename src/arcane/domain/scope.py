@@ -16,7 +16,7 @@ from collections.abc import Mapping
 
 from pydantic import BaseModel, field_validator
 
-from arcane.infra.config import ArcaneConfig
+from arcane.infra.config import ArcaneConfig, validate_org_slug
 
 GLOBAL_ORG = "global"
 DEFAULT_ORG = "personal"
@@ -47,11 +47,12 @@ class Scope(BaseModel):
 
 
 def validate_org(value: str) -> str:
-    """Accept only canonical org slugs, so an org can safely name a directory."""
-    value = value.strip().lower()
-    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", value):
-        raise ValueError("Org must be a nonempty slug containing letters, digits and single hyphens")
-    return value
+    """Accept only canonical org slugs, so an org can safely name a directory.
+
+    The rule itself lives in ``infra.config``, which validates configured orgs
+    at load time; this is the name the rest of the code calls it by.
+    """
+    return validate_org_slug(value)
 
 
 def slugify(name: str) -> str:
