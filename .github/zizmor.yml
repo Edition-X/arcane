@@ -1,0 +1,15 @@
+# zizmor audit configuration — https://docs.zizmor.sh/configuration/
+rules:
+  self-repository:
+    # zizmor prefers `uses: $/.github/actions/setup` over `uses: ./...`, and the
+    # reasoning is sound: the workspace-relative form resolves against whatever
+    # is on disk at that point in the job. GitHub only introduced `$/` in July
+    # 2026 though, and it is not confirmed generally available, so adopting it
+    # here would put every job in the pipeline behind one unproven syntax.
+    # Revisit once it is documented as GA; the change is one sed away.
+    ignore:
+      - ci.yml
+      - main.yml
+      - release.yml
+      - maintenance.yml
+      - pages.yml

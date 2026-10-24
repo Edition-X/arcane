@@ -201,6 +201,74 @@ List journeys, optionally filtered by project or status.
 
 ---
 
+### `journey_show`
+
+**Profile:** `core`
+
+Get full details for a journey — title, status, summary, append-only event history, and all linked memories and artifacts. Use instead of `trace` + `memory_details` loops.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `journey_id` | string | yes | Journey ID or prefix |
+
+---
+
+### `journey_abandon`
+
+**Profile:** `core`
+
+Mark a journey as abandoned — a dead end, superseded work, or test junk. The journey stays searchable; it just stops counting as active.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `journey_id` | string | yes | Journey ID or prefix |
+| `reason` | string | no | Why it was abandoned |
+
+---
+
+### `journey_delete`
+
+**Profile:** `full`
+
+Delete a journey and its relationships. Linked memories survive.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `journey_id` | string | yes | Journey ID or prefix |
+
+---
+
+## Artifact tools
+
+Artifacts are ingested evidence — commits, CI runs, and tickets. The ingestion tools below write them; these two read them back.
+
+### `artifact_search`
+
+**Profile:** `core`
+
+Search ingested artifact titles, external IDs, and raw content.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `query` | string | yes | Search terms |
+| `project` | string | no | Filter by project |
+| `artifact_type` | string | no | Filter by type, for example `commit`, `ci_run`, `ticket` |
+| `limit` | integer | no | Number to return (default: 10) |
+
+---
+
+### `artifact_details`
+
+**Profile:** `full`
+
+Get the full ingested artifact record by ID or prefix.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `artifact_id` | string | yes | Artifact ID or unambiguous prefix |
+
+---
+
 ## Relationship tools
 
 ### `link`

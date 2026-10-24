@@ -1,0 +1,57 @@
+version: 2
+
+updates:
+  # Workflows pin actions by commit SHA; Dependabot is what moves those pins.
+  # Grouped so a week of action releases is one PR, not six.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Ljubljana
+    open-pull-requests-limit: 3
+    cooldown:
+      # Do not pull a version the moment it is published. A week is enough for
+      # a compromised or yanked release to be noticed by someone else first.
+      default-days: 7
+    commit-message:
+      prefix: chore(ci)
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    cooldown:
+      # Do not pull a version the moment it is published. A week is enough for
+      # a compromised or yanked release to be noticed by someone else first.
+      default-days: 7
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      # Runtime bumps change what users get and are worth reading; dev tooling
+      # bumps are noise unless they break the build.
+      runtime:
+        dependency-type: production
+        patterns:
+          - "*"
+      dev:
+        dependency-type: development
+        patterns:
+          - "*"
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      # Do not pull a version the moment it is published. A week is enough for
+      # a compromised or yanked release to be noticed by someone else first.
+      default-days: 7
+    commit-message:
+      prefix: chore(docker)

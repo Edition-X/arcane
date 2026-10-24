@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
-import fcntl
 import os
 import re
+import sys
 import tempfile
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
+
+if sys.platform == "win32":  # pragma: no cover - exercised by the Windows CI leg
+    import msvcrt
+else:
+    import fcntl
 
 from arcane.domain.enums import CATEGORY_HEADINGS, Category
 from arcane.infra.redaction import redact, redact_values
@@ -64,17 +70,47 @@ def write_session_memory(
     return str(file_path)
 
 
+# How long to keep retrying a contended lock on Windows, which has no blocking
+# equivalent of flock() that also releases cleanly on process death.
+_LOCK_TIMEOUT_SECONDS = 10.0
+_LOCK_RETRY_SECONDS = 0.05
+
+
+def _acquire(lock_file: IO[str]) -> None:
+    if sys.platform == "win32":  # pragma: no cover - exercised by the Windows CI leg
+        lock_file.seek(0)
+        deadline = time.monotonic() + _LOCK_TIMEOUT_SECONDS
+        while True:
+            try:
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+                return
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(_LOCK_RETRY_SECONDS)
+    else:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+
+
+def _release(lock_file: IO[str]) -> None:
+    if sys.platform == "win32":  # pragma: no cover - exercised by the Windows CI leg
+        lock_file.seek(0)
+        msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
 @contextmanager
 def _file_lock(file_path: Path) -> Iterator[None]:
     """Use a sibling lock file so independent MCP processes serialize writes."""
     file_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = file_path.with_suffix(file_path.suffix + ".lock")
     with lock_path.open("a+") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        _acquire(lock_file)
         try:
             yield
         finally:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            _release(lock_file)
 
 
 def _atomic_write(file_path: Path, content: str) -> None:

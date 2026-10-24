@@ -12,12 +12,19 @@ requires-python = ">=3.11"
 authors = [{ name = "Dan Kelly" }]
 keywords = ["agent", "memory", "mcp", "engineering", "knowledge"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    # Every release is installed and driven over MCP stdio on all three before
+    # it is published; see .github/workflows/verify.yml.
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
 ]
 dependencies = [
     "click>=8.0",
@@ -29,11 +36,20 @@ dependencies = [
     "sqlite-vec>=0.1",
 ]
 
+[project.urls]
+Homepage = "https://github.com/Edition-X/arcane"
+Documentation = "https://edition-x.github.io/arcane/"
+Source = "https://github.com/Edition-X/arcane"
+Changelog = "https://github.com/Edition-X/arcane/releases"
+Issues = "https://github.com/Edition-X/arcane/issues"
+
 [project.optional-dependencies]
 pysqlite3 = ["pysqlite3-binary>=0.5"]
 dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.23",
+    # Lower bounds the lowest-direct CI job actually resolves to, so they have
+    # to be pairs that work: pytest-asyncio 0.23 cannot collect under pytest 9.
+    "pytest>=8.2",
+    "pytest-asyncio>=1.0",
     "ruff>=0.4",
     "mypy>=1.10",
     "pre-commit>=3.7",

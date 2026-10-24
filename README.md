@@ -1,6 +1,15 @@
 # Arcane
 
-> **Beta software** — Arcane is in active development. APIs and storage formats may change between releases. Pin your version and back up `~/.arcane` before upgrading.
+[![CI](https://github.com/Edition-X/arcane/actions/workflows/ci.yml/badge.svg)](https://github.com/Edition-X/arcane/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/arcane-mcp)](https://pypi.org/project/arcane-mcp/)
+[![Python](https://img.shields.io/pypi/pyversions/arcane-mcp)](https://pypi.org/project/arcane-mcp/)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/Edition-X/arcane/badge)](https://scorecard.dev/viewer/?uri=github.com/Edition-X/arcane)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+
+> **Pre-1.0** — the MCP tool surface and the storage format can still change
+> between minor versions. Back up `~/.arcane` before upgrading. Breaking
+> changes move the minor version and are called out in the
+> [changelog](https://github.com/Edition-X/arcane/releases).
 
 **Unified engineering intelligence** — persistent memory, decision journeys, and knowledge capture for AI-assisted development workflows.
 
@@ -24,17 +33,22 @@ Arcane runs as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io
 ### Install
 
 ```bash
-# Install a pinned GitHub release with uv (recommended)
-uv tool install --from "git+https://github.com/Edition-X/arcane.git@v0.2.0-beta.11" arcane-mcp
+# With uv (recommended)
+uv tool install arcane-mcp
 
 # Or with pip
-pip install "git+https://github.com/Edition-X/arcane.git@v0.2.0-beta.11"
+pip install arcane-mcp
 ```
 
-beta.10 is incompatible with `arcane-mcp` because its distribution metadata is
-`arcane`. Use `v0.2.0-beta.11` or newer, then replace that tag with the later
-release you want. GitHub releases also include wheel and source-distribution
-assets for offline or controlled installs.
+The distribution is `arcane-mcp`. PyPI's `arcane` is an unrelated project — do
+not install that one.
+
+Every release is also published as a container image and as signed wheel and
+source-distribution assets on its [GitHub release](https://github.com/Edition-X/arcane/releases):
+
+```bash
+docker run -i --rm -v "$HOME/.arcane:/data/.arcane" ghcr.io/edition-x/arcane
+```
 
 ### Initialise
 

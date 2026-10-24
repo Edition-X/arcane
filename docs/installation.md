@@ -10,22 +10,41 @@
 
 ## Install Arcane
 
+The distribution is **`arcane-mcp`**. PyPI's `arcane` is an unrelated project —
+do not install that one.
+
 ### With uv (recommended)
 
 ```bash
-uv tool install --from "git+https://github.com/Edition-X/arcane.git@v0.2.0-beta.11" arcane-mcp
+uv tool install arcane-mcp
 ```
 
 ### With pip
 
 ```bash
-pip install "git+https://github.com/Edition-X/arcane.git@v0.2.0-beta.11"
+pip install arcane-mcp
 ```
 
-beta.10 is incompatible with `arcane-mcp` because its distribution metadata is
-`arcane`. Use `v0.2.0-beta.11` or newer, then replace that tag with the later
-release you want. Each GitHub release also contains wheel and source-distribution
-assets for controlled installs.
+### A specific version
+
+```bash
+uv tool install "arcane-mcp==0.2.0"
+```
+
+### From a container image
+
+```bash
+docker run -i --rm -v "$HOME/.arcane:/data/.arcane" ghcr.io/edition-x/arcane
+```
+
+### Verifying what you installed
+
+Every wheel, source distribution and image is published with build provenance
+from the release workflow that produced it:
+
+```bash
+gh attestation verify --owner Edition-X arcane_mcp-0.2.0-py3-none-any.whl
+```
 
 ---
 

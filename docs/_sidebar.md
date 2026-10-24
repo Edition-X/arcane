@@ -7,3 +7,5 @@
   - [Configuration](configuration.md)
 - **Architecture**
   - [How It Works](architecture.md)
+- **Releases**
+  - [Changelog](changelog.md)
