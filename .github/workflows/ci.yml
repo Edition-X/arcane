@@ -111,6 +111,11 @@ jobs:
       - name: Type check
         run: uv run mypy src/arcane
 
+      # The Windows branches of platform shims are unreachable code to mypy on
+      # Linux, so they would never be checked without this.
+      - name: Type check the Windows code paths
+        run: uv run mypy --platform win32 src/arcane
+
   test:
     name: Test (Python ${{ matrix.python-version }})
     needs: changes

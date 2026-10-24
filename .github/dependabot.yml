@@ -11,6 +11,10 @@ updates:
       time: "06:00"
       timezone: Europe/Ljubljana
     open-pull-requests-limit: 3
+    cooldown:
+      # Do not pull a version the moment it is published. A week is enough for
+      # a compromised or yanked release to be noticed by someone else first.
+      default-days: 7
     commit-message:
       prefix: chore(ci)
     groups:
@@ -23,6 +27,10 @@ updates:
     schedule:
       interval: monthly
     open-pull-requests-limit: 3
+    cooldown:
+      # Do not pull a version the moment it is published. A week is enough for
+      # a compromised or yanked release to be noticed by someone else first.
+      default-days: 7
     commit-message:
       prefix: chore(deps)
     groups:
@@ -41,5 +49,9 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    cooldown:
+      # Do not pull a version the moment it is published. A week is enough for
+      # a compromised or yanked release to be noticed by someone else first.
+      default-days: 7
     commit-message:
       prefix: chore(docker)
