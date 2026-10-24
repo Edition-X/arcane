@@ -34,6 +34,7 @@ def init() -> None:
 @click.option("--source", default=None, help="Source agent")
 @click.option("--project", default=None, help="Project name")
 @click.option("--journey-id", default=None, help="Link to a journey")
+@click.option("--supersedes", default=None, help="ID or prefix of an earlier memory this one replaces")
 def save(
     title: str,
     what: str,
@@ -47,6 +48,7 @@ def save(
     source: str | None,
     project: str | None,
     journey_id: str | None,
+    supersedes: str | None,
 ) -> None:
     """Save a memory to the current session."""
     from arcane.services.memory import MemoryService
@@ -76,6 +78,7 @@ def save(
         details=resolved_details,
         source=source,
         journey_id=journey_id,
+        supersedes=supersedes,
     )
 
     with create_container() as container:

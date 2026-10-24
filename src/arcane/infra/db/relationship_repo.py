@@ -113,6 +113,41 @@ class RelationshipRepository:
         rows = self.db.fetchall("SELECT * FROM relationships ORDER BY created_at")
         return [r for r in rows if r["source_id"] in entity_ids or r["target_id"] in entity_ids]
 
+    def superseded_by(self, memory_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """For each of *memory_ids* that a newer memory replaces, that newest replacement's id, title and date."""
+        if not memory_ids:
+            return {}
+        rows = self.db.fetchall(
+            f"""
+            SELECT r.target_id AS replaced_id, m.id, m.title, m.created_at
+            FROM relationships r JOIN memories m ON m.id = r.source_id
+            WHERE r.relation = 'supersedes' AND r.source_type = 'memory' AND r.target_type = 'memory'
+              AND r.target_id IN ({",".join("?" * len(memory_ids))})
+            ORDER BY m.created_at DESC
+            """,
+            memory_ids,
+        )
+        replaced: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            replaced.setdefault(
+                row["replaced_id"], {"id": row["id"], "title": row["title"], "date": row["created_at"][:10]}
+            )
+        return replaced
+
+    def supersedes(self, memory_id: str) -> list[dict[str, Any]]:
+        """The memories *memory_id* replaced, newest first."""
+        rows = self.db.fetchall(
+            """
+            SELECT m.id, m.title, m.created_at
+            FROM relationships r JOIN memories m ON m.id = r.target_id
+            WHERE r.relation = 'supersedes' AND r.source_type = 'memory' AND r.target_type = 'memory'
+              AND r.source_id = ?
+            ORDER BY m.created_at DESC
+            """,
+            (memory_id,),
+        )
+        return [{"id": r["id"], "title": r["title"], "date": r["created_at"][:10]} for r in rows]
+
     def delete(self, rel_id: str) -> bool:
         row = self.db.fetchone("SELECT id FROM relationships WHERE id = ?", (rel_id,))
         if not row:

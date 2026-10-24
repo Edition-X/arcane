@@ -26,6 +26,7 @@ Save a memory for future sessions. Call this before ending any session where you
 | `details` | string | no | Full context — options considered, tradeoffs, follow-up |
 | `project` | string | no | Project name (defaults to current directory name). Worktree-style variants of the current repo (`<repo>-<suffix>`) collapse to `<repo>`. |
 | `journey_id` | string | no | Journey ID or unambiguous prefix to link this memory to. An unknown or ambiguous ID adds a `journey_not_found`/`journey_not_linked` warning and saves the memory unlinked. |
+| `supersedes` | string | no | ID or unambiguous prefix of an earlier memory this one replaces (a reversed decision, a newer fix). Search then marks the old one `superseded_by` and ranks it lower; context leaves it out. A bad reference adds a `supersedes_not_found`/`supersedes_not_linked` warning and saves unlinked. |
 | `ttl_days` | integer | no | Days until this memory expires from search results. Omit for permanent memories. |
 | `confidence` | number | no | Confidence in accuracy 0.0–1.0. Omit if not applicable. |
 
@@ -68,6 +69,8 @@ Search memories using keyword and vector search. Call at session start and whene
 
 Default is `standard`, which omits `why`/`impact` to keep results small — call `memory_details` for the full body of a specific hit. Use `full` if your integration already depends on the previous shape.
 
+At every level, a memory that a newer one replaced carries `superseded_by` (`id`, `title`, `date`) and its score is halved, so it stays findable as history but ranks below current answers.
+
 ---
 
 ### `memory_context`
@@ -104,11 +107,27 @@ The key is omitted entirely when no journeys are stale.
 
 **Profile:** `core`
 
-Get full details for a single memory, including the extended `details` field.
+Get full details for a single memory, including the extended `details` field. The reply adds `superseded_by` when a newer memory replaced this one, and `supersedes` listing the memories this one replaced.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `memory_id` | string | yes | Memory ID or unambiguous prefix |
+
+---
+
+### `memory_update`
+
+**Profile:** `core`
+
+Update a memory in place. Prefer this over `memory_save` when a save warns `near_duplicate`.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `memory_id` | string | yes | Memory ID or unambiguous prefix |
+| `what` / `why` / `impact` | string | no | Replace that field |
+| `tags` | array of strings | no | Replace the tags |
+| `details_append` | string | no | Text appended to the details |
+| `supersedes` | string | no | ID or prefix of an earlier memory this one replaces. An unknown ID is an error. |
 
 ---
 

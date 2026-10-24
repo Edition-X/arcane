@@ -170,6 +170,20 @@ class RetrievalRepository:
         )
         return {"total": int(row["total"]), "followed": int(row["followed"])} if row else {"total": 0, "followed": 0}
 
+    def replaced_hits(self, days: int) -> dict[str, int]:
+        """Lookups that returned a memory a newer one has replaced, and how many such hits."""
+        row = self.db.fetchone(
+            """
+            SELECT count(DISTINCT h.retrieval_id) AS lookups, count(*) AS hits
+            FROM retrieval_hits h JOIN retrievals r ON r.id = h.retrieval_id
+            WHERE h.entity_type = 'memory' AND r.created_at >= ? AND h.entity_id IN (
+                SELECT target_id FROM relationships WHERE relation = 'supersedes' AND target_type = 'memory'
+            )
+            """,
+            (_since(days),),
+        )
+        return {"lookups": int(row["lookups"]), "hits": int(row["hits"])} if row else {"lookups": 0, "hits": 0}
+
     def top_memories(self, days: int, limit: int = 10) -> list[dict[str, Any]]:
         return self.db.fetchall(
             """

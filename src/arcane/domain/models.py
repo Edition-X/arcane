@@ -44,6 +44,8 @@ class RawMemoryInput(BaseModel):
     details: str | None = None
     source: str | None = None
     journey_id: str | None = None
+    # ID or prefix of an earlier memory this one replaces (a reversed decision, a newer fix).
+    supersedes: str | None = None
 
     ttl_days: int | None = None
     confidence: float | None = None

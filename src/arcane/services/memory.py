@@ -10,7 +10,7 @@ from datetime import date
 from typing import Any
 
 from arcane.domain.enums import RelationType
-from arcane.domain.models import Memory, RawMemoryInput
+from arcane.domain.models import Memory, RawMemoryInput, Relationship
 from arcane.domain.scope import GLOBAL_ORG, resolve_read_project, resolve_write_scope, slugify
 from arcane.infra.db.ids import IdentifierResolutionError, resolve_entity_id
 from arcane.infra.db.schema import create_vec_table
@@ -20,6 +20,9 @@ from arcane.infra.search import hybrid_search, tiered_search
 from arcane.services.container import ServiceContainer
 
 logger = logging.getLogger(__name__)
+
+# A replaced memory stays findable as history, but ranks below current answers.
+SUPERSEDED_SCORE_FACTOR = 0.5
 
 # Texts sent to the embedding provider per request during a reindex.
 REINDEX_BATCH_SIZE = 64
@@ -131,12 +134,47 @@ class MemoryService:
             )
         return full_id
 
+    def _resolve_superseded(self, supersedes: str | None, warnings: list[str]) -> str | None:
+        """Resolve the memory a save says it replaces; a bad reference warns and saves unlinked."""
+        if not supersedes:
+            return None
+        try:
+            full_id = self.c.memory_repo.resolve_prefix(supersedes)
+        except IdentifierResolutionError as exc:
+            warnings.append(f"supersedes_not_linked: {exc} The memory was saved without the link.")
+            return None
+        if full_id is None:
+            warnings.append(
+                f"supersedes_not_found: no memory matches '{supersedes}'. The memory was saved without the link."
+            )
+        return full_id
+
+    def link_supersedes(self, new_id: str, old_id: str) -> None:
+        """Record that *new_id* replaces *old_id*. Idempotent; a memory never replaces itself."""
+        relation = RelationType.SUPERSEDES
+        if new_id == old_id or self.c.relationship_repo.exists("memory", new_id, "memory", old_id, relation.value):
+            return
+        rel = Relationship(
+            source_type="memory", source_id=new_id, target_type="memory", target_id=old_id, relation=relation
+        )
+        with self.c.db.transaction():
+            self.c.relationship_repo.insert(rel.model_dump())
+
+    def _with_replacements(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Mark rows a newer memory has replaced with ``superseded_by``."""
+        replaced = self.c.relationship_repo.superseded_by([r["id"] for r in rows])
+        for row in rows:
+            if row["id"] in replaced:
+                row["superseded_by"] = replaced[row["id"]]
+        return rows
+
     @staticmethod
     def _near_duplicate_message(title: str, memory_id: str, score: float | None) -> str:
         score_part = f", similarity {score:.2f}" if score is not None else ""
         return (
             f"near_duplicate: existing memory '{title}' (id {memory_id}{score_part}) "
-            "covers similar ground. Consider updating it instead of creating a new one."
+            "covers similar ground. Consider updating it instead of creating a new one, "
+            "or pass supersedes with its id if the new memory replaces it."
         )
 
     def _near_duplicate_warning(
@@ -243,7 +281,8 @@ class MemoryService:
         raw = RawMemoryInput.model_validate(raw_data)
         warnings = self._details_warnings(raw)
         journey_id = self._resolve_journey(raw.journey_id, warnings)
-        raw = raw.model_copy(update={"journey_id": journey_id})
+        superseded_id = self._resolve_superseded(raw.supersedes, warnings)
+        raw = raw.model_copy(update={"journey_id": journey_id, "supersedes": superseded_id})
 
         # Exact-title dedup, confined to the exact scope layer being written so
         # an org/global write can't merge into a project.
@@ -286,6 +325,8 @@ class MemoryService:
                 JourneyService(self.c).link_memory(raw.journey_id, mem.id)
             if embedding is not None:
                 self._store_embedding(rowid, embedding)
+            if raw.supersedes:
+                self.link_supersedes(mem.id, raw.supersedes)
             write_session_memory(vault_project_dir, mem_dict, today, details=raw.details)
         logger.debug("Created memory id=%s project=%s", mem.id, project)
 
@@ -317,6 +358,8 @@ class MemoryService:
                 from arcane.services.journey import JourneyService
 
                 JourneyService(self.c).link_memory(raw.journey_id, existing_id)
+            if raw.supersedes:
+                self.link_supersedes(existing_id, raw.supersedes)
         logger.debug("Merged duplicate memory id=%s", existing_id)
 
         return {
@@ -327,6 +370,34 @@ class MemoryService:
         }
 
     def search(
+        self,
+        query: str,
+        limit: int = 5,
+        project: str | None = None,
+        source: str | None = None,
+        use_vectors: bool = True,
+        org: str | None = None,
+        include_org: bool = True,
+        include_global: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Ranked search. A memory a newer one replaced keeps its place in history but
+        is marked ``superseded_by`` and ranked below current answers."""
+        candidates = self._ranked_search(
+            query,
+            limit=limit * 2,
+            project=project,
+            source=source,
+            use_vectors=use_vectors,
+            org=org,
+            include_org=include_org,
+            include_global=include_global,
+        )
+        for row in self._with_replacements(candidates):
+            if "superseded_by" in row:
+                row["score"] = row.get("score", 0.0) * SUPERSEDED_SCORE_FACTOR
+        return sorted(candidates, key=lambda r: r.get("score", 0.0), reverse=True)[:limit]
+
+    def _ranked_search(
         self,
         query: str,
         limit: int = 5,
@@ -442,12 +513,15 @@ class MemoryService:
         if topup_recent is None:
             topup_recent = self.c.config.context.topup_recent
 
+        # Context is the current state, so replaced memories are left out; fetch
+        # spare candidates so dropping them does not leave the list short.
+        fetch = limit * 2
         results: list[dict[str, Any]]
         if query:
             use_vectors = self._should_use_semantic(semantic_mode)
             results = self.search(
                 query,
-                limit=limit,
+                limit=fetch,
                 project=project,
                 source=source,
                 use_vectors=use_vectors,
@@ -455,9 +529,9 @@ class MemoryService:
                 include_org=include_org,
                 include_global=include_global,
             )
-            if topup_recent and len(results) < limit:
+            if topup_recent and len(results) < fetch:
                 recent = self.c.memory_repo.list_recent(
-                    limit=limit,
+                    limit=fetch,
                     project=project,
                     source=source,
                     org=org,
@@ -468,11 +542,11 @@ class MemoryService:
                 for r in recent:
                     if r["id"] not in seen:
                         results.append(r)
-                        if len(results) >= limit:
+                        if len(results) >= fetch:
                             break
         else:
             results = self.c.memory_repo.list_recent(
-                limit=limit,
+                limit=fetch,
                 project=project,
                 source=source,
                 org=org,
@@ -480,10 +554,11 @@ class MemoryService:
                 include_global=include_global,
             )
 
+        results = [r for r in self._with_replacements(results) if "superseded_by" not in r]
         if org is not None:
             results = self._apply_global_cap(results, global_cap)
 
-        return results, total
+        return results[:limit], total
 
     def update(
         self,
@@ -493,8 +568,12 @@ class MemoryService:
         impact: str | None = None,
         tags: list[str] | None = None,
         details_append: str | None = None,
+        supersedes: str | None = None,
     ) -> bool:
-        """Update an existing memory (by ID or prefix) and refresh its embedding."""
+        """Update an existing memory (by ID or prefix) and refresh its embedding.
+
+        ``supersedes`` is the full ID of a memory this one replaces (callers resolve prefixes).
+        """
         full_id = self.c.memory_repo.resolve_prefix(memory_id)
         if full_id is None:
             return False
@@ -531,6 +610,8 @@ class MemoryService:
             rowid = self.c.memory_repo.get_rowid(full_id)
             if rowid is not None and embedding is not None:
                 self._store_embedding(rowid, embedding)
+            if supersedes:
+                self.link_supersedes(full_id, supersedes)
         return True
 
     def get_details(self, memory_id: str) -> dict[str, Any] | None:
