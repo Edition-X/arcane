@@ -106,13 +106,17 @@ def live_ollama(arcane: Arcane) -> Iterator[tuple[str, list[str]]]:
         pytest.skip(f"Live Ollama model {model} is not installed")
 
     prompts: list[str] = []
+    embeddings_url = f"{backend}/api/embeddings"
 
     class Forwarder(BaseHTTPRequestHandler):
         def do_POST(self) -> None:
             body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
-            if self.path == "/api/embeddings":
-                prompts.append(json.loads(body)["prompt"])
-            response = httpx.post(f"{backend}{self.path}", content=body, timeout=60)
+            # Arcane only posts embeddings; never forward an arbitrary path.
+            if self.path != "/api/embeddings":
+                self.send_error(404)
+                return
+            prompts.append(json.loads(body)["prompt"])
+            response = httpx.post(embeddings_url, content=body, timeout=60)
             self.send_response(response.status_code)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
