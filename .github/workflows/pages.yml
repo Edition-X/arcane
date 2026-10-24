@@ -44,6 +44,8 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
+          # Keep in step with the uv image in the Dockerfile.
+          version: "0.13.5"
           # No cache restore in a workflow that publishes: a run that produces
           # artifacts other people consume should build from the index, not
           # from anything a previous run left behind.

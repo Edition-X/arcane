@@ -9,8 +9,22 @@ name: Release
 # By the time anything reaches PyPI it has already been installed and driven
 # over MCP stdio on Linux, macOS and Windows, so a publish is the least likely
 # step to surprise anyone.
+#
+# Pull requests that touch the release path, and a weekly schedule, rehearse
+# everything up to the first irreversible step. A release workflow that only
+# runs when someone presses the button is first tested on release day.
 
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/release.yml'
+      - '.github/workflows/verify.yml'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'cliff.toml'
+  schedule:
+    - cron: '41 6 * * 1'
   workflow_dispatch:
     inputs:
       level:
@@ -31,7 +45,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: release
+  # A rehearsal must never queue behind, or replace, a pending real release.
+  group: ${{ github.event_name == 'workflow_dispatch' && 'release' || format('release-rehearsal-{0}', github.ref) }}
   cancel-in-progress: false
 
 env:
@@ -45,9 +60,12 @@ jobs:
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       tag: ${{ steps.resolve.outputs.tag }}
+      # The one switch every irreversible job checks. Only a button press
+      # without dry-run publishes; pull requests and the schedule rehearse.
+      publish: ${{ github.event_name == 'workflow_dispatch' && !inputs.dry-run }}
     steps:
       - name: Refuse to release from anywhere but main
-        if: github.ref != 'refs/heads/main'
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
         run: |
           echo "Releases are cut from main. This run is on ${GITHUB_REF}." >&2
           exit 1
@@ -61,6 +79,8 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
+          # Keep in step with the uv image in the Dockerfile.
+          version: "0.13.5"
           # No cache restore in a workflow that publishes: a run that produces
           # artifacts other people consume should build from the index, not
           # from anything a previous run left behind.
@@ -69,6 +89,7 @@ jobs:
       # Only a commit the Main workflow has already built and verified may be
       # released. Stable can never be something nobody has installed.
       - name: Require a green Main run for this commit
+        if: github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -88,7 +109,7 @@ jobs:
         id: resolve
         env:
           EXPLICIT: ${{ inputs.version }}
-          LEVEL: ${{ inputs.level }}
+          LEVEL: ${{ inputs.level || 'patch' }}
         run: |
           set -euo pipefail
           if [ -n "$EXPLICIT" ]; then
@@ -137,13 +158,13 @@ jobs:
       - name: Summarise the plan
         env:
           TAG: ${{ steps.resolve.outputs.tag }}
-          DRY_RUN: ${{ inputs.dry-run }}
+          PUBLISH: ${{ github.event_name == 'workflow_dispatch' && !inputs.dry-run }}
         run: |
           {
-            echo "## Releasing $TAG"
+            if [ "$PUBLISH" = "true" ]; then echo "## Releasing $TAG"; else echo "## Rehearsing $TAG (nothing is published)"; fi
             echo
             echo "- commit: \`${GITHUB_SHA}\`"
-            echo "- dry run: $DRY_RUN"
+            echo "- event: \`${GITHUB_EVENT_NAME}\`"
             echo
             cat release-notes.md
           } >> "$GITHUB_STEP_SUMMARY"
@@ -174,6 +195,8 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
+          # Keep in step with the uv image in the Dockerfile.
+          version: "0.13.5"
           # No cache restore in a workflow that publishes: a run that produces
           # artifacts other people consume should build from the index, not
           # from anything a previous run left behind.
@@ -211,11 +234,14 @@ jobs:
           set -euo pipefail
           uv venv --python 3.13 /tmp/sbom-env
           uv pip install --python /tmp/sbom-env/bin/python dist/*.whl
-          uvx --from cyclonedx-bom cyclonedx-py environment /tmp/sbom-env \
-            --output-format JSON --outfile sbom.cdx.json
+          uvx --from cyclonedx-bom==7.5.0 cyclonedx-py environment /tmp/sbom-env \
+            --output-format JSON --output-file sbom.cdx.json
           echo "SBOM components: $(jq '.components | length' sbom.cdx.json)"
 
+      # Rehearsal builds are stamped with a version that may never ship, so
+      # they get no provenance attestation that could vouch for one.
       - name: Attest build provenance
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/*
@@ -245,7 +271,7 @@ jobs:
   github-release:
     name: Tag and publish the GitHub release
     needs: [plan, build, verify]
-    if: ${{ !inputs.dry-run }}
+    if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -288,7 +314,7 @@ jobs:
   pypi:
     name: Publish to PyPI
     needs: [plan, build, verify, github-release]
-    if: ${{ !inputs.dry-run }}
+    if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:
@@ -313,7 +339,7 @@ jobs:
   image:
     name: Publish the container image
     needs: [plan, build, verify, github-release]
-    if: ${{ !inputs.dry-run && github.repository == 'Edition-X/arcane' }}
+    if: needs.plan.outputs.publish == 'true' && github.repository == 'Edition-X/arcane'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -380,7 +406,7 @@ jobs:
   await-pypi:
     name: Wait for PyPI
     needs: [plan, pypi]
-    if: ${{ !inputs.dry-run }}
+    if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -403,7 +429,7 @@ jobs:
   verify-published:
     name: Verify what was published
     needs: [plan, await-pypi, image]
-    if: ${{ !inputs.dry-run }}
+    if: needs.plan.outputs.publish == 'true'
     uses: ./.github/workflows/verify.yml
     with:
       source: pypi
@@ -417,7 +443,7 @@ jobs:
   quarantine:
     name: Quarantine the release
     needs: [plan, verify-published]
-    if: ${{ always() && !inputs.dry-run && needs.verify-published.result == 'failure' }}
+    if: always() && needs.plan.outputs.publish == 'true' && needs.verify-published.result == 'failure'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
