@@ -23,6 +23,8 @@ _RETRY_BACKOFF = 2.0  # seconds, doubles each attempt
 
 
 class LinearIngestionPlugin:
+    """Ingest tickets from Linear."""
+
     name = "linear"
 
     def __init__(

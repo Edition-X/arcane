@@ -119,7 +119,8 @@ def search(query: str, limit: int, project: bool, source: str | None) -> None:
     for i, r in enumerate(results, 1):
         score = r.get("score", 0)
         click.echo(f"\n [{i}] {r['title']} (score: {score:.2f})")
-        click.echo(f"     {r.get('category', '')} | {r.get('created_at', '')[:10]} | {r.get('project', '')}")
+        meta = (r.get("category"), (r.get("created_at") or "")[:10], r.get("project"))
+        click.echo("     " + " | ".join(part for part in meta if part))
         click.echo(f"     What: {r['what']}")
         if r.get("why"):
             click.echo(f"     Why: {r['why']}")
@@ -255,6 +256,8 @@ def reindex() -> None:
     from arcane.services.memory import MemoryService
 
     with create_container() as container:
+        if container.config.embedding.provider == "none":
+            raise click.ClickException("Embeddings are disabled (embedding.provider: none), so there is no index.")
         total = container.memory_repo.count()
         if total == 0:
             click.echo("No memories to reindex.")
