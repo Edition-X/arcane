@@ -1,0 +1,59 @@
+name: Set up Python and uv
+description: Install uv with a warm cache, pin an interpreter, and sync the project.
+
+inputs:
+  python-version:
+    description: Interpreter to install and sync against.
+    required: false
+    default: "3.11"
+  resolution:
+    description: uv resolution strategy — highest, lowest-direct, or lowest.
+    required: false
+    default: highest
+  extras:
+    description: Space-separated extras to sync, or "none" to skip the sync entirely.
+    required: false
+    default: dev
+  cache:
+    description: >-
+      Restore the uv cache. Set false in any workflow that publishes artifacts
+      other people consume, so a build never depends on what an earlier run
+      left in the cache.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      with:
+        enable-cache: ${{ inputs.cache == 'true' }}
+        # The resolution strategy changes the resolved set, so it has to be part
+        # of the key or a lowest-direct job would restore the highest-pin cache.
+        cache-suffix: py${{ inputs.python-version }}-${{ inputs.resolution }}
+
+    - name: Install Python ${{ inputs.python-version }}
+      shell: bash
+      env:
+        PYTHON_VERSION: ${{ inputs.python-version }}
+      run: uv python install "$PYTHON_VERSION"
+
+    - name: Sync dependencies
+      if: inputs.extras != 'none'
+      shell: bash
+      env:
+        PYTHON_VERSION: ${{ inputs.python-version }}
+        RESOLUTION: ${{ inputs.resolution }}
+        EXTRAS: ${{ inputs.extras }}
+      run: |
+        args=(--python "$PYTHON_VERSION" --resolution "$RESOLUTION")
+        for extra in $EXTRAS; do
+          args+=(--extra "$extra")
+        done
+        # lowest-direct deliberately resolves away from uv.lock to prove the
+        # declared lower bounds; every other job must match the lock exactly.
+        if [ "$RESOLUTION" = "highest" ]; then
+          args+=(--frozen)
+        fi
+        uv sync "${args[@]}"

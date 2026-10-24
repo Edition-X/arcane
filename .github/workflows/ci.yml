@@ -3,75 +3,323 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+# Every job is read-only. Jobs that need more ask for it themselves.
+permissions:
+  contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Maps the diff onto the jobs it can actually affect. Anything under .github
+  # turns everything on: a change to CI has to prove itself against the whole
+  # pipeline. Detection fails open — if the diff cannot be resolved, every job
+  # runs, so a broken filter can never silently green a pull request.
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.decide.outputs.code }}
+      docker: ${{ steps.decide.outputs.docker }}
+      docs: ${{ steps.decide.outputs.docs }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Filter paths
+        id: filter
+        continue-on-error: true
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            ci:
+              - '.github/**'
+            code:
+              - 'src/**'
+              - 'tests/**'
+              - 'scripts/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+            docker:
+              - 'Dockerfile'
+              - '.dockerignore'
+              - 'docker-compose.yml'
+            docs:
+              - '**/*.md'
+              - 'docs/**'
+
+      - name: Decide which jobs run
+        id: decide
+        env:
+          FILTER_OUTCOME: ${{ steps.filter.outcome }}
+          CI_CHANGED: ${{ steps.filter.outputs.ci }}
+          CODE_CHANGED: ${{ steps.filter.outputs.code }}
+          DOCKER_CHANGED: ${{ steps.filter.outputs.docker }}
+          DOCS_CHANGED: ${{ steps.filter.outputs.docs }}
+        run: |
+          set -euo pipefail
+          if [ "$FILTER_OUTCOME" != "success" ] || [ "$CI_CHANGED" = "true" ]; then
+            reason="path filter unavailable or CI configuration changed"
+            code=true; docker=true; docs=true
+          else
+            reason="path filter resolved the diff"
+            code="${CODE_CHANGED:-true}"
+            docker="${DOCKER_CHANGED:-true}"
+            docs="${DOCS_CHANGED:-true}"
+          fi
+          {
+            echo "code=$code"
+            echo "docker=$docker"
+            echo "docs=$docs"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Affected jobs"
+            echo
+            echo "$reason"
+            echo
+            echo "| area | runs |"
+            echo "| --- | --- |"
+            echo "| code | $code |"
+            echo "| docker | $docker |"
+            echo "| docs | $docs |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Always runs: it covers every file in the repo, docs included, and it is the
+  # cheapest signal in the pipeline.
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: astral-sh/setup-uv@v5
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          enable-cache: true
+          persist-credentials: false
 
-      - name: Set up Python
-        run: uv python install 3.11
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup
 
-      - name: Install dev dependencies
-        run: uv sync --extra dev
-
-      - name: Run pre-commit hooks
-        run: uv run pre-commit run --all-files
+      - name: pre-commit (ruff, gitleaks, actionlint, zizmor)
+        run: uv run pre-commit run --all-files --show-diff-on-failure
 
       - name: Type check
         run: uv run mypy src/arcane
 
   test:
     name: Test (Python ${{ matrix.python-version }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    needs: lint
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
-
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: astral-sh/setup-uv@v5
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          enable-cache: true
+          persist-credentials: false
 
-      - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup
+        with:
+          python-version: ${{ matrix.python-version }}
 
-      - name: Install dependencies
-        run: uv sync --extra dev
+      - name: Run tests
+        run: uv run pytest -q --tb=short -m "not artifact"
+
+  # The job that answers "does this work for someone who is not on your laptop".
+  # Runs the whole suite including the installed-wheel smoke test, so it covers
+  # path handling, SQLite extension loading for sqlite-vec, WAL file locking and
+  # stdio framing on each platform. One interpreter per OS, not a full grid.
+  cross-os:
+    name: Test (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup
+        with:
+          python-version: "3.13"
+
+      - name: Run tests
+        shell: bash
+        run: uv run pytest -q --tb=short
+
+  # Proves the lower bounds in pyproject are real rather than aspirational.
+  # A user who already has an older pydantic or mcp pinned resolves to this set.
+  lowest-deps:
+    name: Test (lowest direct deps)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup
+        with:
+          resolution: lowest-direct
+
+      - name: Show resolved versions
+        run: uv pip list
 
       - name: Run tests
         run: uv run pytest -q --tb=short -m "not artifact"
 
   artifact:
     name: Installed artifact MCP smoke test
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    needs: lint
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: astral-sh/setup-uv@v5
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          enable-cache: true
+          persist-credentials: false
 
-      - name: Set up Python
-        run: uv python install 3.11
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup
 
-      - name: Install dependencies
-        run: uv sync --extra dev
-
-      - name: Build and test installed artifacts
+      - name: Build and exercise the installed wheel
         run: uv run pytest tests/integration/test_installed_mcp.py -q --tb=short
+
+  docker:
+    name: Docker image
+    needs: changes
+    if: needs.changes.outputs.docker == 'true' || needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup
+        with:
+          extras: none
+
+      # The image installs the wheel rather than the source tree, so the wheel
+      # has to exist before the image can be built.
+      - name: Build the wheel the image installs
+        run: uv build --out-dir dist
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: false
+          load: true
+          tags: arcane:pr
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Serve MCP from the image
+        run: uv run --with "mcp>=2.3,<3" python scripts/verify_release.py --target docker --image arcane:pr
+
+  docs:
+    name: Docs
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup
+
+      - name: Check links and install instructions
+        run: uv run pytest tests/docs -q --tb=short
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          allow-licenses: >-
+            MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC, Python-2.0,
+            PSF-2.0, MPL-2.0, Unlicense, CC0-1.0, 0BSD, BSD-3-Clause-Clear
+
+  # The one required status check on main. Every other job may be skipped by the
+  # path filter without stranding a pull request, but none of them may fail.
+  ci:
+    name: ci
+    if: always()
+    needs:
+      - changes
+      - lint
+      - test
+      - cross-os
+      - lowest-deps
+      - artifact
+      - docker
+      - docs
+      - dependency-review
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check every job succeeded or was skipped
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Gate"
+            echo
+            echo "| job | result |"
+            echo "| --- | --- |"
+            jq -r 'to_entries[] | "| \(.key) | \(.value.result) |"' <<< "$RESULTS"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          bad=$(jq -r 'to_entries[]
+            | select(.value.result != "success" and .value.result != "skipped")
+            | .key' <<< "$RESULTS")
+
+          if [ -n "$bad" ]; then
+            echo "These jobs did not pass:" >&2
+            echo "$bad" >&2
+            exit 1
+          fi
+          echo "All jobs passed or were skipped."
