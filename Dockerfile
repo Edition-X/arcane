@@ -1,18 +1,31 @@
+# syntax=docker/dockerfile:1
+
+# Arcane is installed from the wheel this repository builds, never from source.
+# The image, the PyPI release and the GitHub release asset are then provably the
+# same bytes, and the image needs no git history, no build toolchain and no
+# compiler. Build the wheel first:
+#
+#   uv build --out-dir dist
+#   docker build -t arcane .
+
 FROM python:3.13-slim
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.5 /uv /usr/local/bin/uv
 
 ENV PYTHONUNBUFFERED=1 \
-    UV_SYSTEM_PYTHON=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
     UV_NO_CACHE=1 \
     ARCANE_HOME=/data/.arcane
 
-WORKDIR /app
+COPY dist/*.whl /tmp/dist/
 
-COPY pyproject.toml uv.lock ./
-COPY src/ ./src/
-
-RUN uv sync --no-dev --frozen && \
+# Exactly one wheel is expected. A stale dist/ holding several is a build error,
+# not a coin toss over which one gets installed.
+RUN set -eux; \
+    test "$(find /tmp/dist -name '*.whl' | wc -l)" -eq 1; \
+    uv pip install --system --no-cache /tmp/dist/*.whl; \
+    rm -rf /tmp/dist; \
+    arcane --version; \
     mkdir -p /data/.arcane
 
 VOLUME ["/data/.arcane"]

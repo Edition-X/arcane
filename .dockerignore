@@ -12,5 +12,5 @@ docs/
 .env
 .env.*
 *.egg-info
-dist/
 build/
+dist/*.tar.gz
