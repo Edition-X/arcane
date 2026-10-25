@@ -34,8 +34,12 @@ uv tool install "arcane-mcp==0.2.0"
 ### From a container image
 
 ```bash
-docker run -i --rm -v "$HOME/.arcane:/data/.arcane" ghcr.io/edition-x/arcane
+docker run -i --rm --user "$(id -u):$(id -g)" -v "$HOME/.arcane:/data/.arcane" ghcr.io/edition-x/arcane
 ```
+
+The image runs as an unprivileged user (UID 1000). `--user` runs it as you instead, so the
+files it writes to `~/.arcane` stay yours. A vault written by an image older than 0.2.2,
+which ran as root, may need `sudo chown -R "$(id -u):$(id -g)" ~/.arcane` first.
 
 ### Verifying what you installed
 

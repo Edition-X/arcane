@@ -26,7 +26,14 @@ RUN set -eux; \
     uv pip install --system --no-cache /tmp/dist/*.whl; \
     rm -rf /tmp/dist; \
     arcane --version; \
-    mkdir -p /data/.arcane
+    useradd --uid 1000 --user-group --home-dir /data --no-create-home --shell /usr/sbin/nologin arcane; \
+    mkdir -p /data/.arcane; \
+    chown -R arcane:arcane /data
+
+# The server never needs root, and running as root would leave root-owned files
+# in a bind-mounted vault. Pass --user "$(id -u):$(id -g)" to match the owner
+# of a host directory that is not UID 1000.
+USER arcane
 
 VOLUME ["/data/.arcane"]
 

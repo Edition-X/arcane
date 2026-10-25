@@ -83,10 +83,10 @@ If a client cannot find `arcane`, use the full path that `command -v arcane` pri
 Each release also ships a container image, plus wheel and source assets with build provenance on its [GitHub release](https://github.com/Edition-X/arcane/releases). The image runs `arcane mcp` and keeps its data in `/data/.arcane`:
 
 ```bash
-docker run -i --rm -v "$HOME/.arcane:/data/.arcane" ghcr.io/edition-x/arcane
+docker run -i --rm --user "$(id -u):$(id -g)" -v "$HOME/.arcane:/data/.arcane" ghcr.io/edition-x/arcane
 ```
 
-The container cannot see your working directory's git remote, so memories land in the default org unless the agent passes `org` and `project` explicitly.
+The image runs as an unprivileged user; `--user` makes the files it writes yours. The container cannot see your working directory's git remote, so memories land in the default org unless the agent passes `org` and `project` explicitly.
 
 </details>
 
