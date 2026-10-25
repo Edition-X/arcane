@@ -35,6 +35,7 @@ class LinearIngestionPlugin:
         self.api_key = api_key or os.environ.get("LINEAR_API_KEY", "")
         self.team_id = team_id
         self._last_error = ""
+        self.warnings: list[str] = []
 
     def ingest(self, project: str, since: datetime | None = None) -> list[dict[str, Any]]:
         if not self.api_key:
@@ -82,30 +83,35 @@ class LinearIngestionPlugin:
         """Fetch all issues with cursor-based pagination (up to _MAX_PAGES)."""
         all_issues: list[dict[str, Any]] = []
         cursor: str | None = None
+        more = False
 
-        for page in range(_MAX_PAGES):
-            result = self._fetch_page(cursor)
-            if result is None:
-                raise IngestionError(
-                    f"Linear issues for team {self.team_id} could not be fetched after "
-                    f"{_RETRY_ATTEMPTS} attempts ({self._last_error})."
-                )
+        with httpx.Client(timeout=15) as client:
+            for page in range(_MAX_PAGES):
+                result = self._fetch_page(client, cursor)
+                if result is None:
+                    raise IngestionError(
+                        f"Linear issues for team {self.team_id} could not be fetched after "
+                        f"{_RETRY_ATTEMPTS} attempts ({self._last_error})."
+                    )
 
-            nodes = result.get("nodes", [])
-            all_issues.extend(nodes)
+                nodes = result.get("nodes", [])
+                all_issues.extend(nodes)
 
-            page_info = result.get("pageInfo", {})
-            if not page_info.get("hasNextPage"):
-                break
-            cursor = page_info.get("endCursor")
-            if not cursor:
-                break
+                page_info = result.get("pageInfo", {})
+                cursor = page_info.get("endCursor")
+                more = bool(page_info.get("hasNextPage") and cursor)
+                if not more:
+                    break
 
-            logger.debug("Linear: fetched page %d (%d issues so far)", page + 1, len(all_issues))
+                logger.debug("Linear: fetched page %d (%d issues so far)", page + 1, len(all_issues))
 
+        if more:
+            self.warnings.append(
+                f"Stopped after {_MAX_PAGES} pages: only {len(all_issues)} issues of team {self.team_id} were read."
+            )
         return all_issues
 
-    def _fetch_page(self, after: str | None = None) -> dict[str, Any] | None:
+    def _fetch_page(self, client: httpx.Client, after: str | None = None) -> dict[str, Any] | None:
         """Fetch a single page of issues with retry + exponential back-off."""
         query = """
         query($teamId: String, $first: Int, $after: String) {
@@ -144,12 +150,7 @@ class LinearIngestionPlugin:
         delay = _RETRY_BACKOFF
         for attempt in range(1, _RETRY_ATTEMPTS + 1):
             try:
-                resp = httpx.post(
-                    _LINEAR_GQL_URL,
-                    headers=headers,
-                    json={"query": query, "variables": variables},
-                    timeout=15,
-                )
+                resp = client.post(_LINEAR_GQL_URL, headers=headers, json={"query": query, "variables": variables})
                 if resp.status_code == 429:
                     retry_after = float(resp.headers.get("Retry-After", delay))
                     logger.warning("Linear rate-limited; waiting %.1fs (attempt %d)", retry_after, attempt)

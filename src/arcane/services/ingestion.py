@@ -78,12 +78,17 @@ class IngestionService:
             if not existing:
                 ingested += 1
 
-        return {
+        result: dict[str, Any] = {
             "plugin": plugin.name,
             "ingested": ingested,
             "skipped": skipped,
             "total": len(artifacts),
         }
+        # Optional: a plugin that read less than its source holds says so here.
+        warnings = list(getattr(plugin, "warnings", None) or [])
+        if warnings:
+            result["warnings"] = warnings
+        return result
 
     def run_all(
         self,
