@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlsplit
 
 import httpx
@@ -26,6 +27,9 @@ START_WAIT_SECONDS = 5.0
 # costs one failed attempt a minute, not a wait on every save.
 START_COOLDOWN_SECONDS = 60.0
 DEFAULT_PORT = 11434
+# Concurrent requests per embed_batch call. Ollama serves embeddings in
+# parallel; 64 texts take about half as long at 4 as one at a time.
+BATCH_CONCURRENCY = 4
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
 _MACOS_APP = "/Applications/Ollama.app"
 _BINARY_FALLBACKS = (
@@ -194,3 +198,15 @@ class OllamaEmbedding(EmbeddingProvider):
             if not self.autostart or not ensure_running(self.base_url, wait=START_WAIT_SECONDS):
                 raise
             return self._embed(text)
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        # /api/embed takes a list, but it returns unit-length vectors where
+        # /api/embeddings does not, and vec0 ranks by L2 distance: mixing the
+        # two would skew search until every memory was reindexed. Concurrent
+        # single requests are as fast and keep the vectors identical.
+        if not texts:
+            return []
+        # The first call alone, so a stopped Ollama is started once, not by every worker.
+        first = self.embed(texts[0])
+        with ThreadPoolExecutor(max_workers=BATCH_CONCURRENCY) as pool:
+            return [first, *pool.map(self.embed, texts[1:])]

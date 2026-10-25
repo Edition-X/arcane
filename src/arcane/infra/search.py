@@ -24,6 +24,15 @@ def apply_scope_bonus(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(rows, key=lambda x: x.get("score", 0.0), reverse=True)
 
 
+def _normalise(results: list[dict[str, Any]]) -> None:
+    """Scale scores in place by their maximum, so the best is 1.0; all zero when none is positive."""
+    if not results:
+        return
+    best = max(r["score"] for r in results)
+    for r in results:
+        r["score"] = r["score"] / best if best > 0 else 0.0
+
+
 def merge_results(
     fts_results: list[dict[str, Any]],
     vec_results: list[dict[str, Any]],
@@ -37,15 +46,9 @@ def merge_results(
     than cosine similarity. Maximum normalisation preserves their ordering
     and relative strengths before combining them with positive FTS ranks.
     """
-    if fts_results:
-        max_fts = max(r["score"] for r in fts_results) or 1.0
-        for r in fts_results:
-            r["score"] = r["score"] / max_fts if max_fts > 0 else 0.0
+    _normalise(fts_results)
 
-    if vec_results:
-        max_vec = max(r["score"] for r in vec_results) or 1.0
-        for r in vec_results:
-            r["score"] = r["score"] / max_vec if max_vec > 0 else 0.0
+    _normalise(vec_results)
 
     scores: dict[str, dict[str, Any]] = {}
     for r in fts_results:
@@ -87,10 +90,7 @@ def tiered_search(
         include_global=include_global,
     )
 
-    if fts_results:
-        max_score = max(r["score"] for r in fts_results) or 1.0
-        for r in fts_results:
-            r["score"] = r["score"] / max_score if max_score > 0 else 0.0
+    _normalise(fts_results)
 
     if len(fts_results) >= min_fts_results or embedding_provider is None:
         results = fts_results

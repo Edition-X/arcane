@@ -26,9 +26,12 @@ def _run(
     repo_path: str | None = None,
 ) -> dict[str, Any]:
     try:
-        return svc.run_plugin(plugin, project=project, journey_id=journey_id, repo_path=repo_path)
+        result = svc.run_plugin(plugin, project=project, journey_id=journey_id, repo_path=repo_path)
     except (IdentifierResolutionError, IngestionError) as exc:
         raise click.ClickException(str(exc)) from exc
+    for warning in result.get("warnings", []):
+        click.echo(f"Warning: {warning}", err=True)
+    return result
 
 
 @click.group(cls=PluginGroup, kind="ingestion", invoke_without_command=True)

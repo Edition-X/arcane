@@ -80,6 +80,17 @@ def handle_save(
         )
         scope = "project"
 
+    if scope in ("org", "global") and project:
+        handler_warnings.append(
+            f"project_ignored: scope='{scope}' saves belong to no project, so project '{project}' was not stored. "
+            "Use scope='project' to keep it."
+        )
+    if scope == "global" and org:
+        handler_warnings.append(
+            f"org_ignored: scope='global' saves belong to no org, so org '{org}' was not stored. "
+            "Use scope='org' to keep it."
+        )
+
     resolved = resolve_scope(os.getcwd(), svc.c.config)
     if scope == "global":
         org_final, project_final = GLOBAL_ORG, ""

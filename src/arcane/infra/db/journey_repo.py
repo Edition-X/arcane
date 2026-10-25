@@ -14,6 +14,11 @@ from arcane.infra.redaction import redact, redact_values
 # journey_list and the health audit all use this one definition.
 IDLE_JOURNEY_DAYS = 14
 
+# Columns update() may set. Anything else is a caller bug, not a column to add.
+_UPDATABLE_COLUMNS = frozenset(
+    {"title", "project", "org", "status", "completed_at", "summary", "linear_issue_id", "updated_at"}
+)
+
 
 class JourneyRepository:
     """CRUD operations for the journeys table."""
@@ -81,6 +86,10 @@ class JourneyRepository:
             event_type = "updated"
             event_summary = fields["summary"]
 
+        # Column names are interpolated into the SQL, so only known ones may pass.
+        unknown = fields.keys() - _UPDATABLE_COLUMNS
+        if unknown:
+            raise ValueError(f"Cannot update journey column(s): {', '.join(sorted(unknown))}")
         sets = [f"{k} = ?" for k in fields]
         params = list(fields.values()) + [full_id]
         self.db.execute(f"UPDATE journeys SET {', '.join(sets)} WHERE id = ?", params)

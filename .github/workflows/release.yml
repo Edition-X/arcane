@@ -415,8 +415,14 @@ jobs:
           VERSION: ${{ needs.plan.outputs.version }}
         run: |
           set -euo pipefail
+          # Poll the simple index that pip and uv resolve from. The JSON API
+          # (/pypi/<name>/<version>/json) updates first, so it says "ready"
+          # while installs still fail. Each runner can still hit a CDN edge
+          # that lags, which verify_release.py retries on its own.
           for attempt in $(seq 1 60); do
-            if curl -fsS "https://pypi.org/pypi/arcane-mcp/${VERSION}/json" -o /dev/null; then
+            if curl -fsS -H 'Accept: application/vnd.pypi.simple.v1+json' \
+                "https://pypi.org/simple/arcane-mcp/" \
+              | jq -e --arg v "$VERSION" '.versions | index($v)' >/dev/null; then
               echo "arcane-mcp ${VERSION} is on the index (attempt ${attempt})."
               exit 0
             fi

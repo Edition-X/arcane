@@ -342,14 +342,6 @@ class MemoryRepository:
             "duplicate_titles": duplicate_titles,
         }
 
-    def project_orgs(self) -> dict[str, str]:
-        """Return only projects with one known owner; never guess by majority."""
-        rows = self.db.fetchall(
-            "SELECT project, MIN(org) AS org FROM memories WHERE project != '' "
-            "GROUP BY project HAVING COUNT(DISTINCT org) = 1 AND MIN(org) != ''"
-        )
-        return {row["project"]: row["org"] for row in rows}
-
     def list_created_between(
         self,
         since: str,

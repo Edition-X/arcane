@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from mcp import ClientSession
@@ -78,12 +79,34 @@ def _normalise(version: str) -> str:
     return version.replace("-beta.", "b").replace("-rc.", "rc").removeprefix("v")
 
 
+# PyPI's CDN serves the simple index from many edges, and a new release reaches
+# them at different times, so one runner can resolve it while another cannot.
+# Only that failure is retried; anything else is a real problem with the release.
+_NOT_YET_INDEXED = ("no version of arcane-mcp", "No matching distribution found for arcane-mcp")
+_INDEX_ATTEMPTS = 6
+_INDEX_RETRY_SECONDS = 20
+
+
+def _install_when_indexed(command: list[str], **kwargs: object) -> None:
+    for attempt in range(1, _INDEX_ATTEMPTS + 1):
+        try:
+            _run(command, **kwargs)
+            return
+        except VerificationError as exc:
+            if attempt == _INDEX_ATTEMPTS or not any(marker in str(exc) for marker in _NOT_YET_INDEXED):
+                raise
+            _log(f"not on this runner's index yet (attempt {attempt}) — retrying in {_INDEX_RETRY_SECONDS}s")
+            time.sleep(_INDEX_RETRY_SECONDS)
+
+
 def install_from_pypi(workdir: Path, version: str, python: str, installer: str) -> Path:
     """Install the published distribution exactly as a user would, and return its bin dir."""
     requirement = f"arcane-mcp=={_normalise(version)}"
     if installer == "uv":
-        _run(
-            ["uv", "tool", "install", "--force", "--python", python, requirement],
+        # --refresh-package so a retry asks the index again instead of reusing
+        # the cached "not found".
+        _install_when_indexed(
+            ["uv", "tool", "install", "--force", "--refresh-package", "arcane-mcp", "--python", python, requirement],
             env={**os.environ, "UV_TOOL_BIN_DIR": str(workdir / "bin"), "UV_TOOL_DIR": str(workdir / "tools")},
         )
         return workdir / "bin"
@@ -92,7 +115,9 @@ def install_from_pypi(workdir: Path, version: str, python: str, installer: str) 
     environment = workdir / "venv"
     _run(["uv", "venv", "--seed", "--python", python, str(environment)])
     scripts = environment / ("Scripts" if os.name == "nt" else "bin")
-    _run([str(_executable(scripts, "python")), "-m", "pip", "install", "--quiet", requirement])
+    _install_when_indexed(
+        [str(_executable(scripts, "python")), "-m", "pip", "install", "--quiet", "--no-cache-dir", requirement]
+    )
     return scripts
 
 

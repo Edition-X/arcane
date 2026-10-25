@@ -118,31 +118,6 @@ class Memory(BaseModel):
         )
 
 
-class MemoryDetail(BaseModel):
-    """Full details/body content for a memory."""
-
-    memory_id: str
-    body: str
-
-
-class SearchResult(BaseModel):
-    """Search result with score and metadata."""
-
-    id: str
-    title: str
-    what: str
-    why: str | None = None
-    impact: str | None = None
-    category: str | None = None
-    tags: list[str] = Field(default_factory=list)
-    project: str = ""
-    source: str | None = None
-    score: float = 0.0
-    has_details: bool = False
-    file_path: str = ""
-    created_at: str = ""
-
-
 # ---------------------------------------------------------------------------
 # Journey
 # ---------------------------------------------------------------------------

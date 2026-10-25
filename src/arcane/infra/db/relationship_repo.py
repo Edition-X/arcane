@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from typing import Any
 
 from arcane.infra.db.connection import Database
@@ -75,10 +76,10 @@ class RelationshipRepository:
         visited: set[str] = set()
         result: list[dict[str, Any]] = []
         seen_rel_ids: set[str] = set()
-        queue: list[tuple[str, str, int]] = [(entity_type, entity_id, 0)]
+        queue: deque[tuple[str, str, int]] = deque([(entity_type, entity_id, 0)])
 
         while queue:
-            etype, eid, depth = queue.pop(0)
+            etype, eid, depth = queue.popleft()
             if depth > max_depth:
                 continue
 

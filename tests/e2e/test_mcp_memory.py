@@ -88,6 +88,8 @@ def test_save_scope_rules(arcane: Arcane) -> None:
             "blank": await c.call("memory_save", title="C", what="c", project=""),
             "org": await c.call("memory_save", title="D", what="d", scope="org"),
             "global": await c.call("memory_save", title="E", what="e", scope="global"),
+            "org_with_project": await c.call("memory_save", title="F", what="f", scope="org", project="widget"),
+            "global_with_org": await c.call("memory_save", title="G", what="g", scope="global", org="acme"),
         }
 
     out = arcane.run(scenario)
@@ -97,6 +99,11 @@ def test_save_scope_rules(arcane: Arcane) -> None:
     assert out["org"]["scope"] == {"org": "acme", "project": ""}
     assert out["org"]["warnings"] == []
     assert out["global"]["scope"]["org"] == "global"
+    # A scope that drops an explicit project or org says so instead of discarding it silently.
+    assert out["org_with_project"]["scope"] == {"org": "acme", "project": ""}
+    assert out["org_with_project"]["warnings"][0].startswith("project_ignored")
+    assert out["global_with_org"]["scope"]["org"] == "global"
+    assert out["global_with_org"]["warnings"][0].startswith("org_ignored")
 
 
 def test_context_layers_and_detail_levels(arcane: Arcane) -> None:
