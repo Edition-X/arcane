@@ -54,14 +54,16 @@ class MigrationService:
             finally:
                 with_source.close()
 
-        # 2. Run schema upgrade (additive — adds new tables, columns)
+        # 2. Run schema upgrade (additive — adds new tables, columns), in one
+        # transaction as create_container does, so a failure leaves no half-upgrade.
         db = Database(target_db)
-        create_schema(db)
-
-        # Count memories
-        row = db.fetchone("SELECT COUNT(*) as cnt FROM memories")
-        memory_count = row["cnt"] if row else 0
-        db.close()
+        try:
+            with db.transaction():
+                create_schema(db)
+            row = db.fetchone("SELECT COUNT(*) as cnt FROM memories")
+            memory_count = row["cnt"] if row else 0
+        finally:
+            db.close()
 
         # 3. Copy vault directory
         if os.path.exists(source_vault):
@@ -171,26 +173,26 @@ class MigrationService:
 
         db = Database(db_path)
         checks: dict[str, Any] = {}
+        try:
+            # Count entities
+            for table in ["memories", "journeys", "artifacts", "relationships", "insights"]:
+                row = db.fetchone(f"SELECT COUNT(*) as cnt FROM {table}")
+                checks[f"{table}_count"] = row["cnt"] if row else 0
 
-        # Count entities
-        for table in ["memories", "journeys", "artifacts", "relationships", "insights"]:
-            row = db.fetchone(f"SELECT COUNT(*) as cnt FROM {table}")
-            checks[f"{table}_count"] = row["cnt"] if row else 0
+            # Check FTS sync
+            row = db.fetchone("SELECT COUNT(*) as cnt FROM memories_fts")
+            fts_count = row["cnt"] if row else 0
+            checks["fts_synced"] = fts_count == checks["memories_count"]
 
-        # Check FTS sync
-        row = db.fetchone("SELECT COUNT(*) as cnt FROM memories_fts")
-        fts_count = row["cnt"] if row else 0
-        checks["fts_synced"] = fts_count == checks["memories_count"]
+            # Check vec table
+            row = db.fetchone("SELECT name FROM sqlite_master WHERE type='table' AND name='memories_vec'")
+            checks["vec_table_exists"] = row is not None
 
-        # Check vec table
-        row = db.fetchone("SELECT name FROM sqlite_master WHERE type='table' AND name='memories_vec'")
-        checks["vec_table_exists"] = row is not None
-
-        # Check embedding dim
-        row = db.fetchone("SELECT value FROM meta WHERE key = 'embedding_dim'")
-        checks["embedding_dim"] = int(row["value"]) if row else None
-
-        db.close()
+            # Check embedding dim
+            row = db.fetchone("SELECT value FROM meta WHERE key = 'embedding_dim'")
+            checks["embedding_dim"] = int(row["value"]) if row else None
+        finally:
+            db.close()
 
         checks["success"] = True
         return checks
