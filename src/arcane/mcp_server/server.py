@@ -568,6 +568,8 @@ def _create_server(container: ServiceContainer) -> Server:
         if name == "memory_save":
             # Stamp the connecting client as the source unless the caller set one.
             args = {**args, "source": args.get("source") or client}
+            # Out-of-band: where the call came from, never taken from the agent's arguments.
+            args["caller"] = {"client": client, "meta": params.meta}
 
         spec = handlers.get(name)
         is_error = False

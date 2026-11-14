@@ -109,6 +109,8 @@ The key is omitted entirely when no journeys are stale.
 
 Get full details for a single memory, including the extended `details` field. The reply adds `superseded_by` when a newer memory replaced this one, and `supersedes` listing the memories this one replaced.
 
+The reply also carries `provenance`: `commit_sha`, `branch`, `dirty`, `session_id`, `thread_id` and `harness`, recorded by the server when the memory was saved. A field is `null` when unknown (a folder that is not a git repo, a client that sends no session id). `dirty` means tracked files differed from HEAD.
+
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `memory_id` | string | yes | Memory ID or unambiguous prefix |

@@ -65,8 +65,9 @@ class MemoryRepository:
             INSERT INTO memories (
                 id, title, what, why, impact, tags, category, project, org,
                 source, related_files, file_path, section_anchor,
-                created_at, updated_at, metadata, ttl_days, confidence
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, updated_at, metadata, ttl_days, confidence,
+                commit_sha, branch, dirty, session_id, thread_id, harness
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 mem["id"],
@@ -87,6 +88,12 @@ class MemoryRepository:
                 json.dumps(mem.get("metadata", {})),
                 mem.get("ttl_days"),
                 mem.get("confidence"),
+                mem.get("commit_sha"),
+                mem.get("branch"),
+                None if mem.get("dirty") is None else int(bool(mem["dirty"])),
+                mem.get("session_id"),
+                mem.get("thread_id"),
+                mem.get("harness"),
             ),
         )
         rowid = cursor.lastrowid

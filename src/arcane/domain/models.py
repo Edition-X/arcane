@@ -92,6 +92,12 @@ class Memory(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     ttl_days: int | None = None
     confidence: float | None = None
+    commit_sha: str | None = None
+    branch: str | None = None
+    dirty: bool | None = None
+    session_id: str | None = None
+    thread_id: str | None = None
+    harness: str | None = None
 
     @staticmethod
     def from_raw(raw: RawMemoryInput, project: str, org: str = "", file_path: str = "") -> Memory:

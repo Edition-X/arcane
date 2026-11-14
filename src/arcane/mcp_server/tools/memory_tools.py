@@ -6,9 +6,11 @@ import json
 import logging
 import os
 from datetime import datetime
+from typing import Any
 
 from arcane.domain.enums import Category
 from arcane.domain.models import RawMemoryInput
+from arcane.domain.provenance import capture_provenance
 from arcane.domain.scope import GLOBAL_ORG, resolve_scope, resolve_write_scope
 from arcane.infra.db.ids import IdentifierResolutionError
 from arcane.services.memory import MemoryService
@@ -61,7 +63,9 @@ def handle_save(
     confidence: float | None = None,
     source: str | None = None,
     supersedes: str | None = None,
+    caller: dict[str, Any] | None = None,
 ) -> str:
+    # ``caller`` is filled in by the server (client name and call _meta), never by the agent.
     handler_warnings: list[str] = []
 
     # Sanitise category at the handler boundary so the domain model stays strict
@@ -133,7 +137,9 @@ def handle_save(
         ttl_days=ttl_days,
         confidence=confidence,
     )
-    result = svc.save(raw, project=project_final, org=org_final)
+    caller = caller or {}
+    provenance = capture_provenance(os.getcwd(), client=caller.get("client"), meta=caller.get("meta"))
+    result = svc.save(raw, project=project_final, org=org_final, provenance=provenance)
     result["scope"] = {"org": org_final, "project": project_final}
     if handler_warnings:
         result["warnings"] = handler_warnings + result.get("warnings", [])
@@ -365,6 +371,9 @@ def handle_details(svc: MemoryService, memory_id: str) -> str:
         return json.dumps({"error": f"No details found for {memory_id}"})
     full_id = detail["memory_id"]
     payload: dict = {"memory_id": full_id, "body": detail["body"]}
+    memory = svc.c.memory_repo.get(full_id) or {}
+    payload["provenance"] = {k: memory.get(k) for k in ("commit_sha", "branch", "session_id", "thread_id", "harness")}
+    payload["provenance"]["dirty"] = None if memory.get("dirty") is None else bool(memory["dirty"])
     replaced_by = svc.c.relationship_repo.superseded_by([full_id]).get(full_id)
     if replaced_by:
         payload["superseded_by"] = replaced_by

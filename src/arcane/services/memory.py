@@ -11,6 +11,7 @@ from typing import Any
 
 from arcane.domain.enums import RelationType
 from arcane.domain.models import Memory, RawMemoryInput, Relationship
+from arcane.domain.provenance import Provenance, capture_provenance
 from arcane.domain.results import MemorySaveResult
 from arcane.domain.scope import resolve_read_project, resolve_write_scope, slugify, validate_org
 from arcane.infra.db.ids import IdentifierResolutionError, resolve_entity_id
@@ -283,11 +284,20 @@ class MemoryService:
         )
         return str(path)
 
-    def save(self, raw: RawMemoryInput, project: str | None = None, org: str | None = None) -> MemorySaveResult:
+    def save(
+        self,
+        raw: RawMemoryInput,
+        project: str | None = None,
+        org: str | None = None,
+        provenance: Provenance | None = None,
+    ) -> MemorySaveResult:
         """Save a memory with full pipeline: redact, write markdown, index, embed.
 
         ``project``/``org`` together set the scope. An empty ``project`` with an
         ``org`` is an org-level (company-wide) memory; ``org="global"`` is global.
+        ``provenance`` is where the save came from; when omitted it is read from
+        the working directory and environment. A same-titled save that merges
+        into an existing memory keeps that memory's original provenance.
         """
         resolved = resolve_write_scope(project, self.c.config)
         project = resolved.project
@@ -315,7 +325,7 @@ class MemoryService:
         # an org/global write can't merge into a project.
         existing = self.c.memory_repo.find_by_title(raw.title, project, org)
         if existing:
-            return self._merge_into(existing, raw, today, warnings)
+            return self._merge_into(existing, raw, today, warnings, provenance)
 
         # New memory — warn (never block) when it looks semantically close to
         # an existing one. FTS candidates back the check when embeddings are down.
@@ -341,6 +351,7 @@ class MemoryService:
             warnings.append(near_dup)
 
         mem = Memory.from_raw(raw, project=project, org=org, file_path=relative_vault_path(self.c.home, file_path))
+        mem = mem.model_copy(update=(provenance or capture_provenance(os.getcwd())).model_dump())
         mem_dict = mem.model_dump()
 
         with self.c.db.transaction():
@@ -358,12 +369,17 @@ class MemoryService:
                     self.link_supersedes(mem.id, raw.supersedes)
                 self._refresh_mirror(mem.id)
         if existing is not None:
-            return self._merge_into(existing, raw, today, warnings)
+            return self._merge_into(existing, raw, today, warnings, provenance)
         logger.debug("Created memory id=%s project=%s", mem.id, project)
         return {"id": mem.id, "file_path": str(file_path), "action": "created", "warnings": warnings}
 
     def _merge_into(
-        self, existing: dict[str, Any], raw: RawMemoryInput, today: str, warnings: list[str]
+        self,
+        existing: dict[str, Any],
+        raw: RawMemoryInput,
+        today: str,
+        warnings: list[str],
+        provenance: Provenance | None = None,
     ) -> MemorySaveResult:
         """Fold a same-titled save into *existing* instead of creating a duplicate."""
         existing_id = existing["id"]
@@ -372,7 +388,7 @@ class MemoryService:
             current = self.c.memory_repo.get(existing_id)
             if current is None:
                 # A concurrent delete won; run the normal save path again.
-                return self.save(raw, project=existing["project"], org=existing["org"])
+                return self.save(raw, project=existing["project"], org=existing["org"], provenance=provenance)
             merged_tags = self._merge_tags(current.get("tags") or [], raw.tags)
             embedding = self._prepare_embedding(current["title"], raw.what, raw.why, raw.impact, merged_tags)
             with self.c.db.transaction():
