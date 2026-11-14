@@ -67,21 +67,32 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
 
 
 # A why that opens with who asked says who, not why. It only counts as thin when
-# no reason follows: a reason marker with real words after it, or a second sentence.
-_ASK_VERBS = r"(?i:asked|requested|wanted|instructed|told|directed)"
+# no reason follows: a reason marker with real words after it, or a sentence break.
+_ASK_ADVERBS = r"(?:(?i:has|had|also|explicitly|specifically|just|then)\s+){0,2}"
 _PRONOUNS = r"(?:We|They|He|She|It|You|This|That|There|These|Those)"
-# The subject is "user" or a capitalised first name, never a pronoun: "We wanted X" states
-# a team's own aim and is not someone else's request.
-_WHO_ASKED = re.compile(rf"^\s*(?:(?i:the)\s+)?(?:(?i:user)|(?!{_PRONOUNS}\b)[A-Z][a-z]+)\s+{_ASK_VERBS}\b")
+# "User" or "the user" takes the wide verb list. A person is one capitalised first name and
+# only the verbs that name a request: "Customers wanted X" or "Benchmarks told us X" give
+# a reason, not an ask, and "We asked for X" states the team's own aim.
+_WHO_ASKED = re.compile(
+    rf"^\s*(?:(?i:(?:the\s+)?user)\s+{_ASK_ADVERBS}"
+    r"(?i:asks?|asked|requests?|requested|wants?|wanted|instructs?|instructed|tells?|told|directs?|directed)"
+    rf"|(?!{_PRONOUNS}\b)[A-Z][a-z]+\s+{_ASK_ADVERBS}(?i:asked|requested|instructed))\b"
+)
 _REASON_MARKER = re.compile(
-    r"\b(because|since|so that|so|in order to|to avoid|to prevent|due to|otherwise|for (?:better|more))\b", re.I
+    r"\b(because|since|so that|so|in order to|to avoid|to prevent|to (?:reduce|cut|keep|make)|due to"
+    r"|otherwise|for (?:better|more))\b",
+    re.I,
 )
 _RESTATED_ASK = re.compile(r"^(?:(?:the|that)\s+)?\w+\s+(?:asked|requested|wanted|said|told|instructed)\b", re.I)
+# What follows the ask is a new clause, so it is a reason: ". " ": " "; " or a spaced dash.
+_CLAUSE_BREAK = re.compile(r"[.!?:;]\s+\S|\s[-\u2013\u2014]\s")
 _THIN_WHY_WORDS = 30
+_MIN_REASON_WORDS = 3  # fewer words after a marker is "because it was asked", not a reason
+_MAX_RESTATED_WORDS = 8  # a tail this short that restates the ask is the ask again
+_CHOSE_OVER_SPAN = 80
 _OPTIONS_MARKER = re.compile(
     r"\boptions?\b|\balternatives?\b|\bconsidered\b|\brejected\b|\bdeclined\b|\binstead of\b"
-    r"|\brather than\b|\bvs\.?(?=\s)|\bversus\b|\bruled out\b|\bchose\b.{0,80}\bover\b"
-    r"|(?:^|\n)\s*\(?(?:[a-c]|[1-3])[).]\s*\S",
+    rf"|\brather than\b|\bvs\.?(?=\s)|\bversus\b|\bruled out\b|\bchose\b.{{0,{_CHOSE_OVER_SPAN}}}\bover\b",
     re.I,
 )
 
@@ -91,13 +102,13 @@ def _why_only_says_who_asked(why: str) -> bool:
     if not match:
         return False
     rest = why[match.end() :].strip()
-    if len(rest.split()) > _THIN_WHY_WORDS or re.search(r"[.!?]\s+\S", rest):
+    if len(rest.split()) > _THIN_WHY_WORDS or _CLAUSE_BREAK.search(rest):
         return False
     for marker in _REASON_MARKER.finditer(rest):
         tail = rest[marker.end() :].strip(" ,:;.").split()
-        if len(tail) < 3:
-            continue  # "because it was asked"-sized: nothing after the marker
-        if _RESTATED_ASK.match(" ".join(tail)) and len(tail) < 8:
+        if len(tail) < _MIN_REASON_WORDS:
+            continue
+        if _RESTATED_ASK.match(" ".join(tail)) and len(tail) < _MAX_RESTATED_WORDS:
             continue  # "because the user asked for it": the ask again, not a reason
         return False
     return True
@@ -185,10 +196,6 @@ class MemoryService:
                 combined.append(tag)
                 existing_norm.add(tag.lower())
         return combined
-
-    def _details_warnings(self, raw: RawMemoryInput) -> list[str]:
-        """Guidance-only warnings for a thin decision or bug; the save is never blocked."""
-        return quality_warnings(raw.category, raw.why, raw.details)
 
     def _resolve_journey(self, journey_id: str | None, warnings: list[str]) -> str | None:
         """Resolve a caller-supplied journey ID or prefix to the stored full ID.
@@ -378,7 +385,8 @@ class MemoryService:
         redacted = redact_values(raw.model_dump(), self.c.ignore_patterns)
         assert isinstance(redacted, dict)
         raw = raw.model_copy(update=redacted)
-        warnings = self._details_warnings(raw)
+        quality = quality_warnings(raw.category, raw.why, raw.details)
+        warnings: list[str] = []
         journey_id = self._resolve_journey(raw.journey_id, warnings)
         superseded_id = self._resolve_superseded(raw.supersedes, warnings)
         raw = raw.model_copy(update={"journey_id": journey_id, "supersedes": superseded_id})
@@ -432,7 +440,7 @@ class MemoryService:
         if existing is not None:
             return self._merge_into(existing, raw, today, warnings)
         logger.debug("Created memory id=%s project=%s", mem.id, project)
-        return {"id": mem.id, "file_path": str(file_path), "action": "created", "warnings": warnings}
+        return {"id": mem.id, "file_path": str(file_path), "action": "created", "warnings": quality + warnings}
 
     def _merge_into(
         self, existing: dict[str, Any], raw: RawMemoryInput, today: str, warnings: list[str]
@@ -472,7 +480,14 @@ class MemoryService:
                 file_path = self._refresh_mirror(existing_id)
             break
         logger.debug("Merged duplicate memory id=%s", existing_id)
-        return {"id": existing_id, "file_path": file_path, "action": "updated", "warnings": warnings}
+        # A merge leaves the stored why and details in place when the input omits them, so
+        # what is thin is the stored memory, not the incoming save.
+        return {
+            "id": existing_id,
+            "file_path": file_path,
+            "action": "updated",
+            "warnings": self.quality_warnings_for(existing_id) + warnings,
+        }
 
     def search(
         self,
