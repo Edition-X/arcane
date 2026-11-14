@@ -44,6 +44,13 @@ Save a memory for future sessions. Call this before ending any session where you
 
 **In `details`, prefer this structure:** Context, Options considered, Decision, Tradeoffs, Follow-up.
 
+**Recorded automatically.** The server stores where each save came from, with no parameters from you: `commit_sha`, `branch` and `dirty` (tracked files differ from HEAD; untracked files do not count) of the working directory, and `session_id` and `thread_id` of the agent session. Limits:
+
+- The commit, branch and dirty flag are stored only when the memory belongs to the working directory's own project. A save with another `project`, or with `scope` `org` or `global`, keeps the session and thread ids and no commit.
+- A folder that is not a git repo stores no commit, branch or dirty flag. A detached HEAD stores the commit and no branch.
+- `session_id` comes from the call's `_meta` (Codex) or from `CLAUDE_CODE_SESSION_ID` (Claude Code). The environment is read when the server starts, so after `/clear` or a resume in Claude Code it is still the session that started the server. `thread_id` is `T3CODE_THREAD_ID` when T3 Code set it, else the client's own `threadId`. A client that sends neither stores nothing.
+- A same-titled save that updates an existing memory replaces its provenance with the new save's.
+
 ---
 
 ### `memory_search`
@@ -108,6 +115,8 @@ The key is omitted entirely when no journeys are stale.
 **Profile:** `core`
 
 Get full details for a single memory, including the extended `details` field. The reply adds `superseded_by` when a newer memory replaced this one, and `supersedes` listing the memories this one replaced.
+
+The reply also carries `provenance`: `commit_sha`, `branch`, `dirty`, `session_id` and `thread_id`, recorded by the server when the memory was saved. A field is `null` when unknown (a folder that is not a git repo, a client that sends no session id). `dirty` means tracked files differed from HEAD.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

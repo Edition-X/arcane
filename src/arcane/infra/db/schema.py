@@ -94,6 +94,14 @@ def create_schema(db: Database) -> None:
     _add_column_if_missing(db, "memories", "ttl_days", "INTEGER")
     _add_column_if_missing(db, "memories", "confidence", "REAL")
     _add_column_if_missing(db, "memories", "org", "TEXT NOT NULL DEFAULT ''")
+    for column, definition in (
+        ("commit_sha", "TEXT"),
+        ("branch", "TEXT"),
+        ("dirty", "INTEGER"),
+        ("session_id", "TEXT"),
+        ("thread_id", "TEXT"),
+    ):
+        _add_column_if_missing(db, "memories", column, definition)
 
     # ── journeys ────────────────────────────────────────────────────────
     db.execute("""
@@ -285,6 +293,7 @@ def create_schema(db: Database) -> None:
     db.execute("CREATE INDEX IF NOT EXISTS idx_memories_org ON memories(org)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_memories_org_project ON memories(org, project)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_memories_source ON memories(source)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_memories_commit ON memories(commit_sha)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at DESC)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_memories_ttl ON memories(ttl_days, created_at)")
 

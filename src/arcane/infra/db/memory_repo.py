@@ -43,6 +43,9 @@ def _parse_tags(raw: Any) -> list[str]:
     return []
 
 
+PROVENANCE_COLUMNS = ("commit_sha", "branch", "dirty", "session_id", "thread_id")
+
+
 def _process_row(row: dict[str, Any]) -> dict[str, Any]:
     """Deserialise JSON fields on a raw DB row before returning to callers."""
     row["tags"] = _parse_tags(row.get("tags"))
@@ -65,8 +68,9 @@ class MemoryRepository:
             INSERT INTO memories (
                 id, title, what, why, impact, tags, category, project, org,
                 source, related_files, file_path, section_anchor,
-                created_at, updated_at, metadata, ttl_days, confidence
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, updated_at, metadata, ttl_days, confidence,
+                commit_sha, branch, dirty, session_id, thread_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 mem["id"],
@@ -87,6 +91,11 @@ class MemoryRepository:
                 json.dumps(mem.get("metadata", {})),
                 mem.get("ttl_days"),
                 mem.get("confidence"),
+                mem.get("commit_sha"),
+                mem.get("branch"),
+                None if mem.get("dirty") is None else int(bool(mem["dirty"])),
+                mem.get("session_id"),
+                mem.get("thread_id"),
             ),
         )
         rowid = cursor.lastrowid
@@ -156,8 +165,13 @@ class MemoryRepository:
         impact: str | None = None,
         tags: list[str] | None = None,
         details_append: str | None = None,
+        provenance: dict[str, Any] | None = None,
     ) -> bool:
-        """Update an existing memory by exact ID."""
+        """Update an existing memory by exact ID.
+
+        ``provenance`` replaces all six origin columns (``None`` values included),
+        so a re-save that rewrote the content also records where it was rewritten.
+        """
         what = redact(what) if what is not None else None
         why = redact(why) if why is not None else None
         impact = redact(impact) if impact is not None else None
@@ -182,6 +196,12 @@ class MemoryRepository:
         if tags is not None:
             sets.append("tags = ?")
             params.append(json.dumps(tags))
+
+        if provenance is not None:
+            for column in PROVENANCE_COLUMNS:
+                value = provenance.get(column)
+                sets.append(f"{column} = ?")
+                params.append(int(value) if column == "dirty" and value is not None else value)
 
         params.append(full_id)
         self.db.execute(f"UPDATE memories SET {', '.join(sets)} WHERE id = ?", params)
