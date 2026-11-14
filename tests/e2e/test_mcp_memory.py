@@ -44,7 +44,7 @@ def test_memory_lifecycle(arcane: Arcane) -> None:
 
     assert out["saved"]["scope"] == {"org": "acme", "project": "widget"}
     assert out["saved"]["warnings"] == []
-    assert set(out["search_minimal"][0]) == {"id", "title", "category", "score"}
+    assert set(out["search_minimal"][0]) == {"id", "title", "category", "score", "project", "org", "scope_match"}
     standard = out["search_standard"][0]
     assert standard["what"] == "Chose SQLite with FTS5 for memories"
     assert standard["has_details"] is True
@@ -65,7 +65,8 @@ def test_memory_lifecycle(arcane: Arcane) -> None:
     assert "no details found" in out["details_gone"].lower()
     assert "not found" in out["delete_again"].lower()
     assert "not found" in out["update_gone"].lower()
-    assert out["search_gone"] == []
+    # Nothing matched, so the reply points at the wider scope instead of a bare empty list.
+    assert out["search_gone"]["results"] == [] and "scope='all'" in out["search_gone"]["message"]
 
 
 def test_source_is_stamped_from_the_client_unless_given(arcane: Arcane) -> None:
@@ -127,12 +128,16 @@ def test_context_layers_and_detail_levels(arcane: Arcane) -> None:
     def titles(payload: dict[str, Any]) -> set[str]:
         return {m["title"] for m in payload["memories"]}
 
-    assert titles(out["standard"]) == {"Widget decision", "Acme convention", "Universal habit"}
+    # The project holds one memory, fewer than the threshold, so context also reads its sibling.
+    assert titles(out["standard"]) == {"Widget decision", "Acme convention", "Universal habit", "Gadget note"}
+    assert out["standard"]["scope"]["widened"] is True
     assert titles(out["project_only"]) == {"Widget decision"}
-    assert titles(out["no_global"]) == {"Widget decision", "Acme convention"}
+    assert titles(out["no_global"]) == {"Widget decision", "Acme convention", "Gadget note"}
     assert "Acme convention" in titles(out["query"])
     assert {m["title"] for m in out["search_no_org"]} == {"Widget decision"}
-    assert all(set(m) == {"id", "title", "category"} for m in out["minimal"]["memories"])
+    assert all(
+        set(m) == {"id", "title", "category", "project", "org", "scope_match"} for m in out["minimal"]["memories"]
+    )
     full = next(m for m in out["full"]["memories"] if m["title"] == "Widget decision")
     assert full["why"] == "w"
 

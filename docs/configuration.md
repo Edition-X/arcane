@@ -136,10 +136,10 @@ Project names are canonicalised on every save and lookup: trimmed, lowercased, s
 ```bash
 arcane projects                                                              # projects with memory counts
 arcane merge-projects grafana-usage-report grafana-usage-automation          # dry run
-arcane merge-projects grafana-usage-report grafana-usage-automation --apply  # write the change
+arcane merge-projects grafana-usage-report grafana-usage-automation --apply  # back up, then write the change
 ```
 
-A merge moves one org's memories. When more than one org has a project with the source name, the command lists them and asks for `--org`.
+A merge moves one org's memories, journeys, artifacts and insights, and the dry run counts each. `--apply` first writes a backup under `<home>/backups`. When more than one org has a project with the source name, the command lists them and asks for `--org`.
 
 ---
 

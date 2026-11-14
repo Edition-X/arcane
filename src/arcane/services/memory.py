@@ -12,7 +12,8 @@ from typing import Any
 from arcane.domain.enums import RelationType
 from arcane.domain.models import Memory, RawMemoryInput, Relationship
 from arcane.domain.results import MemorySaveResult
-from arcane.domain.scope import resolve_read_project, resolve_write_scope, slugify, validate_org
+from arcane.domain.scope import GLOBAL_ORG, resolve_read_project, resolve_write_scope, slugify, validate_org
+from arcane.infra.db.fts import key_terms_query, prefix_or_query
 from arcane.infra.db.ids import IdentifierResolutionError, resolve_entity_id
 from arcane.infra.db.schema import create_vec_table
 from arcane.infra.embeddings.base import EmbeddingsDisabled
@@ -26,6 +27,38 @@ logger = logging.getLogger(__name__)
 
 # A replaced memory stays findable as history, but ranks below current answers.
 SUPERSEDED_SCORE_FACTOR = 0.5
+
+# A project that matches a search with fewer rows than this cannot answer it
+# alone, so an automatic search also reads the org's other projects.
+WIDEN_BELOW = 3
+
+# How far a search reads: ``layers`` is the project, org and global chain,
+# ``org`` adds every other project of the org, ``all`` reads every org, and
+# ``auto`` picks ``org`` or ``layers`` by how thin the project is.
+REACHES = ("auto", "layers", "org", "all")
+
+
+def label_scope(rows: list[dict[str, Any]], org: str | None, project: str | None) -> None:
+    """Tag each row with ``scope_match``: where it sits relative to the searcher.
+
+    One of ``project``, ``org`` (org-level, no project), ``global``,
+    ``other_project`` (same org) or ``other_org``. A no-op for an unscoped search.
+    """
+    if org is None:
+        return
+    for r in rows:
+        row_org, row_project = r.get("org") or "", r.get("project") or ""
+        if row_org == GLOBAL_ORG:
+            r["scope_match"] = "global"
+        elif row_org != org:
+            r["scope_match"] = "other_org"
+        elif project and row_project == project:
+            r["scope_match"] = "project"
+        elif not row_project:
+            r["scope_match"] = "org"
+        else:
+            r["scope_match"] = "other_project"
+
 
 # Texts sent to the embedding provider per request during a reindex.
 REINDEX_BATCH_SIZE = 64
@@ -412,9 +445,18 @@ class MemoryService:
         org: str | None = None,
         include_org: bool = True,
         include_global: bool = True,
+        reach: str = "auto",
     ) -> list[dict[str, Any]]:
         """Ranked search. A memory a newer one replaced keeps its place in history but
-        is marked ``superseded_by`` and ranked below current answers."""
+        is marked ``superseded_by`` and ranked below current answers.
+
+        With ``reach="auto"`` a project that matches fewer than ``WIDEN_BELOW`` rows
+        of the strict key-term query also searches the org's other projects. Every
+        row carries ``scope_match`` saying where it came from.
+        """
+        if project:
+            project = resolve_read_project(project, self.c.config)
+        reach = self._effective_reach(reach, query, org, project)
         candidates = self._ranked_search(
             query,
             limit=limit * 2,
@@ -424,11 +466,37 @@ class MemoryService:
             org=org,
             include_org=include_org,
             include_global=include_global,
+            reach=reach,
         )
         for row in self._with_replacements(candidates):
             if "superseded_by" in row:
                 row["score"] = row.get("score", 0.0) * SUPERSEDED_SCORE_FACTOR
-        return sorted(candidates, key=lambda r: r.get("score", 0.0), reverse=True)[:limit]
+        ranked = sorted(candidates, key=lambda r: r.get("score", 0.0), reverse=True)[:limit]
+        label_scope(ranked, org, project)
+        return ranked
+
+    def _effective_reach(self, reach: str, query: str | None, org: str | None, project: str | None) -> str:
+        """Settle ``auto`` into ``org`` or ``layers``; any other reach stands."""
+        if reach not in REACHES:
+            raise ValueError(f"Unknown reach '{reach}'. Valid values: {', '.join(REACHES)}.")
+        if reach != "auto":
+            return reach
+        if org is None:
+            return "layers"
+        if not project:
+            return "org"
+        if not query:
+            return (
+                "org"
+                if self.c.memory_repo.count(project=project, org=org, include_org=False, include_global=False)
+                < WIDEN_BELOW
+                else "layers"
+            )
+        fts_query = key_terms_query(query) or prefix_or_query(query)
+        if fts_query is None:
+            return "layers"
+        own = self.c.memory_repo.count_project_matches(fts_query, org, project)
+        return "org" if own < WIDEN_BELOW else "layers"
 
     def _ranked_search(
         self,
@@ -440,6 +508,7 @@ class MemoryService:
         org: str | None = None,
         include_org: bool = True,
         include_global: bool = True,
+        reach: str = "layers",
     ) -> list[dict[str, Any]]:
         if project:
             project = resolve_read_project(project, self.c.config)
@@ -455,6 +524,7 @@ class MemoryService:
                     org=org,
                     include_org=include_org,
                     include_global=include_global,
+                    reach=reach,
                 )
             except DimensionMismatchError:
                 logger.warning("Vector dimension mismatch — falling back to FTS search")
@@ -471,6 +541,7 @@ class MemoryService:
             org=org,
             include_org=include_org,
             include_global=include_global,
+            reach=reach,
         )
 
     def _ollama_warm(self) -> bool:
@@ -519,11 +590,43 @@ class MemoryService:
         include_org: bool = True,
         include_global: bool = True,
         global_cap: int | None = 2,
+        reach: str = "auto",
     ) -> tuple[list[dict[str, Any]], int]:
+        results, total, _ = self.get_context_reach(
+            limit=limit,
+            project=project,
+            source=source,
+            query=query,
+            semantic_mode=semantic_mode,
+            topup_recent=topup_recent,
+            org=org,
+            include_org=include_org,
+            include_global=include_global,
+            global_cap=global_cap,
+            reach=reach,
+        )
+        return results, total
+
+    def get_context_reach(
+        self,
+        limit: int = 10,
+        project: str | None = None,
+        source: str | None = None,
+        query: str | None = None,
+        semantic_mode: str | None = None,
+        topup_recent: bool | None = None,
+        org: str | None = None,
+        include_org: bool = True,
+        include_global: bool = True,
+        global_cap: int | None = 2,
+        reach: str = "auto",
+    ) -> tuple[list[dict[str, Any]], int, str]:
+        """``get_context`` plus the reach it settled on (``layers``, ``org`` or ``all``)."""
         if project:
             project = resolve_read_project(project, self.c.config)
+        reach = self._effective_reach(reach, query, org, project)
         total = self.c.memory_repo.count(
-            project=project, source=source, org=org, include_org=include_org, include_global=include_global
+            project=project, source=source, org=org, include_org=include_org, include_global=include_global, reach=reach
         )
 
         if semantic_mode is None:
@@ -548,6 +651,7 @@ class MemoryService:
                 org=org,
                 include_org=include_org,
                 include_global=include_global,
+                reach=reach,
             )
             if topup_recent and len(results) < fetch:
                 recent = self.c.memory_repo.list_recent(
@@ -557,6 +661,7 @@ class MemoryService:
                     org=org,
                     include_org=include_org,
                     include_global=include_global,
+                    reach=reach,
                 )
                 seen = {r["id"] for r in results}
                 for r in recent:
@@ -572,13 +677,16 @@ class MemoryService:
                 org=org,
                 include_org=include_org,
                 include_global=include_global,
+                reach=reach,
             )
 
         results = [r for r in self._with_replacements(results) if "superseded_by" not in r]
         if org is not None:
             results = self._apply_global_cap(results, global_cap)
 
-        return results[:limit], total
+        results = results[:limit]
+        label_scope(results, org, project)
+        return results, total, reach
 
     def update(
         self,

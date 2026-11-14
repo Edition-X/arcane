@@ -9,7 +9,7 @@ from datetime import datetime
 
 from arcane.domain.enums import Category
 from arcane.domain.models import RawMemoryInput
-from arcane.domain.scope import GLOBAL_ORG, resolve_scope, resolve_write_scope
+from arcane.domain.scope import GLOBAL_ORG, normalize_org, resolve_scope, resolve_write_scope
 from arcane.infra.db.ids import IdentifierResolutionError
 from arcane.services.memory import MemoryService
 
@@ -17,6 +17,10 @@ logger = logging.getLogger(__name__)
 
 VALID_CATEGORIES = tuple(c.value for c in Category)
 VALID_SCOPES = ("project", "org", "global")
+# What a read can ask for. Omitted means auto: the project's own layers, widened
+# to the org's other projects when the project is thin.
+READ_SCOPES = ("project", "org", "global", "all")
+WIDEN_HINT = "No match in this project or its org. Retry with scope='all' to search every project in every org."
 
 SAVE_DESCRIPTION = """Save a memory for future sessions. You MUST call this before ending any session where you made changes, fixed bugs, made decisions, or learned something.
 
@@ -33,14 +37,18 @@ When this memory replaces an earlier one (a reversed decision, a newer fix), pas
 
 SEARCH_DESCRIPTION = """Search memories using keyword and semantic search. Call this at session start and when the user's request relates to a topic with prior context.
 
-Results omit why/impact by default; call memory_details for the full body. A result with `superseded_by` has been replaced by a newer memory; prefer the newer one."""
+Results omit why/impact by default; call memory_details for the full body. A result with `superseded_by` has been replaced by a newer memory; prefer the newer one.
+
+Every hit carries `project`, `org` and `scope_match` (project, org, global, other_project, other_org). When the current project matches fewer than 3 memories, the search also reads the org's other projects; those hits are `other_project`. `scope` overrides this: project, org (org-level memories only), global, or all (every project in every org). When nothing matches, the response says so and names scope='all'."""
 
 CONTEXT_DESCRIPTION = """Get memory context for the current project. Call this at session start to load prior decisions, bugs, and context.
 
 Use the `detail` parameter to control token usage:
 - minimal: title + category only (~500 tokens for 10 memories)
 - standard: title, category, tags, date, what (default)
-- full: all fields including why and impact"""
+- full: all fields including why and impact
+
+When the project has fewer than 3 matching memories, context also reads the org's other projects; the `scope` block then has `widened: true` and each memory has `scope_match`. `scope` overrides this: project, org (org-level memories only), global, or all (every project in every org)."""
 
 
 def handle_save(
@@ -167,12 +175,15 @@ def _search_hit(r: dict, detail: str) -> dict:
     score = round(r.get("score", 0), 2)
     # Shown at every detail level: acting on a replaced decision is the costly mistake.
     replaced = {"superseded_by": r["superseded_by"]} if r.get("superseded_by") else {}
+    # Shown at every detail level: a hit from another project must be told from a local one.
+    where = _where(r)
     if detail == "minimal":
         return {
             "id": r["id"],
             "title": r["title"],
             "category": r.get("category"),
             "score": score,
+            **where,
             **replaced,
         }
     if detail == "full":
@@ -184,8 +195,7 @@ def _search_hit(r: dict, detail: str) -> dict:
             "impact": r.get("impact"),
             "category": r.get("category"),
             "tags": r.get("tags", []),  # already list[str] from repo
-            "project": r.get("project"),
-            "org": r.get("org", ""),
+            **where,
             "created_at": r.get("created_at", "")[:10],
             "score": score,
             "has_details": bool(r.get("has_details")),
@@ -201,11 +211,42 @@ def _search_hit(r: dict, detail: str) -> dict:
         "score": score,
         "what": r["what"],
         "tags": r.get("tags", []),
-        "project": r.get("project"),
+        **where,
         "date": r.get("created_at", "")[:10],
         "has_details": bool(r.get("has_details")),
         **replaced,
     }
+
+
+def _where(r: dict) -> dict:
+    """Where a memory lives, so a hit from another project is told from a local one."""
+    return {"project": r.get("project"), "org": r.get("org", ""), "scope_match": r.get("scope_match")}
+
+
+def _read_scope(
+    scope: str | None, org: str, project: str, include_org: bool, include_global: bool
+) -> tuple[str, str, bool, bool, str]:
+    """Map a read ``scope`` to ``(org, project, include_org, include_global, reach)``.
+
+    Omitted scope keeps the caller's layers and lets the service widen when the
+    project is thin, unless the caller turned the org layer off; an explicit
+    scope never widens, except ``all``.
+    """
+    if scope is None:
+        return org, project, include_org, include_global, "auto" if include_org else "layers"
+    if scope == "project":
+        return org, project, False, False, "layers"
+    if scope == "org":
+        return org, "", True, False, "layers"
+    if scope == "global":
+        return GLOBAL_ORG, "", True, False, "layers"
+    return org, project, include_org, include_global, "all"
+
+
+def _bad_scope(scope: str | None) -> str | None:
+    if scope is not None and scope not in READ_SCOPES:
+        return json.dumps({"error": f"Unknown scope '{scope}'. Valid values: {', '.join(READ_SCOPES)}."})
+    return None
 
 
 def handle_search(
@@ -217,22 +258,31 @@ def handle_search(
     include_org: bool = True,
     include_global: bool = True,
     detail: str | None = "standard",
+    scope: str | None = None,
 ) -> str:
+    if (error := _bad_scope(scope)) is not None:
+        return error
     resolved = resolve_scope(os.getcwd(), svc.c.config)
-    org_final = org or resolved.org
+    org_final = normalize_org(org) or resolved.org
     project_final = project if project is not None else resolved.project
     detail = _normalize_detail(detail)
+    org_final, project_final, inc_org, inc_global, reach = _read_scope(
+        scope, org_final, project_final, include_org, include_global
+    )
 
     results = svc.search(
         query,
         limit=_normalize_limit(limit, 5),
         project=project_final,
         org=org_final,
-        include_org=include_org,
-        include_global=include_global,
+        include_org=inc_org,
+        include_global=inc_global,
+        reach=reach,
     )
 
     clean = [_search_hit(r, detail) for r in results]
+    if not clean and scope != "all":
+        return json.dumps({"results": [], "message": WIDEN_HINT})
     return json.dumps(clean)
 
 
@@ -247,28 +297,27 @@ def handle_context(
     include_org: bool = True,
     include_global: bool = True,
 ) -> str:
+    if (error := _bad_scope(scope)) is not None:
+        return error
     # Resolve the current (org, project) scope; explicit args win.
     resolved = resolve_scope(os.getcwd(), svc.c.config)
-    org_final = org or resolved.org
+    org_final = normalize_org(org) or resolved.org
     project_final = project if project is not None else resolved.project
 
-    # Optional `scope` narrows retrieval to a single layer.
-    inc_org, inc_global = include_org, include_global
-    if scope == "project":
-        inc_org, inc_global = False, False
-    elif scope == "org":
-        project_final, inc_org, inc_global = "", True, False
-    elif scope == "global":
-        org_final, project_final, inc_org, inc_global = GLOBAL_ORG, "", True, False
+    # Optional `scope` narrows retrieval to a single layer, or widens it to `all`.
+    org_final, project_final, inc_org, inc_global, reach = _read_scope(
+        scope, org_final, project_final, include_org, include_global
+    )
 
     # Honour the configured semantic mode rather than hardcoding "never"
-    results, total = svc.get_context(
+    results, total, reach = svc.get_context_reach(
         limit=_normalize_limit(limit, 10),
         project=project_final,
         org=org_final,
         query=query or None,
         include_org=inc_org,
         include_global=inc_global,
+        reach=reach,
     )
 
     # Normalise detail level — fall back to standard for unknown values
@@ -289,6 +338,7 @@ def handle_context(
                     "id": r["id"],
                     "title": r.get("title", "Untitled"),
                     "category": r.get("category", ""),
+                    **_where(r),
                 }
             )
         elif detail == "full":
@@ -302,6 +352,7 @@ def handle_context(
                     "what": r.get("what", ""),
                     "why": r.get("why"),
                     "impact": r.get("impact"),
+                    **_where(r),
                 }
             )
         else:
@@ -314,6 +365,7 @@ def handle_context(
                     "tags": r.get("tags", []),  # already list[str] from repo
                     "date": date_display,
                     "what": r.get("what", ""),
+                    **_where(r),
                 }
             )
 
@@ -321,7 +373,7 @@ def handle_context(
         "total": total,
         "showing": len(memories),
         "memories": memories,
-        "scope": {"org": org_final, "project": project_final},
+        "scope": {"org": org_final, "project": project_final, "reach": reach, "widened": reach != "layers"},
         "message": "Use memory_search for specific topics. Save memories before session ends.",
     }
 

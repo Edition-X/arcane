@@ -212,6 +212,14 @@ class JourneyRepository:
         self.db.commit()
         return True
 
+    def reassign_project(self, old: str, new: str, *, org: str) -> int:
+        """Move *org*'s journeys from project *old* to *new*; return rows moved."""
+        cursor = self.db.execute(
+            "UPDATE OR IGNORE journeys SET project = ? WHERE project = ? AND org = ?", (new, old, org)
+        )
+        self.db.commit()
+        return int(cursor.rowcount)
+
     def count(self, project: str | None = None, org: str | None = None) -> int:
         clauses: list[str] = []
         params: list[Any] = []

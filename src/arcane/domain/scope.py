@@ -55,6 +55,15 @@ def validate_org(value: str) -> str:
     return validate_org_slug(value)
 
 
+def normalize_org(value: str | None) -> str | None:
+    """An org typed by hand, in the form orgs are stored: trimmed and lowercase.
+
+    Orgs are saved as lowercase slugs, so ``Sunrise-Robotics`` would match
+    nothing. An empty value means "not given" and becomes ``None``.
+    """
+    return (value or "").strip().lower() or None
+
+
 def slugify(name: str) -> str:
     """Lowercase, collapse non-alphanumeric runs to single dashes, trim dashes."""
     return re.sub(r"[^a-z0-9]+", "-", (name or "").strip().lower()).strip("-")

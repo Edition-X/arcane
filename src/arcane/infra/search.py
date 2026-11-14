@@ -10,9 +10,12 @@ from arcane.infra.embeddings.base import EmbeddingProvider
 # Specificity bonus added to a normalised score by scope layer. A bias, not a
 # hard gate: a much stronger org/global hit can still outrank a weak project one.
 SCOPE_BONUS = {3: 0.15, 2: 0.05, 1: 0.0, 0: 0.0}
+# After widening past the project, relevance decides and the local bonus only
+# breaks near-ties: a strong hit from another project beats a weak local one.
+WIDENED_SCOPE_BONUS = {3: 0.03, 2: 0.02, 1: 0.0, 0: 0.0}
 
 
-def apply_scope_bonus(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def apply_scope_bonus(rows: list[dict[str, Any]], bonus: dict[int, float] = SCOPE_BONUS) -> list[dict[str, Any]]:
     """Add the per-layer specificity bonus to each row's score, then re-sort.
 
     Rows without a ``scope_rank`` are left untouched (no-op for unscoped search).
@@ -20,7 +23,7 @@ def apply_scope_bonus(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for r in rows:
         rank = r.get("scope_rank")
         if rank is not None:
-            r["score"] = r.get("score", 0.0) + SCOPE_BONUS.get(rank, 0.0)
+            r["score"] = r.get("score", 0.0) + bonus.get(rank, 0.0)
     return sorted(rows, key=lambda x: x.get("score", 0.0), reverse=True)
 
 
@@ -78,6 +81,7 @@ def tiered_search(
     org: str | None = None,
     include_org: bool = True,
     include_global: bool = True,
+    reach: str = "layers",
 ) -> list[dict[str, Any]]:
     """FTS-first tiered search — only calls embed when FTS results are sparse."""
     fts_results = repo.fts_search(
@@ -88,6 +92,7 @@ def tiered_search(
         org=org,
         include_org=include_org,
         include_global=include_global,
+        reach=reach,
     )
 
     _normalise(fts_results)
@@ -105,11 +110,12 @@ def tiered_search(
                 org=org,
                 include_org=include_org,
                 include_global=include_global,
+                reach=reach,
             )
             results = merge_results(fts_results, vec_results, limit=limit * 2)
         except Exception:
             results = fts_results
 
     if org is not None:
-        results = apply_scope_bonus(results)
+        results = apply_scope_bonus(results, SCOPE_BONUS if reach == "layers" else WIDENED_SCOPE_BONUS)
     return results[:limit]

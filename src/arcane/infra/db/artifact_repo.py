@@ -182,6 +182,18 @@ class ArtifactRepository:
         rows = self.db.fetchall(f"SELECT * FROM artifacts {where} ORDER BY created_at", params)
         return [self._process_row(row) for row in rows]
 
+    def reassign_project(self, old: str, new: str, *, org: str) -> int:
+        """Move *org*'s artifacts from project *old* to *new*; return rows moved.
+
+        A row that would collide with one already in *new* (same type and
+        external id) stays where it is.
+        """
+        cursor = self.db.execute(
+            "UPDATE OR IGNORE artifacts SET project = ? WHERE project = ? AND org = ?", (new, old, org)
+        )
+        self.db.commit()
+        return int(cursor.rowcount)
+
     def count(self, project: str | None = None, org: str | None = None) -> int:
         clauses: list[str] = []
         params: list[Any] = []
