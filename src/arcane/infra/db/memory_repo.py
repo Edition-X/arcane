@@ -169,7 +169,7 @@ class MemoryRepository:
     ) -> bool:
         """Update an existing memory by exact ID.
 
-        ``provenance`` replaces all six origin columns (``None`` values included),
+        ``provenance`` replaces all five origin columns (``None`` values included),
         so a re-save that rewrote the content also records where it was rewritten.
         """
         what = redact(what) if what is not None else None
