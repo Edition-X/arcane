@@ -16,7 +16,8 @@ def test_a_replaced_decision_is_labelled_ranked_lower_and_left_out_of_context(ar
         )  # fmt: skip
         new = await c.call(
             "memory_save", title="Pin runner images by digest", what="Runner images are pulled by digest",
-            why="Tags moved under us twice", category="decision", details="Digests are immutable",
+            why="Tags moved under us twice", category="decision",
+            details="Options considered: tags or digests. Digests are immutable",
             supersedes=old["id"][:8],
         )  # fmt: skip
         return {

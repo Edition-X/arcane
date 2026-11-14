@@ -26,9 +26,9 @@ def memory_save_schema() -> dict[str, Any]:
     descriptions = {
         "title": "Short title, max 60 chars.",
         "what": "1-2 sentences. The essence.",
-        "why": "Reasoning behind it.",
+        "why": "The reasoning: why this, not who asked.",
         "impact": "What changed.",
-        "details": "Full context.",
+        "details": "Full context. For a decision, options considered.",
         "source": "Source agent; defaults to the connecting MCP client.",
         "journey_id": "Link to a journey.",
         "supersedes": "ID or prefix of an earlier memory this one replaces.",
