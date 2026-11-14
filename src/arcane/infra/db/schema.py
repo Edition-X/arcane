@@ -100,7 +100,6 @@ def create_schema(db: Database) -> None:
         ("dirty", "INTEGER"),
         ("session_id", "TEXT"),
         ("thread_id", "TEXT"),
-        ("harness", "TEXT"),
     ):
         _add_column_if_missing(db, "memories", column, definition)
 

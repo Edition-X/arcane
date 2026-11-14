@@ -9,16 +9,12 @@ or a client that tells the server nothing about its session.
 from __future__ import annotations
 
 import os
-import subprocess
 from collections.abc import Mapping
 from typing import Any
 
 from pydantic import BaseModel
 
-from arcane.domain.scope import slugify
-
-# MCP clientInfo.name slugs that are better known by another name.
-_HARNESS_NAMES = {"codex-mcp-client": "codex"}
+from arcane.domain.scope import _git
 
 
 class Provenance(BaseModel):
@@ -29,48 +25,35 @@ class Provenance(BaseModel):
     dirty: bool | None = None
     session_id: str | None = None
     thread_id: str | None = None
-    harness: str | None = None
+
+    def without_git(self) -> Provenance:
+        """The same session, with no code state: the save was not about this checkout."""
+        return self.model_copy(update={"commit_sha": None, "branch": None, "dirty": None})
 
 
 def git_state(cwd: str) -> tuple[str | None, str | None, bool | None]:
     """``(commit_sha, branch, dirty)`` of HEAD in *cwd*; all ``None`` outside a repo.
 
-    One git call. ``--ignore-submodules`` and ``--untracked-files=no`` keep it
-    to a few ms in a large repo with submodules, so a save is not slowed. A
-    detached HEAD gives the SHA and no branch. ``dirty`` means tracked files
-    differ from HEAD; untracked files do not count. An unborn branch has no
-    commit, so it gives a branch and no SHA. Never raises.
-
-    ``GIT_OPTIONAL_LOCKS=0`` stops ``git status`` refreshing the index, which
-    takes ``index.lock``: the agent that called the save may be running its
-    own git command in the same checkout at that moment.
+    One git call, with ``--ignore-submodules`` and ``--untracked-files=no`` so it
+    takes a few ms in a large repo and a save is not slowed. A detached HEAD
+    gives the SHA and no branch. ``dirty`` means tracked files differ from HEAD;
+    untracked files do not count. An unborn branch has no commit, so it gives a
+    branch and no SHA. Never raises.
     """
-    try:
-        out = subprocess.run(
-            [
-                "git",
-                "-C",
-                cwd,
-                "status",
-                "--porcelain=v2",
-                "--branch",
-                "--untracked-files=no",
-                "--ignore-submodules=all",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=2,
-            check=False,
-            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None, None, None
-    if out.returncode != 0:
+    out = _git(
+        cwd,
+        "status",
+        "--porcelain=v2",
+        "--branch",
+        "--untracked-files=no",
+        "--ignore-submodules=all",
+    )
+    if out is None:
         return None, None, None
     sha: str | None = None
     branch: str | None = None
     dirty = False
-    for line in out.stdout.splitlines():
+    for line in out.splitlines():
         if line.startswith("# branch.oid "):
             value = line.removeprefix("# branch.oid ")
             sha = None if value == "(initial)" else value
@@ -93,14 +76,13 @@ def _first(*values: Any) -> str | None:
 def capture_provenance(
     cwd: str,
     *,
-    client: str | None = None,
     meta: Mapping[str, Any] | None = None,
     env: Mapping[str, str] | None = None,
 ) -> Provenance:
     """Collect the origin of a save made from *cwd*.
 
-    *client* is the MCP clientInfo name; *meta* is the ``_meta`` of the tool
-    call. Only ids a client has been seen to send are read:
+    *meta* is the ``_meta`` of the tool call. Only ids a client has been seen to
+    send are read:
 
     - Codex puts ``sessionId`` and ``threadId`` in every call's ``_meta``.
     - Claude Code sends no session id in ``_meta``; its ``CLAUDE_CODE_SESSION_ID``
@@ -109,23 +91,18 @@ def capture_provenance(
 
     The environment is read when the server starts, so it is the session that
     started the server. If Claude Code runs ``/clear`` or resumes, the server
-    keeps running and the id here goes stale until the next server start. A
-    per-call ``_meta`` value is current, so it wins over the environment.
+    keeps running and ``CLAUDE_CODE_SESSION_ID`` goes stale until the next server
+    start, so a per-call ``_meta`` session id wins over it. The thread id is the
+    other way round: the T3 thread is the one that can be opened, and it does not
+    change while the server runs, so it wins over a client's own ``threadId``.
     """
     env = os.environ if env is None else env
     meta = meta or {}
     sha, branch, dirty = git_state(cwd)
-    if client:
-        harness: str | None = _HARNESS_NAMES.get(client, client)
-    elif env.get("CLAUDECODE"):
-        harness = "claude-code"
-    else:
-        harness = None
     return Provenance(
         commit_sha=sha,
         branch=branch,
         dirty=dirty,
         session_id=_first(meta.get("sessionId"), env.get("CLAUDE_CODE_SESSION_ID")),
-        thread_id=_first(meta.get("threadId"), env.get("T3CODE_THREAD_ID")),
-        harness=slugify(harness) if harness else None,
+        thread_id=_first(env.get("T3CODE_THREAD_ID"), meta.get("threadId")),
     )

@@ -97,7 +97,6 @@ class Memory(BaseModel):
     dirty: bool | None = None
     session_id: str | None = None
     thread_id: str | None = None
-    harness: str | None = None
 
     @staticmethod
     def from_raw(raw: RawMemoryInput, project: str, org: str = "", file_path: str = "") -> Memory:

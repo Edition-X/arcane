@@ -297,7 +297,10 @@ class MemoryService:
         ``org`` is an org-level (company-wide) memory; ``org="global"`` is global.
         ``provenance`` is where the save came from; when omitted it is read from
         the working directory and environment. A same-titled save that merges
-        into an existing memory keeps that memory's original provenance.
+        into an existing memory replaces that memory's provenance with its own.
+        The commit, branch and dirty flag are recorded only when the memory is
+        about the working directory's own project; a save into another project
+        keeps just the session and thread ids.
         """
         resolved = resolve_write_scope(project, self.c.config)
         project = resolved.project
@@ -316,6 +319,9 @@ class MemoryService:
         redacted = redact_values(raw.model_dump(), self.c.ignore_patterns)
         assert isinstance(redacted, dict)
         raw = raw.model_copy(update=redacted)
+        provenance = provenance or capture_provenance(os.getcwd())
+        if project != resolve_write_scope(None, self.c.config).project:
+            provenance = provenance.without_git()
         warnings = self._details_warnings(raw)
         journey_id = self._resolve_journey(raw.journey_id, warnings)
         superseded_id = self._resolve_superseded(raw.supersedes, warnings)
@@ -351,7 +357,7 @@ class MemoryService:
             warnings.append(near_dup)
 
         mem = Memory.from_raw(raw, project=project, org=org, file_path=relative_vault_path(self.c.home, file_path))
-        mem = mem.model_copy(update=(provenance or capture_provenance(os.getcwd())).model_dump())
+        mem = mem.model_copy(update=provenance.model_dump())
         mem_dict = mem.model_dump()
 
         with self.c.db.transaction():
@@ -402,6 +408,7 @@ class MemoryService:
                     impact=raw.impact,
                     tags=merged_tags,
                     details_append=details_append,
+                    provenance=provenance.model_dump() if provenance else None,
                 )
                 if embedding is not None:
                     self._store_embedding(current["rowid"], embedding)

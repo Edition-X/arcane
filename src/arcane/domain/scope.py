@@ -7,6 +7,7 @@ repo). The org is resolved from the git remote owner, with a config override.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import subprocess
@@ -17,6 +18,8 @@ from collections.abc import Mapping
 from pydantic import BaseModel, field_validator
 
 from arcane.infra.config import ArcaneConfig, validate_org_slug
+
+logger = logging.getLogger(__name__)
 
 GLOBAL_ORG = "global"
 DEFAULT_ORG = "personal"
@@ -129,15 +132,24 @@ def clear_remote_cache() -> None:
 
 
 def _git(cwd: str, *args: str) -> str | None:
-    """Run a short git command in *cwd*; its stripped stdout, or ``None`` on any failure."""
+    """Run a short git command in *cwd*; its stripped stdout, or ``None`` on any failure.
+
+    ``--no-optional-locks`` keeps ``git status`` from refreshing the index, which
+    takes ``index.lock``: the agent that triggered this call may be running its
+    own git command in the same checkout. A timeout is logged, since otherwise it
+    looks the same as "not a repo".
+    """
     try:
         out = subprocess.run(
-            ["git", "-C", cwd, *args],
+            ["git", "--no-optional-locks", "-C", cwd, *args],
             capture_output=True,
             text=True,
             timeout=2,
             check=False,
         )
+    except subprocess.TimeoutExpired:
+        logger.warning("git %s timed out in %s", args[0], cwd)
+        return None
     except (OSError, subprocess.SubprocessError):
         return None
     if out.returncode != 0 or not out.stdout.strip():

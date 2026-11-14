@@ -138,7 +138,7 @@ def handle_save(
         confidence=confidence,
     )
     caller = caller or {}
-    provenance = capture_provenance(os.getcwd(), client=caller.get("client"), meta=caller.get("meta"))
+    provenance = capture_provenance(os.getcwd(), meta=caller.get("meta"))
     result = svc.save(raw, project=project_final, org=org_final, provenance=provenance)
     result["scope"] = {"org": org_final, "project": project_final}
     if handler_warnings:
@@ -372,7 +372,7 @@ def handle_details(svc: MemoryService, memory_id: str) -> str:
     full_id = detail["memory_id"]
     payload: dict = {"memory_id": full_id, "body": detail["body"]}
     memory = svc.c.memory_repo.get(full_id) or {}
-    payload["provenance"] = {k: memory.get(k) for k in ("commit_sha", "branch", "session_id", "thread_id", "harness")}
+    payload["provenance"] = {k: memory.get(k) for k in ("commit_sha", "branch", "session_id", "thread_id")}
     payload["provenance"]["dirty"] = None if memory.get("dirty") is None else bool(memory["dirty"])
     replaced_by = svc.c.relationship_repo.superseded_by([full_id]).get(full_id)
     if replaced_by:
