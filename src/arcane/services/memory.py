@@ -68,14 +68,15 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
 
 # A why that opens with who asked says who, not why. It only counts as thin when
 # no reason follows: a reason marker with real words after it, or a second sentence.
-_WHO_ASKED = re.compile(r"^\s*(the\s+)?(user|dan)\s+(asked|requested|wanted|instructed|told|directed)\b", re.I)
+_ASK_VERBS = r"(?i:asked|requested|wanted|instructed|told|directed)"
+_PRONOUNS = r"(?:We|They|He|She|It|You|This|That|There|These|Those)"
+# The subject is "user" or a capitalised first name, never a pronoun: "We wanted X" states
+# a team's own aim and is not someone else's request.
+_WHO_ASKED = re.compile(rf"^\s*(?:(?i:the)\s+)?(?:(?i:user)|(?!{_PRONOUNS}\b)[A-Z][a-z]+)\s+{_ASK_VERBS}\b")
 _REASON_MARKER = re.compile(
     r"\b(because|since|so that|so|in order to|to avoid|to prevent|due to|otherwise|for (?:better|more))\b", re.I
 )
-_RESTATED_ASK = re.compile(
-    r"^(?:(?:the|that)\s+)?(?:user|dan|he|she|they|it)\s+(?:asked|requested|wanted|said|told|instructed)\b",
-    re.I,
-)
+_RESTATED_ASK = re.compile(r"^(?:(?:the|that)\s+)?\w+\s+(?:asked|requested|wanted|said|told|instructed)\b", re.I)
 _THIN_WHY_WORDS = 30
 _OPTIONS_MARKER = re.compile(
     r"\boptions?\b|\balternatives?\b|\bconsidered\b|\brejected\b|\bdeclined\b|\binstead of\b"

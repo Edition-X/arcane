@@ -49,6 +49,11 @@ def test_a_why_that_only_says_who_asked_warns(arcane: Arcane) -> None:
             "purpose": "User requested the rewrite so the cache survives restarts without a rebuild",
             "second_sentence": "User asked for the rewrite. The old path lost data on restart.",
             "no_who": "The old path lost data on restart",
+            "other_name": "Lukas asked for the cache layer to be rewritten",
+            "other_name_reason": "Lukas asked for the rewrite because the old path lost data on restart",
+            "we_no_reason": "We wanted the cache layer rewritten",
+            "we_reason": "We wanted the cache layer rewritten to avoid losing data on restart",
+            "i_no_reason": "I wanted the cache layer rewritten",
         }
         return {
             name: await decision(c, n, why=why, details=OPTIONS)
@@ -60,7 +65,17 @@ def test_a_why_that_only_says_who_asked_warns(arcane: Arcane) -> None:
     assert codes(out["thin"]) == ["why_only_says_who_asked"]
     assert "memory_update" in out["thin"]["warnings"][0]
     assert codes(out["restated"]) == ["why_only_says_who_asked"]
-    for name in ("reason", "purpose", "second_sentence", "no_who"):
+    assert codes(out["other_name"]) == ["why_only_says_who_asked"]  # any first name, not one person's
+    for name in (
+        "reason",
+        "purpose",
+        "second_sentence",
+        "no_who",
+        "other_name_reason",
+        "we_no_reason",
+        "we_reason",
+        "i_no_reason",
+    ):
         assert out[name]["warnings"] == [], name
 
 
