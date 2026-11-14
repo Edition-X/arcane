@@ -40,6 +40,10 @@ def git_state(cwd: str) -> tuple[str | None, str | None, bool | None]:
     detached HEAD gives the SHA and no branch. ``dirty`` means tracked files
     differ from HEAD; untracked files do not count. An unborn branch has no
     commit, so it gives a branch and no SHA. Never raises.
+
+    ``GIT_OPTIONAL_LOCKS=0`` stops ``git status`` refreshing the index, which
+    takes ``index.lock``: the agent that called the save may be running its
+    own git command in the same checkout at that moment.
     """
     try:
         out = subprocess.run(
@@ -57,6 +61,7 @@ def git_state(cwd: str) -> tuple[str | None, str | None, bool | None]:
             text=True,
             timeout=2,
             check=False,
+            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
         )
     except (OSError, subprocess.SubprocessError):
         return None, None, None
@@ -78,6 +83,7 @@ def git_state(cwd: str) -> tuple[str | None, str | None, bool | None]:
 
 
 def _first(*values: Any) -> str | None:
+    """The first of *values* that is a non-blank string, stripped; else ``None``."""
     for value in values:
         if isinstance(value, str) and value.strip():
             return value.strip()
