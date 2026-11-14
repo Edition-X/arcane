@@ -18,17 +18,19 @@ Save a memory for future sessions. Call this before ending any session where you
 |---|---|---|---|
 | `title` | string | yes | Short title, max 60 characters |
 | `what` | string | yes | 1–2 sentences — the essence of the memory |
-| `why` | string | no | Reasoning behind the decision or action |
+| `why` | string | no | The reasoning: why this was chosen. "User asked for X" says who, not why |
 | `impact` | string | no | What changed or what it affects |
 | `tags` | array of strings | no | 2–5 relevant tags |
 | `category` | string | no | One of: `decision`, `bug`, `pattern`, `learning`, `context`, `poc`, `milestone` |
 | `related_files` | array of strings | no | File paths relevant to this memory |
-| `details` | string | no | Full context — options considered, tradeoffs, follow-up |
+| `details` | string | no | Full context — options considered, tradeoffs, follow-up. A decision's alternatives go here |
 | `project` | string | no | Project name (defaults to current directory name). Worktree-style variants of the current repo (`<repo>-<suffix>`) collapse to `<repo>`. |
 | `journey_id` | string | no | Journey ID or unambiguous prefix to link this memory to. An unknown or ambiguous ID adds a `journey_not_found`/`journey_not_linked` warning and saves the memory unlinked. |
 | `supersedes` | string | no | ID or unambiguous prefix of an earlier memory this one replaces (a reversed decision, a newer fix). Search then marks the old one `superseded_by` and ranks it lower; context leaves it out. A bad reference adds a `supersedes_not_found`/`supersedes_not_linked` warning and saves unlinked. |
 | `ttl_days` | integer | no | Days until this memory expires from search results. Omit for permanent memories. |
 | `confidence` | number | no | Confidence in accuracy 0.0–1.0. Omit if not applicable. |
+
+A `decision` that records too little reasoning saves anyway and adds a warning for each gap: `no_why` (empty why), `why_only_says_who_asked` (why names who asked, no reason after it), `no_options` (details names no alternatives). A decision with no details gets the no-details warning and not `no_options`. Each warning names `memory_update` as the fix.
 
 **Categories:**
 
@@ -119,7 +121,7 @@ Get full details for a single memory, including the extended `details` field. Th
 
 **Profile:** `core`
 
-Update a memory in place. Prefer this over `memory_save` when a save warns `near_duplicate`.
+Update a memory in place. Prefer this over `memory_save` when a save warns `near_duplicate`, or to fix a `no_why`, `why_only_says_who_asked` or `no_options` warning. The reply carries `warnings` for whatever still applies after the update, and omits the key when nothing does.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

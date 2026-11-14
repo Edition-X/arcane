@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import re
 import struct
 from datetime import date
 from typing import Any
@@ -65,6 +66,82 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
+# A why that opens with who asked says who, not why. It only counts as thin when
+# no reason follows: a reason marker with real words after it, or a second sentence.
+_WHO_ASKED = re.compile(r"^\s*(the\s+)?(user|dan)\s+(asked|requested|wanted|instructed|told|directed)\b", re.I)
+_REASON_MARKER = re.compile(
+    r"\b(because|since|so that|so|in order to|to avoid|to prevent|due to|otherwise|for (?:better|more))\b", re.I
+)
+_RESTATED_ASK = re.compile(
+    r"^(?:(?:the|that)\s+)?(?:user|dan|he|she|they|it)\s+(?:asked|requested|wanted|said|told|instructed)\b",
+    re.I,
+)
+_THIN_WHY_WORDS = 30
+_OPTIONS_MARKER = re.compile(
+    r"\boptions?\b|\balternatives?\b|\bconsidered\b|\brejected\b|\bdeclined\b|\binstead of\b"
+    r"|\brather than\b|\bvs\.?(?=\s)|\bversus\b|\bruled out\b|\bchose\b.{0,80}\bover\b"
+    r"|(?:^|\n)\s*\(?(?:[a-c]|[1-3])[).]\s*\S",
+    re.I,
+)
+
+
+def _why_only_says_who_asked(why: str) -> bool:
+    match = _WHO_ASKED.match(why)
+    if not match:
+        return False
+    rest = why[match.end() :].strip()
+    if len(rest.split()) > _THIN_WHY_WORDS or re.search(r"[.!?]\s+\S", rest):
+        return False
+    for marker in _REASON_MARKER.finditer(rest):
+        tail = rest[marker.end() :].strip(" ,:;.").split()
+        if len(tail) < 3:
+            continue  # "because it was asked"-sized: nothing after the marker
+        if _RESTATED_ASK.match(" ".join(tail)) and len(tail) < 8:
+            continue  # "because the user asked for it": the ask again, not a reason
+        return False
+    return True
+
+
+def quality_warnings(category: str | None, why: str | None, details: str | None) -> list[str]:
+    """Warnings for a decision or bug memory that records too little of the reasoning.
+
+    One warning per gap: a decision with no details gets the no-details warning
+    and not a second one about options. Each says how to add the missing part,
+    with ``memory_update``. Shared by save and update so both report what still applies.
+    """
+    kind = (category or "").strip().lower()
+    if kind not in {"decision", "bug"}:
+        return []
+    why_text = (why or "").strip()
+    details_text = (details or "").strip()
+    warnings: list[str] = []
+    if not details_text:
+        warnings.append(
+            f"'{kind}' memories should include details. "
+            "Capture context, options considered, decision, tradeoffs, and follow-up."
+        )
+    if kind != "decision":
+        return warnings
+    if not why_text and details_text:
+        warnings.append(
+            "no_why: search results show why but not details, so move the reasoning into why "
+            "with memory_update (why=...)."
+        )
+    elif not why_text:
+        warnings.append("no_why: add the reasoning behind this decision with memory_update (why=...).")
+    elif _why_only_says_who_asked(why_text):
+        warnings.append(
+            "why_only_says_who_asked: why names who asked but not the reason; "
+            "add the reason after it with memory_update (why=...)."
+        )
+    if details_text and not _OPTIONS_MARKER.search(details_text):
+        warnings.append(
+            "no_options: details does not say what else was considered; "
+            "add the alternatives and why they lost with memory_update (details_append=...)."
+        )
+    return warnings
+
+
 class MemoryService:
     """Main orchestrator for memory operations."""
 
@@ -109,14 +186,8 @@ class MemoryService:
         return combined
 
     def _details_warnings(self, raw: RawMemoryInput) -> list[str]:
-        """Warn when decision/bug memories lack details — guidance only."""
-        category = (raw.category or "").strip().lower()
-        if category in {"decision", "bug"} and not (raw.details or "").strip():
-            return [
-                f"'{category}' memories should include details. "
-                "Capture context, options considered, decision, tradeoffs, and follow-up."
-            ]
-        return []
+        """Guidance-only warnings for a thin decision or bug; the save is never blocked."""
+        return quality_warnings(raw.category, raw.why, raw.details)
 
     def _resolve_journey(self, journey_id: str | None, warnings: list[str]) -> str | None:
         """Resolve a caller-supplied journey ID or prefix to the stored full ID.
@@ -634,6 +705,15 @@ class MemoryService:
                 self.link_supersedes(full_id, supersedes)
             self._refresh_mirror(full_id)
         return True
+
+    def quality_warnings_for(self, memory_id: str) -> list[str]:
+        """What still applies to a stored memory, as save would report it."""
+        full_id = self.c.memory_repo.resolve_prefix(memory_id)
+        existing = self.c.memory_repo.get(full_id) if full_id else None
+        if not full_id or not existing:
+            return []
+        details = self.c.memory_repo.get_details(full_id)
+        return quality_warnings(existing.get("category"), existing.get("why"), (details or {}).get("body"))
 
     def get_details(self, memory_id: str) -> dict[str, Any] | None:
         return self.c.memory_repo.get_details(memory_id)

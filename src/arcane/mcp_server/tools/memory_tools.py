@@ -6,6 +6,7 @@ import json
 import logging
 import os
 from datetime import datetime
+from typing import Any
 
 from arcane.domain.enums import Category
 from arcane.domain.models import RawMemoryInput
@@ -27,7 +28,7 @@ Save when you:
 - Learned something about the codebase
 - Set up infrastructure, tooling, or configuration
 
-When filling `details`, prefer: Context, Options considered, Decision, Tradeoffs, Follow-up.
+`why` is the reasoning, the reason this was chosen; "User asked for X" is not one. For a decision, put the alternatives you weighed in `details` ("Options considered: ..."), not in `why`. Gaps come back as warnings; fix them with memory_update.
 
 When this memory replaces an earlier one (a reversed decision, a newer fix), pass `supersedes` with the old memory's ID: search then marks the old one as replaced and ranks it below the new one, and context leaves it out."""
 
@@ -401,7 +402,11 @@ def handle_update(
         return json.dumps({"error": str(exc)})
     if not updated:
         return json.dumps({"error": f"Memory not found: {memory_id}"})
-    return json.dumps({"updated": True, "memory_id": memory_id})
+    result: dict[str, Any] = {"updated": True, "memory_id": memory_id}
+    warnings = svc.quality_warnings_for(memory_id)
+    if warnings:
+        result["warnings"] = warnings
+    return json.dumps(result)
 
 
 def handle_delete(svc: MemoryService, memory_id: str) -> str:
