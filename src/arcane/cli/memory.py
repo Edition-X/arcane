@@ -302,15 +302,18 @@ def merge_projects(src: str, dest: str, org: str | None, apply_: bool) -> None:
             click.echo(f"Moved 0 memories from {where} into '{dest_canon}'.")
             return
 
-        from arcane.infra.config import get_home
         from arcane.services.backup import BackupError, create_backup
 
-        home = get_home()
-        try:
-            backup = create_backup(home, os.path.join(home, "backups"))
-        except BackupError as exc:
-            raise click.ClickException(f"Backup failed, nothing moved: {exc}") from exc
-        click.echo(f"Backed up to {backup.path}")
+        # The home of the store this command opened, not the default home, so the
+        # backup is always of the database about to change. An in-memory store has none.
+        db_path = container.db.db_path
+        if db_path != ":memory:":
+            home = os.path.dirname(os.path.abspath(db_path))
+            try:
+                backup = create_backup(home, os.path.join(home, "backups"))
+            except BackupError as exc:
+                raise click.ClickException(f"Backup failed, nothing moved: {exc}") from exc
+            click.echo(f"Backed up to {backup.path}")
 
         moved = {"memories": container.memory_repo.reassign_project(src, dest_canon, org=source_org)}
         moved |= {name: repo.reassign_project(src, dest_canon, org=source_org) for name, repo in others.items()}
