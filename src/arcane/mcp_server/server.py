@@ -39,7 +39,7 @@ from mcp.types import (
 
 from arcane import __version__
 from arcane.domain.enums import RelationType
-from arcane.domain.scope import slugify
+from arcane.domain.scope import READ_SCOPES, slugify
 from arcane.infra.config import ConfigError
 from arcane.mcp_server.prompts import (
     PROMPTS,
@@ -158,6 +158,15 @@ def _create_server(container: ServiceContainer) -> Server:
                         "limit": {"type": "integer", "default": 5},
                         "project": {"type": "string"},
                         "org": {"type": "string", "description": "Org slug. Omit to auto-detect from the git remote."},
+                        "scope": {
+                            "type": "string",
+                            "enum": list(READ_SCOPES),
+                            "description": (
+                                "project: this project only. org: org-level memories only. global: global memories "
+                                "only. all: every project in every org. Omit for the project + org + global chain, "
+                                "widened to the org's other projects when the project has fewer than 3 matches."
+                            ),
+                        },
                         "include_org": {"type": "boolean", "default": True},
                         "include_global": {"type": "boolean", "default": True},
                         "detail": {
@@ -203,9 +212,11 @@ def _create_server(container: ServiceContainer) -> Server:
                         "org": {"type": "string", "description": "Org slug. Omit to auto-detect from the git remote."},
                         "scope": {
                             "type": "string",
-                            "enum": ["project", "org", "global"],
+                            "enum": list(READ_SCOPES),
                             "description": (
-                                "Narrow retrieval to one layer. Omit for the full project + org + global chain."
+                                "project: this project only. org: org-level memories only. global: global memories "
+                                "only. all: every project in every org. Omit for the project + org + global chain, "
+                                "widened to the org's other projects when the project has fewer than 3 matches."
                             ),
                         },
                         "include_org": {"type": "boolean", "default": True},

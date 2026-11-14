@@ -111,7 +111,7 @@ The CLI reads and writes the same store as the MCP server. `arcane <command> --h
 | Task | Command |
 |---|---|
 | Save a memory | `arcane save --title "..." --what "..." --category decision` |
-| Search | `arcane search "query"` |
+| Search | `arcane search "query"`, or `--project` / `--scope project\|org\|global\|all` to search from the current project |
 | Print context for an agent prompt | `arcane context` |
 | Read or delete one memory | `arcane details <id>`, `arcane delete <id>` |
 | Track an investigation | `arcane journey start --title "..."`, then `update`, `complete`, `list`, `show` |
@@ -122,7 +122,7 @@ The CLI reads and writes the same store as the MCP server. `arcane <command> --h
 | Link and trace | `arcane link <source> <target> --relation led_to`, `arcane trace <id>` |
 | Export one org | `arcane export --org <org>` |
 | Back up | `arcane backup` |
-| Find and merge split projects | `arcane projects`, `arcane merge-projects <src> <dest>` |
+| Find and merge split projects | `arcane projects`, `arcane merge-projects <src> <dest>` (moves memories, journeys, artifacts and insights; `--apply` backs up first) |
 
 `arcane ingest gha` reads `GITHUB_TOKEN` and `arcane ingest linear` reads `LINEAR_API_KEY`.
 

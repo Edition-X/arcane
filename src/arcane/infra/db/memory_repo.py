@@ -6,12 +6,15 @@ import json
 import logging
 import struct
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from arcane.infra.db.connection import Database
 from arcane.infra.db.fts import prefix_or_query
 from arcane.infra.db.ids import resolve_unique_id
 from arcane.infra.redaction import redact, redact_values
+
+if TYPE_CHECKING:
+    from arcane.domain.scope import Reach
 
 logger = logging.getLogger(__name__)
 
@@ -233,10 +236,24 @@ class MemoryRepository:
         include_org: bool,
         include_global: bool,
         alias: str = "m",
+        reach: Reach = "layers",
     ) -> tuple[str, list[Any]]:
-        """Build the scope WHERE fragment + params for the project ∪ org ∪ global chain."""
+        """Build the scope WHERE fragment + params for the project ∪ org ∪ global chain.
+
+        *reach* widens the chain: ``org`` takes every project of *org* (not just
+        *project* and the org-level layer), ``all`` takes every org.
+        """
+        if reach == "all":
+            return "1 = 1", []
         layers: list[str] = []
         params: list[Any] = []
+        if reach == "org":
+            layers.append(f"{alias}.org = ?")
+            params.append(org)
+            if include_global:
+                layers.append(f"{alias}.org = ?")
+                params.append(GLOBAL_ORG)
+            return "(" + " OR ".join(layers) + ")", params
         if project:
             layers.append(f"({alias}.org = ? AND {alias}.project = ?)")
             params += [org, project]
@@ -395,6 +412,7 @@ class MemoryRepository:
         org: str | None = None,
         include_org: bool = True,
         include_global: bool = True,
+        reach: Reach = "layers",
     ) -> list[dict[str, Any]]:
         fts_query = prefix_or_query(query)
         if fts_query is None:
@@ -404,7 +422,7 @@ class MemoryRepository:
         params: list[Any] = [fts_query]
 
         if org is not None:
-            scope_sql, scope_params = self._scope_where(org, project, include_org, include_global)
+            scope_sql, scope_params = self._scope_where(org, project, include_org, include_global, reach=reach)
             where_clauses.append(scope_sql)
             params += scope_params
         elif project:
@@ -436,6 +454,24 @@ class MemoryRepository:
             self._annotate_scope_rank(processed, org, project)
         return processed
 
+    def count_project_matches(self, fts_query: str, org: str, project: str) -> int:
+        """Live memories of one project that match the FTS expression *fts_query*.
+
+        Judges whether a project can answer a search on its own, so it takes the
+        strict ``key_terms_query``, not the loose ``prefix_or_query``.
+        """
+        scope_sql, scope_params = self._scope_where(org, project, include_org=False, include_global=False)
+        row = self.db.fetchone(
+            f"""
+            SELECT COUNT(*) AS cnt
+            FROM memories_fts fts
+            JOIN memories m ON m.rowid = fts.rowid
+            WHERE fts.memories_fts MATCH ? AND {MemoryRepository._not_expired_clause()} AND {scope_sql}
+            """,
+            [fts_query, *scope_params],
+        )
+        return int(row["cnt"]) if row else 0
+
     def vector_search(
         self,
         query_embedding: list[float],
@@ -445,6 +481,7 @@ class MemoryRepository:
         org: str | None = None,
         include_org: bool = True,
         include_global: bool = True,
+        reach: Reach = "layers",
     ) -> list[dict[str, Any]]:
         """Return the nearest-neighbour memories for ``query_embedding``.
 
@@ -465,7 +502,7 @@ class MemoryRepository:
         params: list[Any] = [vec_bytes, fetch_k]
 
         if org is not None:
-            scope_sql, scope_params = self._scope_where(org, project, include_org, include_global)
+            scope_sql, scope_params = self._scope_where(org, project, include_org, include_global, reach=reach)
             where_clauses.append(scope_sql)
             params += scope_params
         elif project:
@@ -507,6 +544,7 @@ class MemoryRepository:
         org: str | None = None,
         include_org: bool = True,
         include_global: bool = True,
+        reach: Reach = "layers",
     ) -> list[dict[str, Any]]:
         params: list[Any] = []
         select_rank = ""
@@ -519,7 +557,7 @@ class MemoryRepository:
 
         where_clauses: list[str] = [MemoryRepository._not_expired_clause()]
         if org is not None:
-            scope_sql, scope_params = self._scope_where(org, project, include_org, include_global)
+            scope_sql, scope_params = self._scope_where(org, project, include_org, include_global, reach=reach)
             where_clauses.append(scope_sql)
             params += scope_params
         elif project:
@@ -557,12 +595,13 @@ class MemoryRepository:
         org: str | None = None,
         include_org: bool = True,
         include_global: bool = True,
+        reach: Reach = "layers",
     ) -> int:
         where_clauses: list[str] = [MemoryRepository._not_expired_clause()]
         params: list[Any] = []
 
         if org is not None:
-            scope_sql, scope_params = self._scope_where(org, project, include_org, include_global)
+            scope_sql, scope_params = self._scope_where(org, project, include_org, include_global, reach=reach)
             where_clauses.append(scope_sql)
             params += scope_params
         elif project:

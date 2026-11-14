@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 import click
 
 from arcane.cli._utils import create_container
 from arcane.domain.enums import Category
 from arcane.domain.models import RawMemoryInput
+from arcane.domain.scope import READ_SCOPES, ReadScope, plan_read, resolve_write_scope
 
 
 @click.command()
@@ -94,32 +96,52 @@ def save(
 @click.command()
 @click.argument("query")
 @click.option("--limit", default=5)
-@click.option("--project", is_flag=True, default=False, help="Filter to current project")
+@click.option(
+    "--project",
+    is_flag=True,
+    default=False,
+    help="Search from the current project: its own memories, then the org's other projects when it has "
+    "fewer than 3 matches. Without it, every memory is searched.",
+)
 @click.option("--source", default=None)
-def search(query: str, limit: int, project: bool, source: str | None) -> None:
+@click.option(
+    "--scope",
+    type=click.Choice(READ_SCOPES),
+    default=None,
+    help="project: this project only. org: org-level memories only. global: global memories only. "
+    "all: every project in every org. Implies --project.",
+)
+def search(query: str, limit: int, project: bool, source: str | None, scope: ReadScope | None) -> None:
     """Search memories."""
     from arcane.services.memory import MemoryService
 
+    plan = None
     with create_container() as container:
-        if project:
-            from arcane.domain.scope import resolve_write_scope
-
+        if project or scope:
             resolved = resolve_write_scope(None, container.config)
+            plan = plan_read(scope, resolved.org, resolved.project)
             results = MemoryService(container).search(
-                query, limit=limit, project=resolved.project, source=source, org=resolved.org
+                query,
+                limit=limit,
+                project=plan.project,
+                source=source,
+                org=plan.org,
+                include_org=plan.include_org,
+                include_global=plan.include_global,
+                reach=plan.reach,
             )
         else:
             results = MemoryService(container).search(query, limit=limit, source=source)
 
     if not results:
-        click.echo("No results found.")
+        click.echo("No results found." + (f" {plan.nothing_found()}" if plan and plan.nothing_found() else ""))
         return
 
     click.echo(f"\n Results ({len(results)} found) ")
     for i, r in enumerate(results, 1):
         score = r.get("score", 0)
         click.echo(f"\n [{i}] {r['title']} (score: {score:.2f})")
-        meta = (r.get("category"), (r.get("created_at") or "")[:10], r.get("project"))
+        meta = (r.get("category"), (r.get("created_at") or "")[:10], r.get("project"), r.get("org"))
         click.echo("     " + " | ".join(part for part in meta if part))
         click.echo(f"     What: {r['what']}")
         if r.get("why"):
@@ -168,8 +190,6 @@ def context(project: bool, source: str | None, limit: int, query: str | None) ->
 
     with create_container() as container:
         if project:
-            from arcane.domain.scope import resolve_write_scope
-
             resolved = resolve_write_scope(None, container.config)
             project_name, org = resolved.project, resolved.org
         else:
@@ -199,7 +219,9 @@ def context(project: bool, source: str | None, limit: int, query: str | None) ->
 
         cat_part = f" [{cat}]" if cat else ""
         tags_part = f" [{','.join(tags_list)}]" if tags_list else ""
-        click.echo(f"- [{date_display}] {title}{cat_part}{tags_part}")
+        # Context can reach into the org's other projects, so say which one each memory is from.
+        project_part = f" ({r['project']})" if r.get("project") else ""
+        click.echo(f"- [{date_display}] {title}{project_part}{cat_part}{tags_part}")
 
     click.echo("Use `arcane search <query>` for full details on any memory.")
 
@@ -226,14 +248,15 @@ def projects() -> None:
 @click.option("--org", default=None, help="Org that owns SRC. Required when several orgs have a project of that name.")
 @click.option("--apply", "apply_", is_flag=True, default=False, help="Write the change (default: dry run).")
 def merge_projects(src: str, dest: str, org: str | None, apply_: bool) -> None:
-    """Merge one org's memories from project SRC into DEST.
+    """Merge one org's memories, journeys, artifacts and insights from project SRC into DEST.
 
     SRC must match the stored project string exactly; DEST is canonicalized
     (normalised, aliases applied) so merges always heal towards the canonical
-    name. Only one org's memories move: when several orgs have a project
-    called SRC, --org says which. Dry-run by default — pass --apply to commit.
+    name. Only one org's rows move: when several orgs have a project
+    called SRC, --org says which. Dry-run by default — pass --apply to commit,
+    which first backs up the store.
     """
-    from arcane.domain.scope import canonicalize_project, validate_org
+    from arcane.domain.scope import canonicalize_project, slugify, validate_org
 
     with create_container() as container:
         dest_canon = canonicalize_project(dest, container.config.projects.aliases)
@@ -242,26 +265,79 @@ def merge_projects(src: str, dest: str, org: str | None, apply_: bool) -> None:
         if dest_canon != dest:
             click.echo(f"Destination canonicalized: '{dest}' → '{dest_canon}'")
 
-        owners = {r["org"]: r["cnt"] for r in container.memory_repo.list_projects() if r["project"] == src}
+        # A project may hold only journeys, artifacts or insights (its memories merged
+        # earlier, or never saved), so its owners come from all four tables.
+        repos: dict[str, Any] = {
+            "memories": container.memory_repo,
+            "journeys": container.journey_repo,
+            "artifacts": container.artifact_repo,
+            "insights": container.insight_repo,
+        }
+        held: dict[str, dict[str, int]] = {
+            "memories": {r["org"]: r["cnt"] for r in container.memory_repo.list_projects() if r["project"] == src}
+        }
+        for name in ("journeys", "artifacts", "insights"):
+            held[name] = repos[name].count_by_org(src)
+        owners = {org_name for counts in held.values() for org_name in counts}
         if org is not None:
             try:
-                org = validate_org(org)
+                org = validate_org(slugify(org))
             except ValueError as exc:
                 raise click.BadParameter(str(exc), param_hint="--org") from exc
-            owners = {org: owners.get(org, 0)}
+            owners = {org}
         elif len(owners) > 1:
-            listed = ", ".join(f"{name or '<no org>'} ({count})" for name, count in sorted(owners.items()))
+            listed = ", ".join(
+                f"{name or '<no org>'} ({sum(counts.get(name, 0) for counts in held.values())})"
+                for name in sorted(owners)
+            )
             raise click.UsageError(f"Project '{src}' exists in several orgs: {listed}. Pass --org to choose one.")
-        source_org, count = next(iter(owners.items()), (None, 0))
+        source_org = next(iter(owners), None)
         where = f"'{src}'" + (f" in org {source_org or '<no org>'}" if source_org is not None else "")
+        counts = {name: held[name].get(source_org, 0) if source_org is not None else 0 for name in repos}
+        stays = repos["artifacts"].count_collisions(src, dest_canon, org=source_org) if source_org is not None else 0
+        collision_note = (
+            f" {stays} artifacts stay in '{src}': '{dest_canon}' already has the same type and external id."
+            if stays
+            else ""
+        )
 
         if not apply_:
+            listed = ", ".join(f"{n} {name}" for name, n in counts.items())
             click.echo(
-                f"Dry run: would move {count} memories from {where} into '{dest_canon}'. Pass --apply to commit."
+                f"Dry run: would move {listed} from {where} into '{dest_canon}'.{collision_note} "
+                "Pass --apply to commit."
             )
             return
-        moved = container.memory_repo.reassign_project(src, dest_canon, org=source_org) if source_org is not None else 0
-        click.echo(f"Moved {moved} memories from {where} into '{dest_canon}'.")
+        if source_org is None:
+            click.echo(f"Moved 0 memories from {where} into '{dest_canon}'.")
+            return
+
+        from arcane.services.backup import BackupError, create_backup
+
+        # The home of the store this command opened, not the default home, so the
+        # backup is always of the database about to change. An in-memory store has none.
+        # It goes beside, not in, the `arcane backup` folder and never rotates, so a
+        # merge cannot push out a backup someone took on purpose.
+        db_path = container.db.db_path
+        if db_path != ":memory:":
+            home = os.path.dirname(os.path.abspath(db_path))
+            try:
+                backup = create_backup(home, os.path.join(home, "backups", "pre-merge"), keep=0)
+            except BackupError as exc:
+                raise click.ClickException(f"Backup failed, nothing moved: {exc}") from exc
+            click.echo(f"Backed up to {backup.path}")
+
+        # One transaction: a failure part way leaves every table as it was.
+        with container.db.transaction():
+            moved = {name: repo.reassign_project(src, dest_canon, org=source_org) for name, repo in repos.items()}
+        listed = ", ".join(f"{n} {name}" for name, n in moved.items())
+        left = counts["artifacts"] - moved["artifacts"]
+        note = (
+            f" {left} artifacts stayed in '{src}': '{dest_canon}' already has the same type and external id."
+            if left
+            else ""
+        )
+        click.echo(f"Moved {listed} from {where} into '{dest_canon}'.{note}")
 
 
 @click.command()

@@ -97,7 +97,7 @@ SELECT ROUND(100.0*SUM(CASE WHEN tags IS NULL OR tags='[]' THEN 1 END)/COUNT(*),
 -- Graph usage: flag `graph-underuse` (info) if relationships < 5% of memories
 SELECT (SELECT COUNT(*) FROM relationships) AS relationships, (SELECT COUNT(*) FROM memories) AS memories;
 
--- Journey project fragmentation (merge-projects only heals memories)
+-- Journey project fragmentation (merge-projects also moves journeys, artifacts and insights)
 SELECT project, COUNT(*) FROM journeys GROUP BY project;
 ```
 
@@ -114,7 +114,6 @@ Open candidates — mark each `missing` / `underused`, tied to *this run's* metr
 - **Auto-capture assist from git commits** (lower the manual-save burden).
 - **Tool profiles** (core vs full) to cut everyday tool-count noise.
 - **Search-quality eval harness** (golden queries → expected hits; guards recall regressions).
-- **Journey merge/reassign-project tool** (journeys aren't covered by `merge-projects`).
 
 Add new candidate capabilities as you think of them; the checklist is meant to grow.
 
