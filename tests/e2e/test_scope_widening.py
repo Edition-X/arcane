@@ -65,12 +65,11 @@ def test_populated_project_does_not_widen_and_automatic_widening_stays_in_the_or
         assert {h["project"] for h in hits} == {"widget"}
 
         await _save(client, "Ledger rounding", "ledger rounding is bankers", "ledger", org="beta")
-        assert await client.call("memory_search", query="ledger rounding") == {
-            "results": [],
-            "message": (
-                "No match in this project or its org. Retry with scope='all' to search every project in every org."
-            ),
-        }
+        empty = await client.call("memory_search", query="ledger rounding")
+        assert empty["results"] == []
+        # True to what was read: the org's every project and global, not "this project".
+        assert "org 'acme' (every project) and global memories" in empty["message"]
+        assert "scope='all'" in empty["message"]
         everywhere = await client.call("memory_search", query="ledger rounding", scope="all")
         assert [(h["org"], h["scope_match"]) for h in everywhere] == [("beta", "other_org")]
 
@@ -80,15 +79,21 @@ def test_populated_project_does_not_widen_and_automatic_widening_stays_in_the_or
     arcane.run(scenario)
 
 
-def test_explicit_scope_never_widens_and_unknown_scope_is_an_error(arcane: Arcane) -> None:
+def test_explicit_scope_never_widens_and_each_empty_reply_says_what_was_searched(arcane: Arcane) -> None:
     async def scenario(client: Client) -> None:
         await _save(client, "Kafka retry policy", "kafka retry backs off twice", "gadget")
         await _save(client, "Org wide rule", "kafka rule for the whole org", "")
-        for scope in ("project", "global"):
-            hits = await client.call("memory_search", query="kafka", scope=scope)
-            assert hits["results"] == [], scope
+
+        project = await client.call("memory_search", query="kafka", scope="project")
+        assert project["results"] == [] and "Nothing matched in project 'widget'." in project["message"]
+        no_org = await client.call("memory_search", query="kafka", include_org=False)
+        assert no_org["results"] == [] and "include_org was false" in no_org["message"]
+        global_ = await client.call("memory_search", query="kafka", scope="global")
+        assert global_["results"] == [] and "global memories" in global_["message"]
         org_hits = await client.call("memory_search", query="kafka", scope="org")
         assert [h["title"] for h in org_hits] == ["Org wide rule"]
+        org_empty = await client.call("memory_search", query="zebra", scope="org")
+        assert "org-level" not in org_empty["message"] and "among org 'acme' memories" in org_empty["message"]
         assert "'nearby' is not one of" in await client.error("memory_search", query="kafka", scope="nearby")
 
     arcane.run(scenario)
@@ -141,14 +146,25 @@ def test_cli_search_scope_all_and_hint(arcane: Arcane) -> None:
 
     arcane.run(seed)
     scoped = _cli(arcane, "search", "ledger rounding", "--project").stdout
-    assert "No results found." in scoped and "--scope all" in scoped
+    assert "No results found." in scoped and "scope='all'" in scoped
     everywhere = _cli(arcane, "search", "ledger rounding", "--scope", "all").stdout
     assert "Ledger rounding" in everywhere and "beta" in everywhere
+    # An unscoped search already read every memory, so it does not suggest a wider one.
+    assert _cli(arcane, "search", "zebra unicorn").stdout.strip() == "No results found."
 
 
-def test_merge_projects_moves_journeys_artifacts_insights_and_backs_up_first(arcane: Arcane) -> None:
+def test_cli_context_names_the_project_of_each_memory(arcane: Arcane) -> None:
     async def seed(client: Client) -> None:
-        await _save(client, "Old name note", "kept under the old name", "old-name")
+        await _save(client, "Gadget decision", "gadget picked sqlite", "gadget")
+
+    arcane.run(seed)
+    assert "Gadget decision (gadget)" in _cli(arcane, "context", "--project").stdout
+
+
+def _seed_old_name(arcane: Arcane, *, memory: bool = True, external_id: str | None = None) -> None:
+    async def seed(client: Client) -> None:
+        if memory:
+            await _save(client, "Old name note", "kept under the old name", "old-name")
         await client.call("journey_start", title="Old name journey", project="old-name")
 
     arcane.run(seed)
@@ -157,7 +173,7 @@ def test_merge_projects_moves_journeys_artifacts_insights_and_backs_up_first(arc
         arcane.sql(
             "INSERT INTO artifacts (id, artifact_type, external_id, title, project, org, created_at) "
             "VALUES (?, 'commit', ?, 'a commit', 'old-name', ?, ?)",
-            (str(uuid.uuid4()), "abc123", org, now),
+            (str(uuid.uuid4()), external_id or f"sha-{uuid.uuid4().hex[:8]}", org, now),
         )
         arcane.sql(
             "INSERT INTO insights (id, insight_type, title, body, project, org, created_at) "
@@ -165,18 +181,68 @@ def test_merge_projects_moves_journeys_artifacts_insights_and_backs_up_first(arc
             (str(uuid.uuid4()), org, now),
         )
 
-    def where(table: str) -> list[tuple[str, str]]:
-        return [(org, project) for org, project in arcane.sql(f"SELECT org, project FROM {table} ORDER BY org")]  # noqa: S608
+
+def _where(arcane: Arcane, table: str) -> list[tuple[str, str]]:
+    return [(org, project) for org, project in arcane.sql(f"SELECT org, project FROM {table} ORDER BY org")]  # noqa: S608
+
+
+def test_merge_projects_moves_journeys_artifacts_insights_and_backs_up_first(arcane: Arcane) -> None:
+    _seed_old_name(arcane)
+    backups = Path(arcane.home) / "backups"
+    backups.mkdir()
+    (backups / "arcane-20200101-000000.tar.gz").write_bytes(b"a backup someone took on purpose")
 
     dry = _cli(arcane, "merge-projects", "old-name", "new-name", "--org", "ACME").stdout
     assert "would move 1 memories, 1 journeys, 1 artifacts, 1 insights from 'old-name' in org acme" in dry
-    assert not (Path(arcane.home) / "backups").exists()
-    assert where("journeys") == [("acme", "old-name")]
+    assert not (backups / "pre-merge").exists()
+    assert _where(arcane, "journeys") == [("acme", "old-name")]
 
     applied = _cli(arcane, "merge-projects", "old-name", "new-name", "--org", "acme", "--apply").stdout
     assert "Moved 1 memories, 1 journeys, 1 artifacts, 1 insights from 'old-name' in org acme" in applied
-    assert len(list((Path(arcane.home) / "backups").glob("*.tar.gz"))) == 1
-    assert where("journeys") == [("acme", "new-name")]
+    assert len(list((backups / "pre-merge").glob("*.tar.gz"))) == 1
+    assert _where(arcane, "journeys") == [("acme", "new-name")]
     # beta's rows share the old name and stay put.
-    assert where("artifacts") == [("acme", "new-name"), ("beta", "old-name")]
-    assert where("insights") == [("acme", "new-name"), ("beta", "old-name")]
+    assert _where(arcane, "artifacts") == [("acme", "new-name"), ("beta", "old-name")]
+    assert _where(arcane, "insights") == [("acme", "new-name"), ("beta", "old-name")]
+
+    # Repeated merges never rotate anything out, however many there are.
+    for n in range(16):
+        _seed_old_name(arcane, memory=False)
+        _cli(arcane, "merge-projects", "old-name", f"name-{n}", "--org", "acme", "--apply")
+    assert (backups / "arcane-20200101-000000.tar.gz").exists()
+    assert len(list((backups / "pre-merge").glob("*.tar.gz"))) == 17
+
+
+def test_merge_projects_finds_the_org_of_a_project_with_only_journeys(arcane: Arcane) -> None:
+    # A project whose memories were merged earlier still holds journeys; the org must come from them.
+    async def seed(client: Client) -> None:
+        await client.call("journey_start", title="Stranded journey", project="old-name")
+
+    arcane.run(seed)
+    dry = _cli(arcane, "merge-projects", "old-name", "new-name").stdout
+    assert "would move 0 memories, 1 journeys, 0 artifacts, 0 insights from 'old-name' in org acme" in dry
+    _cli(arcane, "merge-projects", "old-name", "new-name", "--apply")
+    assert _where(arcane, "journeys") == [("acme", "new-name")]
+
+
+def test_merge_projects_says_which_artifacts_stayed_and_moves_nothing_on_failure(arcane: Arcane) -> None:
+    _seed_old_name(arcane, external_id="abc123")
+    now = "2026-01-01T00:00:00+00:00"
+    arcane.sql(
+        "INSERT INTO artifacts (id, artifact_type, external_id, title, project, org, created_at) "
+        "VALUES (?, 'commit', 'abc123', 'already there', 'new-name', 'acme', ?)",
+        (str(uuid.uuid4()), now),
+    )
+    dry = _cli(arcane, "merge-projects", "old-name", "new-name", "--org", "acme").stdout
+    assert "1 artifacts stay in 'old-name': 'new-name' already has the same type and external id" in dry
+    applied = _cli(arcane, "merge-projects", "old-name", "new-name", "--org", "acme", "--apply").stdout
+    assert "0 artifacts" in applied and "1 artifacts stayed in 'old-name'" in applied
+    assert _where(arcane, "journeys") == [("acme", "new-name")]
+
+    # A failure part way leaves every table as it was.
+    arcane.sql("CREATE TRIGGER fail_insights BEFORE UPDATE ON insights BEGIN SELECT RAISE(ABORT, 'boom'); END")
+    _seed_old_name(arcane, memory=False)
+    failed = _cli(arcane, "merge-projects", "old-name", "other-name", "--org", "acme", "--apply", check=False)
+    assert failed.returncode != 0
+    assert _where(arcane, "journeys").count(("acme", "old-name")) == 1
+    assert ("acme", "other-name") not in _where(arcane, "journeys")

@@ -139,7 +139,7 @@ arcane merge-projects grafana-usage-report grafana-usage-automation          # d
 arcane merge-projects grafana-usage-report grafana-usage-automation --apply  # back up, then write the change
 ```
 
-A merge moves one org's memories, journeys, artifacts and insights, and the dry run counts each. `--apply` first writes a backup under `<home>/backups`. When more than one org has a project with the source name, the command lists them and asks for `--org`.
+A merge moves one org's memories, journeys, artifacts and insights, and the dry run counts each. `--apply` first writes a backup under `<home>/backups/pre-merge`, which never rotates, and moves the four tables in one transaction. An artifact that would collide with one already in the destination stays behind, and both the dry run and the result say how many. When more than one org has a project with the source name, the command lists them and asks for `--org`.
 
 ---
 

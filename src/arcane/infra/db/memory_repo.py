@@ -6,12 +6,15 @@ import json
 import logging
 import struct
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from arcane.infra.db.connection import Database
 from arcane.infra.db.fts import prefix_or_query
 from arcane.infra.db.ids import resolve_unique_id
 from arcane.infra.redaction import redact, redact_values
+
+if TYPE_CHECKING:
+    from arcane.domain.scope import Reach
 
 logger = logging.getLogger(__name__)
 
@@ -233,7 +236,7 @@ class MemoryRepository:
         include_org: bool,
         include_global: bool,
         alias: str = "m",
-        reach: str = "layers",
+        reach: Reach = "layers",
     ) -> tuple[str, list[Any]]:
         """Build the scope WHERE fragment + params for the project ∪ org ∪ global chain.
 
@@ -409,7 +412,7 @@ class MemoryRepository:
         org: str | None = None,
         include_org: bool = True,
         include_global: bool = True,
-        reach: str = "layers",
+        reach: Reach = "layers",
     ) -> list[dict[str, Any]]:
         fts_query = prefix_or_query(query)
         if fts_query is None:
@@ -478,7 +481,7 @@ class MemoryRepository:
         org: str | None = None,
         include_org: bool = True,
         include_global: bool = True,
-        reach: str = "layers",
+        reach: Reach = "layers",
     ) -> list[dict[str, Any]]:
         """Return the nearest-neighbour memories for ``query_embedding``.
 
@@ -541,7 +544,7 @@ class MemoryRepository:
         org: str | None = None,
         include_org: bool = True,
         include_global: bool = True,
-        reach: str = "layers",
+        reach: Reach = "layers",
     ) -> list[dict[str, Any]]:
         params: list[Any] = []
         select_rank = ""
@@ -592,7 +595,7 @@ class MemoryRepository:
         org: str | None = None,
         include_org: bool = True,
         include_global: bool = True,
-        reach: str = "layers",
+        reach: Reach = "layers",
     ) -> int:
         where_clauses: list[str] = [MemoryRepository._not_expired_clause()]
         params: list[Any] = []

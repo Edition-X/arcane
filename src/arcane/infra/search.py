@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from arcane.domain.scope import Reach
 from arcane.infra.db.memory_repo import MemoryRepository
 from arcane.infra.embeddings.base import EmbeddingProvider
 
@@ -81,7 +82,7 @@ def tiered_search(
     org: str | None = None,
     include_org: bool = True,
     include_global: bool = True,
-    reach: str = "layers",
+    reach: Reach = "layers",
 ) -> list[dict[str, Any]]:
     """FTS-first tiered search — only calls embed when FTS results are sparse."""
     fts_results = repo.fts_search(

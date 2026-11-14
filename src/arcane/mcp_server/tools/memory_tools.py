@@ -9,7 +9,7 @@ from datetime import datetime
 
 from arcane.domain.enums import Category
 from arcane.domain.models import RawMemoryInput
-from arcane.domain.scope import GLOBAL_ORG, normalize_org, resolve_scope, resolve_write_scope
+from arcane.domain.scope import GLOBAL_ORG, ReadScope, plan_read, resolve_scope, resolve_write_scope, slugify
 from arcane.infra.db.ids import IdentifierResolutionError
 from arcane.services.memory import MemoryService
 
@@ -17,10 +17,6 @@ logger = logging.getLogger(__name__)
 
 VALID_CATEGORIES = tuple(c.value for c in Category)
 VALID_SCOPES = ("project", "org", "global")
-# What a read can ask for. Omitted means auto: the project's own layers, widened
-# to the org's other projects when the project is thin.
-READ_SCOPES = ("project", "org", "global", "all")
-WIDEN_HINT = "No match in this project or its org. Retry with scope='all' to search every project in every org."
 
 SAVE_DESCRIPTION = """Save a memory for future sessions. You MUST call this before ending any session where you made changes, fixed bugs, made decisions, or learned something.
 
@@ -223,32 +219,6 @@ def _where(r: dict) -> dict:
     return {"project": r.get("project"), "org": r.get("org", ""), "scope_match": r.get("scope_match")}
 
 
-def _read_scope(
-    scope: str | None, org: str, project: str, include_org: bool, include_global: bool
-) -> tuple[str, str, bool, bool, str]:
-    """Map a read ``scope`` to ``(org, project, include_org, include_global, reach)``.
-
-    Omitted scope keeps the caller's layers and lets the service widen when the
-    project is thin, unless the caller turned the org layer off; an explicit
-    scope never widens, except ``all``.
-    """
-    if scope is None:
-        return org, project, include_org, include_global, "auto" if include_org else "layers"
-    if scope == "project":
-        return org, project, False, False, "layers"
-    if scope == "org":
-        return org, "", True, False, "layers"
-    if scope == "global":
-        return GLOBAL_ORG, "", True, False, "layers"
-    return org, project, include_org, include_global, "all"
-
-
-def _bad_scope(scope: str | None) -> str | None:
-    if scope is not None and scope not in READ_SCOPES:
-        return json.dumps({"error": f"Unknown scope '{scope}'. Valid values: {', '.join(READ_SCOPES)}."})
-    return None
-
-
 def handle_search(
     svc: MemoryService,
     query: str,
@@ -258,31 +228,31 @@ def handle_search(
     include_org: bool = True,
     include_global: bool = True,
     detail: str | None = "standard",
-    scope: str | None = None,
+    scope: ReadScope | None = None,
 ) -> str:
-    if (error := _bad_scope(scope)) is not None:
-        return error
     resolved = resolve_scope(os.getcwd(), svc.c.config)
-    org_final = normalize_org(org) or resolved.org
-    project_final = project if project is not None else resolved.project
-    detail = _normalize_detail(detail)
-    org_final, project_final, inc_org, inc_global, reach = _read_scope(
-        scope, org_final, project_final, include_org, include_global
+    plan = plan_read(
+        scope,
+        slugify(org or "") or resolved.org,
+        project if project is not None else resolved.project,
+        include_org,
+        include_global,
     )
+    detail = _normalize_detail(detail)
 
     results = svc.search(
         query,
         limit=_normalize_limit(limit, 5),
-        project=project_final,
-        org=org_final,
-        include_org=inc_org,
-        include_global=inc_global,
-        reach=reach,
+        project=plan.project,
+        org=plan.org,
+        include_org=plan.include_org,
+        include_global=plan.include_global,
+        reach=plan.reach,
     )
 
     clean = [_search_hit(r, detail) for r in results]
-    if not clean and scope != "all":
-        return json.dumps({"results": [], "message": WIDEN_HINT})
+    if not clean and (message := plan.nothing_found()):
+        return json.dumps({"results": [], "message": message})
     return json.dumps(clean)
 
 
@@ -293,21 +263,20 @@ def handle_context(
     detail: str | None = "standard",
     query: str | None = None,
     org: str | None = None,
-    scope: str | None = None,
+    scope: ReadScope | None = None,
     include_org: bool = True,
     include_global: bool = True,
 ) -> str:
-    if (error := _bad_scope(scope)) is not None:
-        return error
     # Resolve the current (org, project) scope; explicit args win.
     resolved = resolve_scope(os.getcwd(), svc.c.config)
-    org_final = normalize_org(org) or resolved.org
-    project_final = project if project is not None else resolved.project
-
-    # Optional `scope` narrows retrieval to a single layer, or widens it to `all`.
-    org_final, project_final, inc_org, inc_global, reach = _read_scope(
-        scope, org_final, project_final, include_org, include_global
+    plan = plan_read(
+        scope,
+        slugify(org or "") or resolved.org,
+        project if project is not None else resolved.project,
+        include_org,
+        include_global,
     )
+    org_final, project_final = plan.org, plan.project
 
     # Honour the configured semantic mode rather than hardcoding "never"
     results, total, reach = svc.get_context_reach(
@@ -315,9 +284,9 @@ def handle_context(
         project=project_final,
         org=org_final,
         query=query or None,
-        include_org=inc_org,
-        include_global=inc_global,
-        reach=reach,
+        include_org=plan.include_org,
+        include_global=plan.include_global,
+        reach=plan.reach,
     )
 
     # Normalise detail level — fall back to standard for unknown values

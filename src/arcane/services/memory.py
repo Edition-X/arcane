@@ -12,7 +12,7 @@ from typing import Any
 from arcane.domain.enums import RelationType
 from arcane.domain.models import Memory, RawMemoryInput, Relationship
 from arcane.domain.results import MemorySaveResult
-from arcane.domain.scope import GLOBAL_ORG, resolve_read_project, resolve_write_scope, slugify, validate_org
+from arcane.domain.scope import GLOBAL_ORG, Reach, resolve_read_project, resolve_write_scope, slugify, validate_org
 from arcane.infra.db.fts import key_terms_query, prefix_or_query
 from arcane.infra.db.ids import IdentifierResolutionError, resolve_entity_id
 from arcane.infra.db.schema import create_vec_table
@@ -31,11 +31,6 @@ SUPERSEDED_SCORE_FACTOR = 0.5
 # A project that matches a search with fewer rows than this cannot answer it
 # alone, so an automatic search also reads the org's other projects.
 WIDEN_BELOW = 3
-
-# How far a search reads: ``layers`` is the project, org and global chain,
-# ``org`` adds every other project of the org, ``all`` reads every org, and
-# ``auto`` picks ``org`` or ``layers`` by how thin the project is.
-REACHES = ("auto", "layers", "org", "all")
 
 
 def label_scope(rows: list[dict[str, Any]], org: str | None, project: str | None) -> None:
@@ -445,7 +440,7 @@ class MemoryService:
         org: str | None = None,
         include_org: bool = True,
         include_global: bool = True,
-        reach: str = "auto",
+        reach: Reach = "auto",
     ) -> list[dict[str, Any]]:
         """Ranked search. A memory a newer one replaced keeps its place in history but
         is marked ``superseded_by`` and ranked below current answers.
@@ -475,10 +470,8 @@ class MemoryService:
         label_scope(ranked, org, project)
         return ranked
 
-    def _effective_reach(self, reach: str, query: str | None, org: str | None, project: str | None) -> str:
+    def _effective_reach(self, reach: Reach, query: str | None, org: str | None, project: str | None) -> Reach:
         """Settle ``auto`` into ``org`` or ``layers``; any other reach stands."""
-        if reach not in REACHES:
-            raise ValueError(f"Unknown reach '{reach}'. Valid values: {', '.join(REACHES)}.")
         if reach != "auto":
             return reach
         if org is None:
@@ -508,7 +501,7 @@ class MemoryService:
         org: str | None = None,
         include_org: bool = True,
         include_global: bool = True,
-        reach: str = "layers",
+        reach: Reach = "layers",
     ) -> list[dict[str, Any]]:
         if project:
             project = resolve_read_project(project, self.c.config)
@@ -590,7 +583,7 @@ class MemoryService:
         include_org: bool = True,
         include_global: bool = True,
         global_cap: int | None = 2,
-        reach: str = "auto",
+        reach: Reach = "auto",
     ) -> tuple[list[dict[str, Any]], int]:
         results, total, _ = self.get_context_reach(
             limit=limit,
@@ -619,8 +612,8 @@ class MemoryService:
         include_org: bool = True,
         include_global: bool = True,
         global_cap: int | None = 2,
-        reach: str = "auto",
-    ) -> tuple[list[dict[str, Any]], int, str]:
+        reach: Reach = "auto",
+    ) -> tuple[list[dict[str, Any]], int, Reach]:
         """``get_context`` plus the reach it settled on (``layers``, ``org`` or ``all``)."""
         if project:
             project = resolve_read_project(project, self.c.config)

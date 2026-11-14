@@ -13,6 +13,8 @@ import subprocess
 import threading
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Literal, get_args
 
 from pydantic import BaseModel, field_validator
 
@@ -53,15 +55,6 @@ def validate_org(value: str) -> str:
     at load time; this is the name the rest of the code calls it by.
     """
     return validate_org_slug(value)
-
-
-def normalize_org(value: str | None) -> str | None:
-    """An org typed by hand, in the form orgs are stored: trimmed and lowercase.
-
-    Orgs are saved as lowercase slugs, so ``Sunrise-Robotics`` would match
-    nothing. An empty value means "not given" and becomes ``None``.
-    """
-    return (value or "").strip().lower() or None
 
 
 def slugify(name: str) -> str:
@@ -239,3 +232,74 @@ def resolve_read_project(project: str | None, config: ArcaneConfig, cwd: str | N
     resolved = resolve_scope(cwd or os.getcwd(), config)
     slug = canonicalize_project(project, config.projects.aliases)
     return collapse_project_variant(slug, resolved.project)
+
+
+# What a read can ask for. Omitted means auto: the project's own layers, widened
+# to the org's other projects when the project is thin.
+ReadScope = Literal["project", "org", "global", "all"]
+READ_SCOPES: tuple[ReadScope, ...] = get_args(ReadScope)
+
+# How far a search reads: ``layers`` is the project, org and global chain, ``org``
+# adds every other project of the org, ``all`` reads every org, and ``auto`` picks
+# ``org`` or ``layers`` by how thin the project is.
+Reach = Literal["auto", "layers", "org", "all"]
+
+
+@dataclass(frozen=True)
+class ReadPlan:
+    """The layers and reach a read covers, from a caller's ``scope``."""
+
+    org: str
+    project: str
+    include_org: bool
+    include_global: bool
+    reach: Reach
+    scope: ReadScope | None
+
+    def nothing_found(self) -> str | None:
+        """What to tell a caller whose search matched nothing, true to what was searched.
+
+        ``None`` when every project of every org was already searched.
+        """
+        if self.scope == "all":
+            return None
+        if self.scope == "global":
+            return "Nothing matched in global memories. Retry without scope, or with scope='all' to search every org."
+        if self.scope == "org":
+            return (
+                f"Nothing matched among org '{self.org}' memories. "
+                "Retry without scope, or with scope='all' to search every project in every org."
+            )
+        where = f"project '{self.project}'" if self.project else "this project"
+        wider = (
+            f"to include org '{self.org}' and its other projects, or scope='all' to search every project in every org"
+        )
+        if self.scope == "project":
+            return f"Nothing matched in {where}. Retry without scope {wider}."
+        if not self.include_org:
+            return f"Nothing matched in {where} (include_org was false). Retry with include_org=true {wider}."
+        layers = f"org '{self.org}' (every project)" + (" and global memories" if self.include_global else "")
+        return f"Nothing matched in {layers}. Retry with scope='all' to search every project in every org."
+
+
+def plan_read(
+    scope: ReadScope | None, org: str, project: str, include_org: bool = True, include_global: bool = True
+) -> ReadPlan:
+    """Map a read ``scope`` to the org, project, layers and reach to search.
+
+    Omitted scope keeps the caller's layers and lets the service widen when the
+    project is thin, unless the caller turned the org layer off; an explicit
+    scope never widens, except ``all``.
+    """
+    if scope is None:
+        reach: Reach = "auto" if include_org else "layers"
+        return ReadPlan(org, project, include_org, include_global, reach, scope)
+    if scope == "project":
+        return ReadPlan(org, project, False, False, "layers", scope)
+    if scope == "org":
+        return ReadPlan(org, "", True, False, "layers", scope)
+    if scope == "global":
+        return ReadPlan(GLOBAL_ORG, "", True, False, "layers", scope)
+    if scope == "all":
+        return ReadPlan(org, project, include_org, include_global, "all", scope)
+    raise ValueError(f"Unknown scope '{scope}'. Valid values: {', '.join(READ_SCOPES)}.")

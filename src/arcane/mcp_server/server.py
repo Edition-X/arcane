@@ -39,7 +39,7 @@ from mcp.types import (
 
 from arcane import __version__
 from arcane.domain.enums import RelationType
-from arcane.domain.scope import slugify
+from arcane.domain.scope import READ_SCOPES, slugify
 from arcane.infra.config import ConfigError
 from arcane.mcp_server.prompts import (
     PROMPTS,
@@ -160,7 +160,7 @@ def _create_server(container: ServiceContainer) -> Server:
                         "org": {"type": "string", "description": "Org slug. Omit to auto-detect from the git remote."},
                         "scope": {
                             "type": "string",
-                            "enum": ["project", "org", "global", "all"],
+                            "enum": list(READ_SCOPES),
                             "description": (
                                 "project: this project only. org: org-level memories only. global: global memories "
                                 "only. all: every project in every org. Omit for the project + org + global chain, "
@@ -212,7 +212,7 @@ def _create_server(container: ServiceContainer) -> Server:
                         "org": {"type": "string", "description": "Org slug. Omit to auto-detect from the git remote."},
                         "scope": {
                             "type": "string",
-                            "enum": ["project", "org", "global", "all"],
+                            "enum": list(READ_SCOPES),
                             "description": (
                                 "project: this project only. org: org-level memories only. global: global memories "
                                 "only. all: every project in every org. Omit for the project + org + global chain, "
