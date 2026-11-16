@@ -87,10 +87,11 @@ _REASON_MARKER = re.compile(
 _RESTATED_ASK = re.compile(r"^(?:(?:the|that)\s+)?\w+\s+(?:asked|requested|wanted|said|told|instructed)\b", re.I)
 # What follows the ask is a new clause, so it is a reason: ". " ": " "; " or a spaced dash.
 _CLAUSE_BREAK = re.compile(r"[.!?:;]\s+\S|\s[-\u2013\u2014]\s")
-_THIN_WHY_WORDS = 30
+_THIN_WHY_WORDS = 30  # a why this long after the ask carries its own reasoning
 _MIN_REASON_WORDS = 3  # fewer words after a marker is "because it was asked", not a reason
 _MAX_RESTATED_WORDS = 8  # a tail this short that restates the ask is the ask again
-_CHOSE_OVER_SPAN = 80
+_CHOSE_OVER_SPAN = 80  # "chose X over Y" within one sentence
+# A keyword heuristic: alternatives written as plain prose ("B was too slow") are missed.
 _OPTIONS_MARKER = re.compile(
     r"\boptions?\b|\balternatives?\b|\bconsidered\b|\brejected\b|\bdeclined\b|\binstead of\b"
     rf"|\brather than\b|\bvs\.?(?=\s)|\bversus\b|\bruled out\b|\bchose\b.{{0,{_CHOSE_OVER_SPAN}}}\bover\b",
@@ -101,9 +102,15 @@ _OPTIONS_MARKER = re.compile(
 def _why_only_says_who_asked(why: str) -> bool:
     """True when *why* opens with who asked and no reason follows.
 
-    A heuristic, tuned on the live store's 626 decisions: a clause break, a long
-    tail, or a reason marker followed by real words that do not restate the ask
-    all count as a reason. It only ever adds a warning, never blocks a save.
+    A heuristic: a clause break, a long tail, or a reason marker followed by real
+    words that do not restate the ask all count as a reason. It misses passive asks
+    ("Requested by the user") and only ever adds a warning, never blocks a save.
+
+    Args:
+        why: the memory's why field, stripped.
+
+    Returns:
+        Whether the why names who asked and nothing else.
     """
     match = _WHO_ASKED.match(why)
     if not match:

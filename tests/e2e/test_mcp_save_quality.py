@@ -8,17 +8,15 @@ from tests.e2e.conftest import Arcane, Client
 
 OPTIONS = "Context: the old path lost data.\nOptions considered: keep it, or move to the new one. Chose the new one."
 WHY = "The old path lost data on restart"
-CODES = ("no_why", "why_only_says_who_asked", "no_options")
+CODES = ("no_why", "why_only_says_who_asked", "no_options", "no_details")
 
 
 def codes(result: dict[str, Any]) -> list[str]:
-    """Name each warning by its code, or no_details for the details warning; anything else fails."""
+    """Name each warning by its code prefix; a warning without one fails."""
     named = []
     for warning in result.get("warnings", []):
         code = next((c for c in CODES if warning.startswith(f"{c}:")), None)
-        if code is None:
-            assert "should include details" in warning, warning
-            code = "no_details"
+        assert code is not None, warning
         named.append(code)
     return named
 

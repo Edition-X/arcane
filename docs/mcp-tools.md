@@ -130,7 +130,7 @@ The reply also carries `provenance`: `commit_sha`, `branch`, `dirty`, `session_i
 
 **Profile:** `core`
 
-Update a memory in place. Prefer this over `memory_save` when a save warns `near_duplicate`, or to fix a `no_why`, `why_only_says_who_asked` or `no_options` warning. When the update changes `why` or `details_append`, the reply carries `warnings` for whatever still applies, and omits the key when nothing does. An update of only `what`, `impact` or `tags` returns no warnings.
+Update a memory in place. Prefer this over `memory_save` when a save warns `near_duplicate`, or to fix a `no_why`, `why_only_says_who_asked`, `no_options` or `no_details` warning. When the update changes `why` or `details_append`, the reply carries `warnings` for whatever still applies, and omits the key when nothing does. An update of only `what`, `impact`, `tags` or `supersedes` returns no warnings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
