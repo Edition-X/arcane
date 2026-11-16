@@ -80,11 +80,15 @@ Search memories using keyword and vector search. Call at session start and whene
 | `standard` | `id`, `title`, `category`, `score`, `what`, `tags`, `project`, `org`, `scope_match`, `date`, `has_details` |
 | `full` | `id`, `title`, `what`, `why`, `impact`, `category`, `tags`, `project`, `org`, `scope_match`, `created_at`, `score`, `has_details`, `ttl_days`, `confidence` |
 
-**Widening.** When the current project has fewer than 3 memories matching the query's key words, a search without `scope` also reads the org's other projects, and ranks all hits by relevance; the project's own hits win only near-ties. It never crosses into another org on its own. `scope_match` says where a hit came from: `project`, `org`, `global`, `other_project` or `other_org`. An explicit `scope` of `project`, `org` or `global` never widens, and neither does `include_org=false`.
+**Widening.** When the current project has fewer than 3 memories matching the query's key words, a search without `scope` also reads the org's other projects, and ranks all hits by relevance; the project's own hits win only near-ties, unless one of them holds every key word of the query and the other hit does not. It never crosses into another org on its own. `scope_match` says where a hit came from: `project`, `org`, `global`, `other_project` or `other_org`. An explicit `scope` of `project`, `org` or `global` never widens, and neither does `include_org=false`.
 
 **Empty result.** A search that matches nothing and was not `scope="all"` replies `{"results": [], "message": "..."}` instead of `[]`. The message says what was searched (the project, the org's projects, or global memories, as the service settled on) and names `scope="all"` as the wider option, which is how an agent learns it exists. A search that finds something, and any `scope="all"` search, replies with a plain list of hits.
 
 Default is `standard`, which omits `why`/`impact` to keep results small — call `memory_details` for the full body of a specific hit. Use `full` if your integration already depends on the previous shape.
+
+Search reads the whole memory, `memory_details` body included: words that appear only in a memory's details find it. A match in the title, `what`, `why`, `impact` or tags outranks the same match in details (the details column has a quarter of their weight in the keyword ranking).
+
+Every search runs both backends. The keyword search always runs; the query is also embedded once and its nearest vectors are merged with the keyword hits by score. Embedding a query takes about 10 ms with a local Ollama. If the provider is `none`, down, or slower than 2 seconds, the search returns keyword results and no error, and skips the provider for the next 30 seconds so a hung server costs one wait, not one per search.
 
 At every level, a memory that a newer one replaced carries `superseded_by` (`id`, `title`, `date`) and its score is halved, so it stays findable as history but ranks below current answers.
 

@@ -9,8 +9,9 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from arcane.infra.db.connection import Database
-from arcane.infra.db.fts import prefix_or_query
+from arcane.infra.db.fts import all_key_terms_query, prefix_or_query
 from arcane.infra.db.ids import resolve_unique_id
+from arcane.infra.db.schema import FTS_COLUMNS
 from arcane.infra.redaction import redact, redact_values
 
 if TYPE_CHECKING:
@@ -24,9 +25,24 @@ logger = logging.getLogger(__name__)
 KNN_MIN_CANDIDATES = 200
 VEC0_MAX_K = 4096
 
+# bm25 weight per memories_fts column; any column not listed counts 1.0. A
+# details body is several times longer than the other fields, so at full weight
+# it would outrank a title or why match; at 0.25 it finds a memory by its own
+# words and loses to a field-level hit. Built in FTS_COLUMNS order, which bm25()
+# reads its weights in.
+FTS_COLUMN_WEIGHTS = {"details": 0.25}
+FTS_BM25_WEIGHTS = ", ".join(str(FTS_COLUMN_WEIGHTS.get(column, 1.0)) for column in FTS_COLUMNS)
+
 # Reserved org for the "applies everywhere" layer. Mirrors
 # ``arcane.domain.scope.GLOBAL_ORG`` (kept local to avoid an infra→domain import).
 GLOBAL_ORG = "global"
+
+
+def join_details(body: str | None, addition: str | None) -> str | None:
+    """A details body with *addition* appended after a blank line; either may be empty."""
+    if not addition:
+        return body
+    return f"{body}\n\n{addition}" if body else addition
 
 
 def _parse_tags(raw: Any) -> list[str]:
@@ -212,10 +228,9 @@ class MemoryRepository:
         if details_append:
             existing = self.db.fetchone("SELECT body FROM memory_details WHERE memory_id = ?", (full_id,))
             if existing:
-                new_body = existing["body"] + "\n\n" + details_append
                 self.db.execute(
                     "UPDATE memory_details SET body = ? WHERE memory_id = ?",
-                    (new_body, full_id),
+                    (join_details(existing["body"], details_append), full_id),
                 )
             else:
                 self.db.execute(
@@ -423,6 +438,34 @@ class MemoryRepository:
         self.db.commit()
         return int(cursor.rowcount)
 
+    def strict_match_ids(self, query: str, candidate_ids: set[str]) -> set[str]:
+        """The ids among *candidate_ids* that hold every key word of *query* and no newer memory replaces.
+
+        Uses ``all_key_terms_query``, not the loose ``prefix_or_query``, where one
+        stop word is enough. ``key_terms_query`` would also do for a short query,
+        but for a long one it lets a word go missing, and a bonus for such
+        near-matches buried the right answer. A replaced memory gets no bonus, so
+        it keeps ranking below current answers.
+        """
+        fts_query = all_key_terms_query(query)
+        if fts_query is None or not candidate_ids:
+            return set()
+        ids = sorted(candidate_ids)
+        rows = self.db.fetchall(
+            f"""
+            SELECT m.id FROM memories_fts
+            JOIN memories m ON m.rowid = memories_fts.rowid
+            WHERE memories_fts MATCH ?
+              AND m.id IN ({",".join("?" * len(ids))})
+              AND NOT EXISTS (
+                  SELECT 1 FROM relationships r
+                  WHERE r.relation = 'supersedes' AND r.target_type = 'memory' AND r.target_id = m.id
+              )
+            """,
+            [fts_query, *ids],
+        )
+        return {r["id"] for r in rows}
+
     def fts_search(
         self,
         query: str,
@@ -458,13 +501,13 @@ class MemoryRepository:
 
         rows = self.db.fetchall(
             f"""
-            SELECT m.*, -fts.rank as score,
+            SELECT m.*, -bm25(memories_fts, {FTS_BM25_WEIGHTS}) as score,
                    EXISTS(SELECT 1 FROM memory_details WHERE memory_id = m.id) as has_details
-            FROM memories_fts fts
-            JOIN memories m ON m.rowid = fts.rowid
-            WHERE fts.memories_fts MATCH ?
+            FROM memories_fts
+            JOIN memories m ON m.rowid = memories_fts.rowid
+            WHERE memories_fts MATCH ?
             {where_clause}
-            ORDER BY fts.rank
+            ORDER BY score DESC
             LIMIT ?
             """,
             params,
@@ -607,7 +650,10 @@ class MemoryRepository:
         return [_process_row(r) for r in rows]
 
     def list_all_for_reindex(self) -> list[dict[str, Any]]:
-        rows = self.db.fetchall("SELECT rowid, title, what, why, impact, tags FROM memories ORDER BY rowid")
+        rows = self.db.fetchall(
+            "SELECT m.rowid, m.title, m.what, m.why, m.impact, m.tags, d.body AS details "
+            "FROM memories m LEFT JOIN memory_details d ON d.memory_id = m.id ORDER BY m.rowid"
+        )
         return [_process_row(r) for r in rows]
 
     def count(

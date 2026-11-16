@@ -53,3 +53,15 @@ def key_terms_query(text: str) -> str | None:
         return " AND ".join(_quote(t) for t in terms)
     groups = [[t for j, t in enumerate(terms) if j != skip] for skip in range(len(terms))]
     return " OR ".join("(" + " AND ".join(_quote(t) for t in group) + ")" for group in groups)
+
+
+def all_key_terms_query(text: str) -> str | None:
+    """An FTS5 expression matching memories that contain every key word of *text*.
+
+    Unlike ``key_terms_query``, which lets one of four or more words go missing,
+    no word may, and each must be a whole word, so "ci" does not match "city".
+    The porter tokenizer still matches other forms of it. Returns ``None`` when
+    *text* has no key words.
+    """
+    terms = key_terms(text)
+    return " AND ".join('"' + t.replace('"', '""') + '"' for t in terms) if terms else None

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from arcane.domain.scope import Reach
 from arcane.infra.db.memory_repo import MemoryRepository
-from arcane.infra.embeddings.base import EmbeddingProvider
+from arcane.infra.embeddings.base import EmbeddingProvider, EmbeddingsDisabled
+
+logger = logging.getLogger(__name__)
 
 # Specificity bonus added to a normalised score by scope layer. A bias, not a
 # hard gate: a much stronger org/global hit can still outrank a weak project one.
@@ -14,6 +17,17 @@ SCOPE_BONUS = {3: 0.15, 2: 0.05, 1: 0.0, 0: 0.0}
 # After widening past the project, relevance decides and the local bonus only
 # breaks near-ties: a strong hit from another project beats a weak local one.
 WIDENED_SCOPE_BONUS = {3: 0.03, 2: 0.02, 1: 0.0, 0: 0.0}
+
+FTS_WEIGHT = 0.3
+VEC_WEIGHT = 0.7
+# Added to a row that holds every key word of the query. Such a row may have
+# little vector score, and a vector-only row scores up to VEC_WEIGHT, so the
+# bonus has to exceed that to lead it. It also covers the widest scope gap
+# (the 0.15 project bonus), so a vector-only neighbour from a nearer layer
+# cannot pass it either. Every reach gets it: a keyword hit that names the
+# whole query is strong evidence in the project or across the org. It does
+# not always lead a row that misses a word but is strong on both scores.
+STRICT_MATCH_BONUS = VEC_WEIGHT + SCOPE_BONUS[3]
 
 
 def apply_scope_bonus(rows: list[dict[str, Any]], bonus: dict[int, float] = SCOPE_BONUS) -> list[dict[str, Any]]:
@@ -37,22 +51,43 @@ def _normalise(results: list[dict[str, Any]]) -> None:
         r["score"] = r["score"] / best if best > 0 else 0.0
 
 
+def _normalise_range(results: list[dict[str, Any]]) -> None:
+    """Scale scores in place onto 0..1 between their minimum and maximum; all 1.0 when they are equal."""
+    if not results:
+        return
+    low = min(r["score"] for r in results)
+    high = max(r["score"] for r in results)
+    for r in results:
+        r["score"] = (r["score"] - low) / (high - low) if high > low else 1.0
+
+
+def apply_strict_bonus(rows: list[dict[str, Any]], strict_ids: set[str]) -> None:
+    """Add ``STRICT_MATCH_BONUS`` in place to each row whose id is in *strict_ids*."""
+    for r in rows:
+        if r["id"] in strict_ids:
+            r["score"] += STRICT_MATCH_BONUS
+
+
 def merge_results(
     fts_results: list[dict[str, Any]],
     vec_results: list[dict[str, Any]],
-    fts_weight: float = 0.3,
-    vec_weight: float = 0.7,
+    fts_weight: float = FTS_WEIGHT,
+    vec_weight: float = VEC_WEIGHT,
     limit: int = 5,
+    strict_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Normalise positive per-backend scores by their maximum, then weight.
+    """Normalise each backend's scores, then weight.
 
-    Vector scores are reciprocal L2 distance, ``1 / (1 + distance)``, rather
-    than cosine similarity. Maximum normalisation preserves their ordering
-    and relative strengths before combining them with positive FTS ranks.
+    FTS ranks are scaled by their maximum. Vector scores are reciprocal L2
+    distance, ``1 / (1 + distance)``, which sit close together for every
+    neighbour, so they are spread over their range instead: scaled by the
+    maximum, a neighbour sharing no word with the query scored near 1.0 and
+    outranked an exact keyword hit. Rows in *strict_ids*, which match every key
+    word of the query, then get ``STRICT_MATCH_BONUS`` so they lead every vector-only row.
     """
     _normalise(fts_results)
 
-    _normalise(vec_results)
+    _normalise_range(vec_results)
 
     scores: dict[str, dict[str, Any]] = {}
     for r in fts_results:
@@ -67,7 +102,9 @@ def merge_results(
             scores[rid] = dict(r)
             scores[rid]["score"] = vec_weight * r["score"]
 
-    ranked = sorted(scores.values(), key=lambda x: x["score"], reverse=True)
+    ranked = list(scores.values())
+    apply_strict_bonus(ranked, strict_ids or set())
+    ranked.sort(key=lambda x: x["score"], reverse=True)
     return ranked[:limit]
 
 
@@ -76,7 +113,6 @@ def tiered_search(
     embedding_provider: EmbeddingProvider | None,
     query: str,
     limit: int = 5,
-    min_fts_results: int = 3,
     project: str | None = None,
     source: str | None = None,
     org: str | None = None,
@@ -84,7 +120,12 @@ def tiered_search(
     include_global: bool = True,
     reach: Reach = "layers",
 ) -> list[dict[str, Any]]:
-    """FTS-first tiered search — only calls embed when FTS results are sparse."""
+    """Keyword and vector search on every query, merged by score.
+
+    The query is embedded once. When the provider is missing, down or slow the
+    keyword results stand alone: a search never raises or waits for it beyond
+    the query timeout, and a failure skips the provider for a while.
+    """
     fts_results = repo.fts_search(
         query,
         limit=limit * 2,
@@ -98,11 +139,15 @@ def tiered_search(
 
     _normalise(fts_results)
 
-    if len(fts_results) >= min_fts_results or embedding_provider is None:
-        results = fts_results
-    else:
+    vec_results: list[dict[str, Any]] | None = None
+    if embedding_provider is not None:
         try:
-            query_vec = embedding_provider.embed(query)
+            query_vec = embedding_provider.embed_query(query)
+        except EmbeddingsDisabled:
+            pass
+        except Exception:  # the provider has already logged why
+            logger.debug("Query embedding failed; keyword results only.", exc_info=True)
+        else:
             vec_results = repo.vector_search(
                 query_vec,
                 limit=limit * 2,
@@ -113,9 +158,15 @@ def tiered_search(
                 include_global=include_global,
                 reach=reach,
             )
-            results = merge_results(fts_results, vec_results, limit=limit * 2)
-        except Exception:
-            results = fts_results
+
+    candidate_ids = {r["id"] for r in fts_results} | {r["id"] for r in vec_results or []}
+    strict_ids = repo.strict_match_ids(query, candidate_ids)
+    if vec_results is not None:
+        results = merge_results(fts_results, vec_results, limit=limit * 2, strict_ids=strict_ids)
+    else:
+        results = fts_results
+        apply_strict_bonus(results, strict_ids)
+        results.sort(key=lambda x: x["score"], reverse=True)
 
     if org is not None:
         results = apply_scope_bonus(results, SCOPE_BONUS if reach == "layers" else WIDENED_SCOPE_BONUS)

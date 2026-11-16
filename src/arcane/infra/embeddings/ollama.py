@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from arcane.infra.embeddings.base import EmbeddingProvider
+from arcane.infra.embeddings.base import QUERY_TIMEOUT_SECONDS, EmbeddingProvider, TextTooLong
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,9 @@ DEFAULT_PORT = 11434
 # Concurrent requests per embed_batch call. Ollama serves embeddings in
 # parallel; 64 texts take about half as long at 4 as one at a time.
 BATCH_CONCURRENCY = 4
+# Attempts, and the share of the text kept on each, when Ollama rejects a prompt as too long.
+CONTEXT_ATTEMPTS = 5
+CONTEXT_SHRINK = 0.6
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
 _MACOS_APP = "/Applications/Ollama.app"
 _BINARY_FALLBACKS = (
@@ -181,13 +184,28 @@ class OllamaEmbedding(EmbeddingProvider):
         self.base_url = base_url
         self.autostart = autostart
 
-    def _embed(self, text: str) -> list[float]:
-        resp = _http().post(
-            f"{self.base_url}/api/embeddings",
-            json={"model": self.model, "prompt": text},
-        )
-        resp.raise_for_status()
-        return list(resp.json()["embedding"])
+    def _embed(self, text: str, timeout: float | None = None, attempts: int = CONTEXT_ATTEMPTS) -> list[float]:
+        # The model reads 2048 tokens, which is 2300 characters of dense text
+        # (paths, code) and 10000 of prose. When Ollama says the text is too
+        # long, keep the front, which holds the title and the fields that name
+        # the memory, and ask again with less.
+        for _ in range(attempts):
+            resp = _http().post(
+                f"{self.base_url}/api/embeddings",
+                json={"model": self.model, "prompt": text},
+                timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
+            )
+            if resp.status_code == 500 and "exceeds the context length" in resp.text:
+                text = text[: int(len(text) * CONTEXT_SHRINK)]
+                continue
+            resp.raise_for_status()
+            return list(resp.json()["embedding"])
+        raise TextTooLong("Text does not fit the embedding model's context, even when cut short.")
+
+    def embed_query(self, text: str, timeout: float = QUERY_TIMEOUT_SECONDS) -> list[float]:
+        # No autostart: a search must not wait for Ollama to boot. One attempt,
+        # so a query never waits out several timeouts or context-length cuts.
+        return self._embed(text, timeout=timeout, attempts=1)
 
     def embed(self, text: str) -> list[float]:
         try:
