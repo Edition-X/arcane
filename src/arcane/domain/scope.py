@@ -14,6 +14,8 @@ import subprocess
 import threading
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Literal, get_args
 
 from pydantic import BaseModel, field_validator
 
@@ -242,3 +244,113 @@ def resolve_read_project(project: str | None, config: ArcaneConfig, cwd: str | N
     resolved = resolve_scope(cwd or os.getcwd(), config)
     slug = canonicalize_project(project, config.projects.aliases)
     return collapse_project_variant(slug, resolved.project)
+
+
+# What a read can ask for. Omitted means auto: the project's own layers, widened
+# to the org's other projects when the project is thin.
+ReadScope = Literal["project", "org", "global", "all"]
+READ_SCOPES: tuple[ReadScope, ...] = get_args(ReadScope)
+
+# How far a search reads: ``layers`` is the project, org and global chain, ``org``
+# adds every other project of the org, ``all`` reads every org, and ``auto`` picks
+# ``org`` or ``layers`` by how thin the project is.
+Reach = Literal["auto", "layers", "org", "all"]
+
+
+# A project that matches a search with fewer rows than this cannot answer it
+# alone, so an automatic search also reads the org's other projects.
+WIDEN_BELOW = 3
+
+
+@dataclass(frozen=True)
+class ReadPlan:
+    """The layers and reach a read covers, from a caller's ``scope``.
+
+    ``project`` is ``""`` when the read has no project: ``scope="org"`` and
+    ``scope="global"`` read org-level or global memories only, and a caller that
+    passes ``project=""`` reads the whole org.
+    """
+
+    org: str
+    project: str
+    include_org: bool
+    include_global: bool
+    reach: Reach
+    scope: ReadScope | None
+
+    def nothing_found(self, settled_reach: Reach, *, cli: bool = False) -> str | None:
+        """What to tell a caller whose search matched nothing, true to what was searched.
+
+        Args:
+            settled_reach: The reach the service settled on (``search_reach``), not
+                the plan's ``auto``.
+            cli: Spell the retry hints as command-line options rather than MCP
+                arguments. On the CLI a search without ``--project`` or ``--scope``
+                reads every org, so the automatic retry is ``--project``.
+
+        Returns:
+            The message, or ``None`` when every project of every org was already searched.
+        """
+        if self.scope == "all":
+            return None
+        everywhere = "--scope all" if cli else "scope='all'"
+        automatic = "with --project instead" if cli else "without scope"
+        if self.scope == "global":
+            return f"Nothing matched in global memories. Retry {automatic}, or with {everywhere}."
+        if self.scope == "org":
+            return (
+                f"Nothing matched among org '{self.org}' memories. Retry {automatic}, "
+                f"or with {everywhere} to search every project in every org."
+            )
+        where = f"project '{self.project}'" if self.project else "this project"
+        wider = (
+            f"to include org '{self.org}' and its other projects, or {everywhere} to search every project in every org"
+        )
+        if self.scope == "project":
+            return f"Nothing matched in {where}. Retry {automatic} {wider}."
+        if not self.include_org:
+            return f"Nothing matched in {where} (include_org was false). Retry with include_org=true {wider}."
+        global_part = " and global memories" if self.include_global else ""
+        if settled_reach == "layers":
+            return (
+                f"Nothing matched in {where}, org-level{global_part} memories. The org's other projects were not "
+                f"searched, because the query has no key words to judge the project by. "
+                f"Retry with {everywhere} to search every project in every org."
+            )
+        return (
+            f"Nothing matched in org '{self.org}' (every project){global_part}. "
+            f"Retry with {everywhere} to search every project in every org."
+        )
+
+
+def plan_read(
+    scope: ReadScope | None, org: str, project: str, include_org: bool = True, include_global: bool = True
+) -> ReadPlan:
+    """Map a read ``scope`` to the org, project, layers and reach to search.
+
+    Omitted scope keeps the caller's layers and lets the service widen when the
+    project is thin, unless the caller turned the org layer off; an explicit
+    scope never widens, except ``all``.
+
+    Args:
+        scope: What the caller asked for, or ``None`` for automatic widening.
+        org: The org slug, already resolved and lowercased.
+        project: The resolved project; ``""`` for none.
+        include_org: Whether org-level memories are read.
+        include_global: Whether global memories are read (``all`` ignores this).
+
+    Raises:
+        ValueError: *scope* is not one of ``READ_SCOPES``.
+    """
+    if scope is None:
+        reach: Reach = "auto" if include_org else "layers"
+        return ReadPlan(org, project, include_org, include_global, reach, scope)
+    if scope == "project":
+        return ReadPlan(org, project, False, False, "layers", scope)
+    if scope == "org":
+        return ReadPlan(org, "", True, False, "layers", scope)
+    if scope == "global":
+        return ReadPlan(GLOBAL_ORG, "", True, False, "layers", scope)
+    if scope == "all":
+        return ReadPlan(org, project, include_org, include_global, "all", scope)
+    raise ValueError(f"Unknown scope '{scope}'. Valid values: {', '.join(READ_SCOPES)}.")

@@ -42,7 +42,7 @@ def draft_blog(journey_id: str | None, project: str | None) -> None:
         elif project:
             scope = resolve_write_scope(project, container.config)
             context["memories"], _ = MemoryService(container).get_context(
-                limit=20, project=scope.project, org=scope.org
+                limit=20, project=scope.project, org=scope.org, reach="layers"
             )
             context["project"] = project
         else:

@@ -182,6 +182,34 @@ class ArtifactRepository:
         rows = self.db.fetchall(f"SELECT * FROM artifacts {where} ORDER BY created_at", params)
         return [self._process_row(row) for row in rows]
 
+    def reassign_project(self, old: str, new: str, *, org: str) -> int:
+        """Move *org*'s artifacts from project *old* to *new*; return rows moved.
+
+        A row that would collide with one already in *new* (same type and
+        external id, which the unique key allows once) stays where it is; see
+        ``count_collisions``.
+        """
+        cursor = self.db.execute(
+            "UPDATE OR IGNORE artifacts SET project = ? WHERE project = ? AND org = ?", (new, old, org)
+        )
+        self.db.commit()
+        return int(cursor.rowcount)
+
+    def count_collisions(self, old: str, new: str, *, org: str) -> int:
+        """Artifacts of *org*'s project *old* that ``reassign_project`` would leave behind."""
+        row = self.db.fetchone(
+            "SELECT COUNT(*) AS cnt FROM artifacts a WHERE a.project = ? AND a.org = ? AND EXISTS ("
+            "SELECT 1 FROM artifacts b WHERE b.project = ? AND b.org = a.org AND b.artifact_type = a.artifact_type "
+            "AND b.external_id = a.external_id)",
+            (old, org, new),
+        )
+        return int(row["cnt"]) if row else 0
+
+    def count_by_org(self, project: str) -> dict[str, int]:
+        """How many artifacts each org holds under *project*."""
+        rows = self.db.fetchall("SELECT org, COUNT(*) AS cnt FROM artifacts WHERE project = ? GROUP BY org", (project,))
+        return {r["org"]: int(r["cnt"]) for r in rows}
+
     def count(self, project: str | None = None, org: str | None = None) -> int:
         clauses: list[str] = []
         params: list[Any] = []

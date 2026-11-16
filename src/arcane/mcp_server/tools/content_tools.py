@@ -62,6 +62,6 @@ def _build_project_brief(container: ServiceContainer, project: str) -> str:
     """Build a blog brief from recent project memories when no journey is available."""
     svc = MemoryService(container)
     scope = resolve_write_scope(project, container.config)
-    memories, _ = svc.get_context(limit=20, project=scope.project, org=scope.org)
+    memories, _ = svc.get_context(limit=20, project=scope.project, org=scope.org, reach="layers")
     brief = create_plugin("content", "blog", container).generate({"memories": memories, "project": scope.project})
     return str(brief) if brief else f"# Blog Brief: {scope.project}\n\n*No memories found for this project.*"
