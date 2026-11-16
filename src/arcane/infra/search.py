@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from arcane.infra.db.memory_repo import MemoryRepository
-from arcane.infra.embeddings.base import EmbeddingProvider
+from arcane.infra.embeddings.base import EmbeddingProvider, EmbeddingsDisabled
+
+logger = logging.getLogger(__name__)
 
 # Specificity bonus added to a normalised score by scope layer. A bias, not a
 # hard gate: a much stronger org/global hit can still outrank a weak project one.
@@ -72,14 +75,18 @@ def tiered_search(
     embedding_provider: EmbeddingProvider | None,
     query: str,
     limit: int = 5,
-    min_fts_results: int = 3,
     project: str | None = None,
     source: str | None = None,
     org: str | None = None,
     include_org: bool = True,
     include_global: bool = True,
 ) -> list[dict[str, Any]]:
-    """FTS-first tiered search — only calls embed when FTS results are sparse."""
+    """Keyword and vector search on every query, merged by score.
+
+    The query is embedded once. When the provider is missing, down or slow the
+    keyword results stand alone: a search never raises or waits for it beyond
+    the query timeout, and a failure skips the provider for a while.
+    """
     fts_results = repo.fts_search(
         query,
         limit=limit * 2,
@@ -92,11 +99,15 @@ def tiered_search(
 
     _normalise(fts_results)
 
-    if len(fts_results) >= min_fts_results or embedding_provider is None:
-        results = fts_results
-    else:
+    results = fts_results
+    if embedding_provider is not None:
         try:
-            query_vec = embedding_provider.embed(query)
+            query_vec = embedding_provider.embed_query(query)
+        except EmbeddingsDisabled:
+            pass
+        except Exception:  # the provider has already logged why
+            logger.debug("Query embedding failed; keyword results only", exc_info=True)
+        else:
             vec_results = repo.vector_search(
                 query_vec,
                 limit=limit * 2,
@@ -107,8 +118,6 @@ def tiered_search(
                 include_global=include_global,
             )
             results = merge_results(fts_results, vec_results, limit=limit * 2)
-        except Exception:
-            results = fts_results
 
     if org is not None:
         results = apply_scope_bonus(results)

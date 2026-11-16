@@ -21,6 +21,13 @@ logger = logging.getLogger(__name__)
 KNN_MIN_CANDIDATES = 200
 VEC0_MAX_K = 4096
 
+# bm25 column weights for memories_fts, in column order: title, what, why,
+# impact, tags, category, project, source, details. A details body is several
+# times longer than the other fields, so at full weight it would outrank a
+# title or why match; at 0.25 it finds a memory by its own words and loses to
+# a field-level hit.
+FTS_BM25_WEIGHTS = "1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.25"
+
 # Reserved org for the "applies everywhere" layer. Mirrors
 # ``arcane.domain.scope.GLOBAL_ORG`` (kept local to avoid an infra→domain import).
 GLOBAL_ORG = "global"
@@ -420,13 +427,13 @@ class MemoryRepository:
 
         rows = self.db.fetchall(
             f"""
-            SELECT m.*, -fts.rank as score,
+            SELECT m.*, -bm25(memories_fts, {FTS_BM25_WEIGHTS}) as score,
                    EXISTS(SELECT 1 FROM memory_details WHERE memory_id = m.id) as has_details
-            FROM memories_fts fts
-            JOIN memories m ON m.rowid = fts.rowid
-            WHERE fts.memories_fts MATCH ?
+            FROM memories_fts
+            JOIN memories m ON m.rowid = memories_fts.rowid
+            WHERE memories_fts MATCH ?
             {where_clause}
-            ORDER BY fts.rank
+            ORDER BY score DESC
             LIMIT ?
             """,
             params,
@@ -547,7 +554,10 @@ class MemoryRepository:
         return [_process_row(r) for r in rows]
 
     def list_all_for_reindex(self) -> list[dict[str, Any]]:
-        rows = self.db.fetchall("SELECT rowid, title, what, why, impact, tags FROM memories ORDER BY rowid")
+        rows = self.db.fetchall(
+            "SELECT m.rowid, m.title, m.what, m.why, m.impact, m.tags, d.body AS details "
+            "FROM memories m LEFT JOIN memory_details d ON d.memory_id = m.id ORDER BY m.rowid"
+        )
         return [_process_row(r) for r in rows]
 
     def count(

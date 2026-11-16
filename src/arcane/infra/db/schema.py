@@ -55,45 +55,14 @@ def create_schema(db: Database) -> None:
         )
     """)
 
-    # FTS5 virtual table
-    db.execute("""
-        CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
-            title, what, why, impact, tags, category, project, source,
-            content='memories', content_rowid='rowid',
-            tokenize='porter unicode61'
-        )
-    """)
-
-    # FTS auto-sync triggers
-    db.execute("""
-        CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
-            INSERT INTO memories_fts(rowid, title, what, why, impact, tags, category, project, source)
-            VALUES (new.rowid, new.title, new.what, new.why, new.impact, new.tags, new.category, new.project, new.source);
-        END
-    """)
-
-    db.execute("""
-        CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
-            INSERT INTO memories_fts(memories_fts, rowid, title, what, why, impact, tags, category, project, source)
-            VALUES ('delete', old.rowid, old.title, old.what, old.why, old.impact, old.tags, old.category, old.project, old.source);
-            INSERT INTO memories_fts(rowid, title, what, why, impact, tags, category, project, source)
-            VALUES (new.rowid, new.title, new.what, new.why, new.impact, new.tags, new.category, new.project, new.source);
-        END
-    """)
-
-    db.execute("""
-        CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
-            INSERT INTO memories_fts(memories_fts, rowid, title, what, why, impact, tags, category, project, source)
-            VALUES ('delete', old.rowid, old.title, old.what, old.why, old.impact, old.tags, old.category, old.project, old.source);
-        END
-    """)
-
     # Migration: add columns if missing
     _add_column_if_missing(db, "memories", "updated_count", "INTEGER DEFAULT 0")
     _add_column_if_missing(db, "memories", "metadata", "TEXT DEFAULT '{}'")
     _add_column_if_missing(db, "memories", "ttl_days", "INTEGER")
     _add_column_if_missing(db, "memories", "confidence", "REAL")
     _add_column_if_missing(db, "memories", "org", "TEXT NOT NULL DEFAULT ''")
+
+    _ensure_memories_fts(db)
 
     # ── journeys ────────────────────────────────────────────────────────
     db.execute("""
@@ -382,6 +351,80 @@ def _repair_relationship_ids(db: Database) -> None:
                     if full_id is not None:
                         db.execute(f"UPDATE relationships SET {id_column} = ? WHERE id = ?", (full_id, row["id"]))
         db.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')", (RELATIONSHIP_REPAIR_KEY,))
+
+
+FTS_COLUMNS = ("title", "what", "why", "impact", "tags", "category", "project", "source", "details")
+
+# One row of memories_fts for the memory whose rowid and id are given, details included.
+_FTS_ROW = (
+    "INSERT INTO memories_fts(rowid, {cols}) "
+    "SELECT m.rowid, m.title, m.what, m.why, m.impact, m.tags, m.category, m.project, m.source, {details} "
+    "FROM memories m {where}"
+)
+
+
+def _fts_trigger_sql() -> list[str]:
+    cols = ", ".join(FTS_COLUMNS)
+    body = "(SELECT body FROM memory_details WHERE memory_id = m.id)"
+    row = _FTS_ROW.format(cols=cols, details=body, where="WHERE m.rowid = new.rowid")
+    return [
+        f"CREATE TRIGGER memories_ai AFTER INSERT ON memories BEGIN {row}; END",
+        f"""CREATE TRIGGER memories_au AFTER UPDATE ON memories BEGIN
+            DELETE FROM memories_fts WHERE rowid = old.rowid;
+            {row};
+        END""",
+        "CREATE TRIGGER memories_ad AFTER DELETE ON memories BEGIN DELETE FROM memories_fts WHERE rowid = old.rowid; END",
+        # A details row changes only the details column of its memory's FTS row.
+        f"""CREATE TRIGGER memory_details_ai AFTER INSERT ON memory_details BEGIN
+            DELETE FROM memories_fts WHERE rowid = (SELECT rowid FROM memories WHERE id = new.memory_id);
+            {_FTS_ROW.format(cols=cols, details="new.body", where="WHERE m.id = new.memory_id")};
+        END""",
+        f"""CREATE TRIGGER memory_details_au AFTER UPDATE ON memory_details BEGIN
+            DELETE FROM memories_fts WHERE rowid = (SELECT rowid FROM memories WHERE id = new.memory_id);
+            {_FTS_ROW.format(cols=cols, details="new.body", where="WHERE m.id = new.memory_id")};
+        END""",
+        f"""CREATE TRIGGER memory_details_ad AFTER DELETE ON memory_details BEGIN
+            DELETE FROM memories_fts WHERE rowid = (SELECT rowid FROM memories WHERE id = old.memory_id);
+            {_FTS_ROW.format(cols=cols, details="NULL", where="WHERE m.id = old.memory_id")};
+        END""",
+    ]
+
+
+def _fts_has_details(db: Database) -> bool:
+    return "details" in {row["name"] for row in db.fetchall("PRAGMA table_info(memories_fts)")}
+
+
+def _ensure_memories_fts(db: Database) -> None:
+    """Create the memory keyword index, or rebuild it when it predates details search.
+
+    Older stores have an external-content table over ``memories`` alone, which
+    cannot hold a column from ``memory_details``. This swaps it for a table that
+    keeps its own copy, in one transaction. Once the ``details`` column exists
+    the function does nothing, so it is safe on every start.
+    """
+    if _fts_has_details(db):
+        return
+    with db.transaction():
+        if _fts_has_details(db):  # another process rebuilt it while this one waited for the lock
+            return
+        for trigger in ("memories_ai", "memories_au", "memories_ad"):
+            db.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+        db.execute("DROP TABLE IF EXISTS memories_fts")
+        db.execute(f"""
+            CREATE VIRTUAL TABLE memories_fts USING fts5(
+                {", ".join(FTS_COLUMNS)},
+                tokenize='porter unicode61'
+            )
+        """)
+        db.execute(
+            _FTS_ROW.format(
+                cols=", ".join(FTS_COLUMNS),
+                details="d.body",
+                where="LEFT JOIN memory_details d ON d.memory_id = m.id",
+            )
+        )
+        for trigger in _fts_trigger_sql():
+            db.execute(trigger)
 
 
 def _add_column_if_missing(db: Database, table: str, column: str, definition: str) -> None:

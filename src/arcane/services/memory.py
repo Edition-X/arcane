@@ -41,6 +41,12 @@ class DimensionMismatchError(Exception):
         )
 
 
+# How much of a details body goes into the embedding. The model reads about
+# 2000 tokens; the cut keeps the fields that name the memory (title, what,
+# why) ahead of the body, and stops a long body from pulling the vector away from them.
+EMBED_DETAILS_CHARS = 6000
+
+
 def _embedding_text(
     title: str,
     what: str,
@@ -48,9 +54,13 @@ def _embedding_text(
     impact: str | None,
     tags: list[str],
     extra_patterns: list[str] | None = None,
+    details: str | None = None,
 ) -> str:
     """Build the text string that is fed to the embedding model."""
-    return redact(f"{title} {what} {why or ''} {impact or ''} {' '.join(tags)}", extra_patterns)
+    text = f"{title} {what} {why or ''} {impact or ''} {' '.join(tags)}"
+    if details:
+        text += f" {details[:EMBED_DETAILS_CHARS]}"
+    return redact(text, extra_patterns)
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -239,10 +249,16 @@ class MemoryService:
         return None
 
     def _prepare_embedding(
-        self, title: str, what: str, why: str | None, impact: str | None, tags: list[str]
+        self,
+        title: str,
+        what: str,
+        why: str | None,
+        impact: str | None,
+        tags: list[str],
+        details: str | None = None,
     ) -> list[float] | None:
         """Compute an embedding before entering a database write transaction."""
-        text = _embedding_text(title, what, why, impact, tags, self.c.ignore_patterns)
+        text = _embedding_text(title, what, why, impact, tags, self.c.ignore_patterns, details)
         try:
             return self.c.embedding_provider.embed(text)
         except EmbeddingsDisabled:
@@ -253,6 +269,14 @@ class MemoryService:
             logger.warning("Embedding failed (%s) — memory will be saved without a vector.", exc)
             logger.debug("Embedding failure detail", exc_info=True)
             return None
+
+    def _details_after_append(self, memory_id: str, details_append: str | None) -> str | None:
+        """The details body a memory will have once *details_append* is added, as the repository joins them."""
+        row = self.c.memory_repo.get_details(memory_id)
+        body = row["body"] if row else None
+        if not details_append:
+            return body
+        return f"{body}\n\n{details_append}" if body else details_append
 
     def _store_embedding(self, rowid: int, embedding: list[float]) -> None:
         """Store a precomputed embedding inside the caller's transaction."""
@@ -335,7 +359,7 @@ class MemoryService:
         except Exception:
             logger.debug("FTS dedup search failed; treating as new memory", exc_info=True)
 
-        embedding = self._prepare_embedding(raw.title, raw.what, raw.why, raw.impact, raw.tags)
+        embedding = self._prepare_embedding(raw.title, raw.what, raw.why, raw.impact, raw.tags, raw.details)
         near_dup = self._near_duplicate_warning(raw, project, org, candidates, embedding)
         if near_dup:
             warnings.append(near_dup)
@@ -374,7 +398,14 @@ class MemoryService:
                 # A concurrent delete won; run the normal save path again.
                 return self.save(raw, project=existing["project"], org=existing["org"])
             merged_tags = self._merge_tags(current.get("tags") or [], raw.tags)
-            embedding = self._prepare_embedding(current["title"], raw.what, raw.why, raw.impact, merged_tags)
+            embedding = self._prepare_embedding(
+                current["title"],
+                raw.what,
+                raw.why,
+                raw.impact,
+                merged_tags,
+                self._details_after_append(existing_id, details_append),
+            )
             with self.c.db.transaction():
                 latest = self.c.memory_repo.get(existing_id)
                 if latest is None or latest["updated_count"] != current["updated_count"]:
@@ -614,6 +645,7 @@ class MemoryService:
             why if why is not None else existing.get("why"),
             impact if impact is not None else existing.get("impact"),
             tags if tags is not None else existing.get("tags") or [],
+            self._details_after_append(full_id, details_append),
         )
 
         with self.c.db.transaction():
@@ -669,7 +701,13 @@ class MemoryService:
 
         texts = [
             _embedding_text(
-                mem["title"], mem["what"], mem.get("why"), mem.get("impact"), mem["tags"], self.c.ignore_patterns
+                mem["title"],
+                mem["what"],
+                mem.get("why"),
+                mem.get("impact"),
+                mem["tags"],
+                self.c.ignore_patterns,
+                mem.get("details"),
             )
             for mem in memories
         ]

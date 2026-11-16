@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from arcane.infra.embeddings.base import EmbeddingProvider
+from arcane.infra.embeddings.base import QUERY_TIMEOUT_SECONDS, EmbeddingProvider
 
 logger = logging.getLogger(__name__)
 
@@ -181,13 +181,18 @@ class OllamaEmbedding(EmbeddingProvider):
         self.base_url = base_url
         self.autostart = autostart
 
-    def _embed(self, text: str) -> list[float]:
+    def _embed(self, text: str, timeout: float | None = None) -> list[float]:
         resp = _http().post(
             f"{self.base_url}/api/embeddings",
             json={"model": self.model, "prompt": text},
+            timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
         )
         resp.raise_for_status()
         return list(resp.json()["embedding"])
+
+    def embed_query(self, text: str, timeout: float = QUERY_TIMEOUT_SECONDS) -> list[float]:
+        # No autostart: a search must not wait for Ollama to boot.
+        return self._embed(text, timeout=timeout)
 
     def embed(self, text: str) -> list[float]:
         try:

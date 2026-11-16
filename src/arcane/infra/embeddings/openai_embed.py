@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import httpx
 
-from arcane.infra.embeddings.base import EmbeddingProvider
+from arcane.infra.embeddings.base import QUERY_TIMEOUT_SECONDS, EmbeddingProvider
 
 _EMBEDDINGS_URL = "https://api.openai.com/v1/embeddings"
 # The embeddings API accepts up to 2048 inputs per request.
@@ -25,14 +25,21 @@ class OpenAIEmbedding(EmbeddingProvider):
             self._client = httpx.Client(timeout=30.0, headers={"Authorization": f"Bearer {self.api_key}"})
         return self._client
 
-    def _request(self, inputs: str | list[str]) -> list[list[float]]:
-        resp = self._http().post(_EMBEDDINGS_URL, json={"model": self.model, "input": inputs})
+    def _request(self, inputs: str | list[str], timeout: float | None = None) -> list[list[float]]:
+        resp = self._http().post(
+            _EMBEDDINGS_URL,
+            json={"model": self.model, "input": inputs},
+            timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
+        )
         resp.raise_for_status()
         data = sorted(resp.json()["data"], key=lambda item: item["index"])
         return [list(item["embedding"]) for item in data]
 
     def embed(self, text: str) -> list[float]:
         return self._request(text)[0]
+
+    def embed_query(self, text: str, timeout: float = QUERY_TIMEOUT_SECONDS) -> list[float]:
+        return self._request(text, timeout=timeout)[0]
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
         vectors: list[list[float]] = []
