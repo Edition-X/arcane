@@ -7,85 +7,11 @@ records every prompt, and can be made slow or stopped.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import sqlite3
-import subprocess
-import threading
 import time
-from collections.abc import Iterator
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-import pytest
-
-from tests.e2e.conftest import ARCANE, Arcane, Client
-
-DIM = 32
-
-
-def _vector(text: str) -> list[float]:
-    vec = [0.0] * DIM
-    for word in text.lower().split():
-        vec[int(hashlib.md5(word.encode()).hexdigest(), 16) % DIM] += 1.0
-    return vec
-
-
-class FakeOllama:
-    def __init__(self) -> None:
-        self.prompts: list[str] = []
-        self.delay = 0.0
-        self.max_chars: int | None = None  # longer prompts get Ollama's context-length error
-        outer = self
-
-        class Handler(BaseHTTPRequestHandler):
-            def do_POST(self) -> None:
-                body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
-                outer.prompts.append(body["prompt"])
-                if outer.max_chars is not None and len(body["prompt"]) > outer.max_chars:
-                    self.send_response(500)
-                    self.end_headers()
-                    self.wfile.write(b'{"error":"the input length exceeds the context length"}')
-                    return
-                if outer.delay:
-                    time.sleep(outer.delay)
-                payload = json.dumps({"embedding": _vector(body["prompt"])}).encode()
-                try:
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.end_headers()
-                    self.wfile.write(payload)
-                except OSError:  # the client gave up waiting
-                    pass
-
-            def log_message(self, *_args: Any) -> None:
-                pass
-
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.server.daemon_threads = True
-        self.worker = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.worker.start()
-        self.url = f"http://127.0.0.1:{self.server.server_port}"
-
-    def stop(self) -> None:
-        self.server.shutdown()
-        self.server.server_close()
-
-
-@pytest.fixture
-def ollama(arcane: Arcane) -> Iterator[FakeOllama]:
-    fake = FakeOllama()
-    (arcane.home / "config.yaml").write_text(
-        f"context:\n  semantic: never\nembedding:\n  base_url: {fake.url}\n  autostart: false\n", encoding="utf-8"
-    )
-    try:
-        yield fake
-    finally:
-        fake.stop()
-
-
-def _titles(hits: list[dict[str, Any]]) -> list[str]:
-    return [hit["title"] for hit in hits]
+from tests.e2e.conftest import Arcane, Client, FakeOllama, _titles
 
 
 def test_words_only_in_details_find_the_memory(arcane: Arcane) -> None:
@@ -200,14 +126,7 @@ def test_a_query_too_long_to_embed_warns_that_only_keywords_ran(arcane: Arcane, 
 
     arcane.run(seed)
     ollama.max_chars = 10
-    result = subprocess.run(
-        [ARCANE, "search", "cache layer sessions and the queue behind them", "--limit", "1"],
-        cwd=arcane.repo,
-        env=arcane.env("core"),
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    result = arcane.cli("search", "cache layer sessions and the queue behind them", "--limit", "1", profile="core")
     assert "[1] Cache layer" in result.stdout  # the keyword results still come back
     assert "too long to embed" in result.stderr
 
@@ -258,9 +177,7 @@ def test_reindex_embeds_details_up_to_the_cut(arcane: Arcane, ollama: FakeOllama
 
     arcane.run(seed)
     ollama.prompts.clear()
-    result = subprocess.run(
-        [ARCANE, "reindex"], cwd=arcane.repo, env=arcane.env("core"), capture_output=True, text=True, check=True
-    )
+    result = arcane.cli("reindex", profile="core")
     assert "Re-indexed 3 memories" in result.stdout
     assert len(ollama.prompts) == 3
     by_title = {p.split(" ", 1)[0]: p for p in ollama.prompts}
@@ -355,15 +272,7 @@ def test_a_stopword_match_does_not_earn_the_local_bonus_when_widened(arcane: Arc
 
 def _cli_search(arcane: Arcane, query: str) -> str:
     """The output of ``arcane search`` for one result with no org; the provider is unreachable, so keywords rank."""
-    result = subprocess.run(
-        [ARCANE, "search", query, "--limit", "1"],
-        cwd=arcane.repo,
-        env=arcane.env("core"),
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return result.stdout
+    return arcane.cli("search", query, "--limit", "1", profile="core").stdout
 
 
 def test_a_keyword_only_cli_search_puts_a_whole_query_match_first(arcane: Arcane) -> None:
