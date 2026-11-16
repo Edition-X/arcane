@@ -62,7 +62,7 @@ def test_memory_lifecycle(arcane: Arcane) -> None:
     assert "Revisited" in out["details_after"]["body"]
 
     assert out["delete"]["deleted"] is True
-    assert "no details found" in out["details_gone"].lower()
+    assert "memory not found" in out["details_gone"].lower()
     assert "not found" in out["delete_again"].lower()
     assert "not found" in out["update_gone"].lower()
     # Nothing matched, so the reply points at the wider scope instead of a bare empty list.

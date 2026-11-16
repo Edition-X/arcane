@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -163,23 +164,46 @@ def search(query: str, limit: int, project: bool, source: str | None, scope: Rea
             click.echo(f"     Why: {r['why']}")
         if r.get("impact"):
             click.echo(f"     Impact: {r['impact']}")
+        if r.get("related_files"):
+            click.echo(f"     Files: {', '.join(r['related_files'])}")
         if r.get("has_details"):
             click.echo(f"     Details: available (use `arcane details {r['id'][:12]}`)")
 
 
 @click.command()
 @click.argument("memory_id")
-def details(memory_id: str) -> None:
-    """Fetch full details for a memory."""
+@click.option("--json", "as_json", is_flag=True, help="Print the record as JSON, as memory_details returns it")
+def details(memory_id: str, as_json: bool) -> None:
+    """Show the whole record of a memory: what, why, impact, files, journeys and details."""
     from arcane.services.memory import MemoryService
 
     with create_container() as container:
-        detail = MemoryService(container).get_details(memory_id)
+        record = MemoryService(container).get_record(memory_id)
 
-    if not detail:
-        click.echo(f"No details found for {memory_id}")
+    if "error" in record:
+        raise click.ClickException(record["error"])
+    if as_json:
+        click.echo(json.dumps(record, indent=2))
         return
-    click.echo(detail["body"])
+    click.echo(f"{record['title']} ({record['memory_id']})")
+    meta = (record["category"], record["date"], ", ".join(record["tags"]))
+    click.echo(" | ".join(part for part in meta if part))
+    click.echo(f"What: {record['what']}")
+    for label, key in (("Why", "why"), ("Impact", "impact")):
+        if record[key]:
+            click.echo(f"{label}: {record[key]}")
+    if record["related_files"]:
+        click.echo("Files: " + ", ".join(record["related_files"]))
+    for journey in record["journeys"]:
+        click.echo(f"Journey: {journey['title']} ({journey['id']}, {journey['status']})")
+    for replaced in record.get("supersedes", []):
+        click.echo(f"Replaces: {replaced['title']} ({replaced['id']})")
+    if "superseded_by" in record:
+        click.echo(f"Replaced by: {record['superseded_by']['title']} ({record['superseded_by']['id']})")
+    provenance = {k: v for k, v in record["provenance"].items() if v is not None}
+    if provenance:
+        click.echo("Provenance: " + ", ".join(f"{k}={v}" for k, v in provenance.items()))
+    click.echo(f"Details:\n{record['body']}" if record["has_details"] else "Details: none")
 
 
 @click.command()
@@ -311,6 +335,8 @@ def merge_projects(src: str, dest: str, org: str | None, apply_: bool) -> None:
         colliding_artifacts = (
             repos["artifacts"].count_collisions(src, dest_canon, org=source_org) if source_org is not None else 0
         )
+        # What both the dry run and --apply act on: a colliding artifact stays where it is.
+        movable = {**counts, "artifacts": counts["artifacts"] - colliding_artifacts}
         collision_note = (
             f" {colliding_artifacts} artifacts stay in '{src}': '{dest_canon}' already has the same type "
             "and external id."
@@ -319,13 +345,13 @@ def merge_projects(src: str, dest: str, org: str | None, apply_: bool) -> None:
         )
 
         if not apply_:
-            listed = ", ".join(f"{n} {name}" for name, n in counts.items())
+            listed = ", ".join(f"{n} {name}" for name, n in movable.items())
             click.echo(
                 f"Dry run: would move {listed} from {where} into '{dest_canon}'.{collision_note} "
                 "Pass --apply to commit."
             )
             return
-        if source_org is None or sum(counts.values()) - colliding_artifacts == 0:
+        if source_org is None or sum(movable.values()) == 0:
             click.echo(f"Nothing to move from {where} into '{dest_canon}'; no backup taken.")
             return
 

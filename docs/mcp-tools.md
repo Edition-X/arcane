@@ -77,20 +77,22 @@ Search memories using keyword and vector search. Call at session start and whene
 | Level | Fields returned |
 |---|---|
 | `minimal` | `id`, `title`, `category`, `score`, `project`, `org`, `scope_match` |
-| `standard` | `id`, `title`, `category`, `score`, `what`, `tags`, `project`, `org`, `scope_match`, `date`, `has_details` |
-| `full` | `id`, `title`, `what`, `why`, `impact`, `category`, `tags`, `project`, `org`, `scope_match`, `created_at`, `score`, `has_details`, `ttl_days`, `confidence` |
+| `standard` | `id`, `title`, `category`, `score`, `what`, `tags`, `related_files`, `project`, `org`, `scope_match`, `date`, `has_details` |
+| `full` | `id`, `title`, `what`, `why`, `impact`, `category`, `tags`, `related_files`, `project`, `org`, `scope_match`, `created_at`, `score`, `has_details`, `ttl_days`, `confidence` |
 
 **Widening.** When the current project has fewer than 3 memories matching the query's key words, a search without `scope` also reads the org's other projects, and ranks all hits by relevance; the project's own hits win only near-ties, unless one of them holds every key word of the query and the other hit does not. It never crosses into another org on its own. `scope_match` says where a hit came from: `project`, `org`, `global`, `other_project` or `other_org`. An explicit `scope` of `project`, `org` or `global` never widens, and neither does `include_org=false`.
 
 **Empty result.** A search that matches nothing and was not `scope="all"` replies `{"results": [], "message": "..."}` instead of `[]`. The message says what was searched (the project, the org's projects, or global memories, as the service settled on) and names `scope="all"` as the wider option, which is how an agent learns it exists. A search that finds something, and any `scope="all"` search, replies with a plain list of hits.
 
-Default is `standard`, which omits `why`/`impact` to keep results small — call `memory_details` for the full body of a specific hit. Use `full` if your integration already depends on the previous shape.
+Default is `standard`, which omits `why`/`impact` to keep results small — call `memory_details` for the whole record of a specific hit. `related_files` is listed at `standard` and `full` when the memory has any, and left out when it has none. Use `full` if your integration already depends on the previous shape.
 
 Search reads the whole memory, `memory_details` body included: words that appear only in a memory's details find it. A match in the title, `what`, `why`, `impact` or tags outranks the same match in details (the details column has a quarter of their weight in the keyword ranking).
 
-Every search runs both backends. The keyword search always runs; the query is also embedded once and its nearest vectors are merged with the keyword hits by score. Embedding a query takes about 10 ms with a local Ollama. If the provider is `none`, down, or slower than 2 seconds, the search returns keyword results and no error, and skips the provider for the next 30 seconds so a hung server costs one wait, not one per search.
+A memory's `related_files` are searched too, at the weight of the other fields: a file path in the query, such as `src/arcane/infra/db/schema.py`, finds the memories that name it. The query's path stays one term, and a hit needs every part of it in order, so `schema.py` alone also matches, but `db/schema.py` does not match `infra/schema.py` by keyword.
 
-At every level, a memory that a newer one replaced carries `superseded_by` (`id`, `title`, `date`) and its score is halved, so it stays findable as history but ranks below current answers.
+Every search runs both backends. The keyword search always runs; the query is also embedded once and its nearest vectors are merged with the keyword hits by score. Embedding a query takes about 10 ms with a local Ollama. If the provider is `none`, down, or slower than 2 seconds, the search returns keyword results and no error, and skips the provider for the next 30 seconds so a hung server costs one wait, not one per search. A query too long for the embedding model also gets keyword results only, with the warning `Query too long to embed` in the server log; that does not pause the provider, so the next query is embedded as usual.
+
+At every level, a memory that a newer one replaced carries `superseded_by` (`id`, `title`, `date`) and its score is halved, so it stays findable as history but ranks below current answers. It also earns no whole-query bonus (the one for holding every key word of the query), even when it holds them all.
 
 ---
 
@@ -135,9 +137,13 @@ The key is omitted entirely when no journeys are stale.
 
 **Profile:** `core`
 
-Get full details for a single memory, including the extended `details` field. The reply adds `superseded_by` when a newer memory replaced this one, and `supersedes` listing the memories this one replaced.
+Get the whole record of a memory. The reply holds `memory_id`, `title`, `category`, `tags`, `date`, `what`, `why`, `impact`, `related_files`, `journeys` (each `id`, `title`, `status`, oldest link first; empty when the memory is in none), `has_details` and `body` (the extended `details` text). It adds `superseded_by` when a newer memory replaced this one, and `supersedes` listing the memories this one replaced.
+
+A memory saved without `details` has no body: `has_details` is `false` and `body` is `""`, not an error. An ID that matches no memory is an error.
 
 The reply also carries `provenance`: `commit_sha`, `branch`, `dirty`, `session_id` and `thread_id`, recorded by the server when the memory was saved. A field is `null` when unknown (a folder that is not a git repo, a client that sends no session id). `dirty` means tracked files differed from HEAD.
+
+`arcane details <id>` prints the same record; `--json` prints it as the tool returns it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

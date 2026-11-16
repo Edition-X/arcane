@@ -227,7 +227,11 @@ def _create_server(container: ServiceContainer) -> Server:
             ),
             Tool(
                 name="memory_details",
-                description="Get full details for a memory by ID or prefix.",
+                description=(
+                    "Get the whole record of a memory by ID or prefix: what, why, impact, related_files, "
+                    "journeys, supersedes and superseded_by, provenance and the details body. "
+                    "Works when the memory has no details body (`has_details` false, `body` empty)."
+                ),
                 input_schema={
                     "type": "object",
                     "properties": {"memory_id": {"type": "string"}},

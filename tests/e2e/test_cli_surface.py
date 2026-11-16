@@ -103,3 +103,34 @@ def test_health_advice_for_orgless_memories_actually_repairs_them(arcane: Arcane
     _cli(arcane, "migrate", "org-scope", "--apply")
     [(org,)] = arcane.sql("SELECT org FROM memories WHERE title = 'Legacy'")
     assert org == "personal"
+
+
+def _artifact(arcane: Arcane, external_id: str, project: str) -> None:
+    arcane.sql(
+        "INSERT INTO artifacts (id, artifact_type, external_id, title, project, org, created_at) "
+        "VALUES (?, 'git_commit', ?, 'a commit', ?, 'alpha', '2026-11-16T00:00:00')",
+        (f"{project}-{external_id}", external_id, project),
+    )
+
+
+def test_merge_projects_dry_run_does_not_count_colliding_artifacts_as_moving(arcane: Arcane) -> None:
+    async def seed(client: Client) -> None:
+        await client.call("memory_save", title="alpha note", what="in widget", project="widget", org="alpha")
+
+    arcane.run(seed)
+    _artifact(arcane, "same", "widget")  # gadget holds the same type and external id, so this one stays behind
+    _artifact(arcane, "same", "gadget")
+    _artifact(arcane, "other", "widget")
+
+    dry_run = _cli(arcane, "merge-projects", "widget", "gadget", "--org", "alpha").stdout
+    assert "would move 1 memories, 0 journeys, 1 artifacts, 0 insights" in dry_run
+    assert "1 artifacts stay in 'widget'" in dry_run
+
+    applied = _cli(arcane, "merge-projects", "widget", "gadget", "--org", "alpha", "--apply").stdout
+    assert "Moved 1 memories, 0 journeys, 1 artifacts, 0 insights" in applied
+
+    # Only a colliding artifact is left: the dry run now says nothing moves, and --apply agrees.
+    dry_run = _cli(arcane, "merge-projects", "widget", "gadget", "--org", "alpha").stdout
+    assert "would move 0 memories, 0 journeys, 0 artifacts, 0 insights" in dry_run
+    applied = _cli(arcane, "merge-projects", "widget", "gadget", "--org", "alpha", "--apply").stdout
+    assert "Nothing to move" in applied

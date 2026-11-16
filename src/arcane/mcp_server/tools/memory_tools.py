@@ -45,7 +45,7 @@ When this memory replaces an earlier one (a reversed decision, a newer fix), pas
 
 SEARCH_DESCRIPTION = f"""Search memories using keyword and semantic search. Call this at session start and when the user's request relates to a topic with prior context.
 
-Results omit why/impact by default; call memory_details for the full body. A result with `superseded_by` has been replaced by a newer memory; prefer the newer one.
+Results omit why/impact by default; call memory_details for the whole record. A hit lists its `related_files` when it has any, and a file path in the query finds the memories that name it. A result with `superseded_by` has been replaced by a newer memory; prefer the newer one.
 
 Every hit carries `project`, `org` and `scope_match` (project, org, global, other_project, other_org). When the current project matches fewer than {WIDEN_BELOW} memories, the search also reads the org's other projects; those hits are `other_project`. `scope` overrides this: project, org (org-level memories only), global, or all (every project in every org). When nothing matches, the response says so and names scope='all'."""
 
@@ -79,7 +79,7 @@ def handle_save(
     supersedes: str | None = None,
     caller: dict[str, Any] | None = None,
 ) -> str:
-    """Save a memory. ``caller`` holds the call's ``_meta``, set by the server, never by the agent."""
+    """Save a memory. ``caller`` is set by the server, never by the agent; ``caller["meta"]`` is the call's ``_meta``."""
     handler_warnings: list[str] = []
 
     # Sanitise category at the handler boundary so the domain model stays strict
@@ -189,6 +189,7 @@ def _search_hit(r: dict, detail: str) -> dict:
     replaced = {"superseded_by": r["superseded_by"]} if r.get("superseded_by") else {}
     # Shown at every detail level: a hit from another project must be told from a local one.
     where = _location(r)
+    files = {"related_files": r["related_files"]} if r.get("related_files") else {}
     if detail == "minimal":
         return {
             "id": r["id"],
@@ -207,6 +208,7 @@ def _search_hit(r: dict, detail: str) -> dict:
             "impact": r.get("impact"),
             "category": r.get("category"),
             "tags": r.get("tags", []),  # already list[str] from repo
+            **files,
             **where,
             "created_at": r.get("created_at", "")[:10],
             "score": score,
@@ -223,6 +225,7 @@ def _search_hit(r: dict, detail: str) -> dict:
         "score": score,
         "what": r["what"],
         "tags": r.get("tags", []),
+        **files,
         **where,
         "date": r.get("created_at", "")[:10],
         "has_details": bool(r.get("has_details")),
@@ -394,24 +397,7 @@ def handle_context(
 
 
 def handle_details(svc: MemoryService, memory_id: str) -> str:
-    try:
-        detail = svc.get_details(memory_id)
-    except IdentifierResolutionError as exc:
-        return json.dumps({"error": str(exc)})
-    if not detail:
-        return json.dumps({"error": f"No details found for {memory_id}"})
-    full_id = detail["memory_id"]
-    payload: dict = {"memory_id": full_id, "body": detail["body"]}
-    memory = svc.c.memory_repo.get(full_id) or {}
-    payload["provenance"] = {k: memory.get(k) for k in ("commit_sha", "branch", "session_id", "thread_id")}
-    payload["provenance"]["dirty"] = None if memory.get("dirty") is None else bool(memory["dirty"])
-    replaced_by = svc.c.relationship_repo.superseded_by([full_id]).get(full_id)
-    if replaced_by:
-        payload["superseded_by"] = replaced_by
-    replaces = svc.c.relationship_repo.supersedes(full_id)
-    if replaces:
-        payload["supersedes"] = replaces
-    return json.dumps(payload)
+    return json.dumps(svc.get_record(memory_id))
 
 
 def handle_update(

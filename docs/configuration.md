@@ -89,6 +89,8 @@ This is safe to interrupt and re-run — the index is rebuilt atomically.
 
 Run it after upgrading to the release that searches details, too. The keyword index picks details up by itself the first time the store opens (a one-off rebuild that does nothing on later starts). The vectors do not: `arcane reindex` re-embeds every memory with the first 2000 characters of its details. Until then search still works, but a memory's vector reflects its title, what, why, impact and tags only. The same cut applies to later appends: text that lands past the first 2000 characters of a memory's details is searchable by keyword but is not in its vector.
 
+The release that searches `related_files` needs no reindex. The first start rebuilds the keyword index once, in one transaction, so every memory keeps its row and gains its file paths; later starts do nothing. File paths are not part of the embedding text, so they find a memory by keyword only.
+
 ---
 
 ## Context retrieval
@@ -141,7 +143,7 @@ arcane merge-projects grafana-usage-report grafana-usage-automation          # d
 arcane merge-projects grafana-usage-report grafana-usage-automation --apply  # back up, then write the change
 ```
 
-A merge moves one org's memories, journeys, artifacts and insights, and the dry run counts each. `--apply` first writes a backup under `<home>/backups/pre-merge`, which never rotates, unless there is nothing to move, and moves the four tables in one transaction. An artifact that would collide with one already in the destination stays behind, and both the dry run and the result say how many. When more than one org has a project with the source name, the command lists them and asks for `--org`.
+A merge moves one org's memories, journeys, artifacts and insights, and the dry run counts each. `--apply` writes a backup under `<home>/backups/pre-merge`, which never rotates, and then moves the four tables in one transaction. When there is nothing to move, it writes no backup and changes nothing. An artifact that would collide with one already in the destination stays behind, and both the dry run and the result say how many. When more than one org has a project with the source name, the command lists them and asks for `--org`.
 
 ---
 

@@ -28,7 +28,10 @@ class EmbeddingsDisabled(RuntimeError):
 
 
 class TextTooLong(ValueError):
-    """The text does not fit the embedding model's context: a fault of this text, not of the provider."""
+    """The text does not fit the embedding model's context: a fault of this text, not of the provider.
+
+    Only the Ollama provider raises it; a provider that cannot tell this fault apart raises its own error.
+    """
 
 
 class NoEmbedding(EmbeddingProvider):

@@ -194,6 +194,24 @@ def test_a_query_too_long_for_the_model_is_embedded_once_not_retried(arcane: Arc
     assert ollama.prompts == ["cache"]
 
 
+def test_a_query_too_long_to_embed_warns_that_only_keywords_ran(arcane: Arcane, ollama: FakeOllama) -> None:
+    async def seed(c: Client) -> None:
+        await c.call("memory_save", title="Cache layer", what="Added a cache")
+
+    arcane.run(seed)
+    ollama.max_chars = 10
+    result = subprocess.run(
+        [ARCANE, "search", "cache layer sessions and the queue behind them", "--limit", "1"],
+        cwd=arcane.repo,
+        env=arcane.env("core"),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "[1] Cache layer" in result.stdout  # the keyword results still come back
+    assert "too long to embed" in result.stderr
+
+
 def test_search_with_the_provider_down_returns_keyword_results(arcane: Arcane, ollama: FakeOllama) -> None:
     async def seed(c: Client) -> None:
         await c.call("memory_save", title="Cache layer", what="Added a cache", details="Options: redis")
@@ -335,6 +353,19 @@ def test_a_stopword_match_does_not_earn_the_local_bonus_when_widened(arcane: Arc
     assert _titles(arcane.run(scenario))[0] == "Hazelcast cluster sizing"
 
 
+def _cli_search(arcane: Arcane, query: str) -> str:
+    """The output of ``arcane search`` for one result with no org; the provider is unreachable, so keywords rank."""
+    result = subprocess.run(
+        [ARCANE, "search", query, "--limit", "1"],
+        cwd=arcane.repo,
+        env=arcane.env("core"),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout
+
+
 def test_a_keyword_only_cli_search_puts_a_whole_query_match_first(arcane: Arcane) -> None:
     async def seed(c: Client) -> None:
         for n in range(8):  # enough that "cache" is not in every memory and carries weight
@@ -346,30 +377,10 @@ def test_a_keyword_only_cli_search_puts_a_whole_query_match_first(arcane: Arcane
         )
 
     arcane.run(seed)
-    # No --project or --scope, so the search has no org; the provider is unreachable, so only keywords rank.
-    result = subprocess.run(
-        [ARCANE, "search", "cache sessions", "--limit", "1"],
-        cwd=arcane.repo,
-        env=arcane.env("core"),
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    # No --project or --scope, so the search has no org.
+    output = _cli_search(arcane, "cache sessions")
     # Only "Notes" holds both words. Three other memories out-score it on keywords alone.
-    assert "[1] Notes" in result.stdout
-
-
-def _cli_search(arcane: Arcane, query: str) -> str:
-    """The first hit of a keyword-only ``arcane search`` with no org (the provider is unreachable)."""
-    result = subprocess.run(
-        [ARCANE, "search", query, "--limit", "1"],
-        cwd=arcane.repo,
-        env=arcane.env("core"),
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return result.stdout
+    assert "[1] Notes" in output
 
 
 def test_a_key_word_must_match_whole_to_earn_the_bonus(arcane: Arcane) -> None:

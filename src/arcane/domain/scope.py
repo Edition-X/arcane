@@ -35,6 +35,7 @@ _REMOTE_RE = re.compile(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?/?$")
 # subprocess behind it was most of a call's latency. Remotes almost never
 # change mid-session, so a lookup is reused for this many seconds.
 REMOTE_CACHE_TTL_SECONDS = 60.0
+_GIT_TIMEOUT_S = 2
 _remote_cache: dict[str, tuple[float, tuple[str | None, str | None]]] = {}
 _remote_cache_lock = threading.Lock()
 
@@ -146,11 +147,11 @@ def _git(cwd: str, *args: str) -> str | None:
             ["git", "--no-optional-locks", "-C", cwd, *args],
             capture_output=True,
             text=True,
-            timeout=2,
+            timeout=_GIT_TIMEOUT_S,
             check=False,
         )
     except subprocess.TimeoutExpired:
-        logger.warning("Git %s timed out after 2 s in %s.", args[0], cwd)
+        logger.warning("Git %s timed out after %d s in %s.", args[0], _GIT_TIMEOUT_S, cwd)
         return None
     except (OSError, subprocess.SubprocessError):
         return None

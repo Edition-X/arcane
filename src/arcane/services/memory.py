@@ -662,7 +662,7 @@ class MemoryService:
         return ranked, reach
 
     def _effective_reach(
-        self, reach: Reach, query: str | None, org: str | None, project: str | None, source: str | None = None
+        self, reach: Reach, query: str | None, org: str | None, project: str | None, source: str | None
     ) -> Reach:
         """Settle ``auto`` into ``org`` or ``layers``; any other reach stands.
 
@@ -948,6 +948,58 @@ class MemoryService:
             return []
         details = self.c.memory_repo.get_details(full_id)
         return quality_warnings(existing.get("category"), existing.get("why"), (details or {}).get("body"))
+
+    def get_record(self, memory_id: str) -> dict[str, Any]:
+        """The whole record of one memory, details body included, or ``{"error": ...}``.
+
+        Shared by the ``memory_details`` tool and ``arcane details`` so both show the same fields.
+        """
+        try:
+            full_id = self.c.memory_repo.resolve_prefix(memory_id)
+        except IdentifierResolutionError as exc:
+            return {"error": str(exc)}
+        memory = self.c.memory_repo.get(full_id) if full_id else None
+        if memory is None:
+            return {"error": f"Memory not found: {memory_id}"}
+        detail = self.get_details(memory["id"])
+        record: dict[str, Any] = {
+            "memory_id": full_id,
+            "title": memory["title"],
+            "category": memory.get("category"),
+            "tags": memory.get("tags", []),
+            "what": memory["what"],
+            "why": memory.get("why"),
+            "impact": memory.get("impact"),
+            "related_files": memory.get("related_files", []),
+            "date": memory.get("created_at", "")[:10],
+            "has_details": detail is not None,
+            "body": detail["body"] if detail else "",
+            "journeys": self._journeys_of(memory["id"]),
+        }
+        full_id = memory["id"]
+        record["provenance"] = {k: memory.get(k) for k in ("commit_sha", "branch", "session_id", "thread_id")}
+        record["provenance"]["dirty"] = None if memory.get("dirty") is None else bool(memory["dirty"])
+        replaced_by = self.c.relationship_repo.superseded_by([full_id]).get(full_id)
+        if replaced_by:
+            record["superseded_by"] = replaced_by
+        replaces = self.c.relationship_repo.supersedes(full_id)
+        if replaces:
+            record["supersedes"] = replaces
+        return record
+
+    def _journeys_of(self, memory_id: str) -> list[dict[str, Any]]:
+        """Every journey a memory is part of, as ``{id, title, status}``, oldest link first.
+
+        A memory saved again with another ``journey_id`` belongs to both.
+        """
+        edges = sorted(self.c.relationship_repo.get_from("memory", memory_id), key=lambda rel: rel["created_at"])
+        journeys = []
+        for rel in edges:
+            if rel["relation"] == RelationType.PART_OF.value and rel["target_type"] == "journey":
+                journey = self.c.journey_repo.get(rel["target_id"])
+                if journey:
+                    journeys.append({"id": journey["id"], "title": journey["title"], "status": journey["status"]})
+        return journeys
 
     def get_details(self, memory_id: str) -> dict[str, Any] | None:
         return self.c.memory_repo.get_details(memory_id)
