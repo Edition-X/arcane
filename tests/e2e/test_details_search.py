@@ -108,7 +108,7 @@ def test_words_only_in_details_find_the_memory(arcane: Arcane) -> None:
     assert _titles(out["appended"]) == ["Queue layer"]
     assert _titles(out["merged"]) == ["Cache layer"]
     assert _titles(out["merged_old"]) == ["Cache layer"]
-    assert out["deleted"] == [] or out["deleted"]["results"] == []
+    assert out["deleted"]["results"] == []
 
 
 def test_title_and_why_matches_outrank_a_long_details_body(arcane: Arcane) -> None:
@@ -164,18 +164,31 @@ def test_upgrade_indexes_details_and_running_it_twice_changes_nothing(arcane: Ar
 
 def test_every_search_embeds_the_query_once(arcane: Arcane, ollama: FakeOllama) -> None:
     async def scenario(c: Client) -> list[Any]:
-        await c.call("memory_save", title="Cache layer", what="Added a cache for sessions")
+        # Four memories match "cache", more than enough keyword hits for a search to need no vectors.
+        for n in range(4):
+            await c.call("memory_save", title=f"Cache layer {n}", what="Added a cache for sessions")
         await c.call("memory_save", title="Queue layer", what="Added a queue for jobs")
-        ollama.prompts.clear()
         out = []
         for query in ("cache", "queue jobs", "cache sessions queue jobs and more words"):
-            before = len(ollama.prompts)
+            ollama.prompts.clear()
             out.append(await c.call("memory_search", query=query))
-            assert ollama.prompts[before:] == [query]
+            assert ollama.prompts == [query]
         return out
 
-    # Three keyword matches or none, the embedding model is asked every time.
+    # Many keyword matches or none, the embedding model is asked every time.
     assert len(arcane.run(scenario)) == 3
+
+
+def test_a_query_too_long_for_the_model_is_embedded_once_not_retried(arcane: Arcane, ollama: FakeOllama) -> None:
+    async def scenario(c: Client) -> list[dict[str, Any]]:
+        await c.call("memory_save", title="Cache layer", what="Added a cache")
+        ollama.max_chars = 10
+        ollama.prompts.clear()
+        return await c.call("memory_search", query="cache layer sessions and the queue behind them")
+
+    arcane.run(scenario)
+    # A search never waits through the save path's cut-and-retry loop.
+    assert len(ollama.prompts) == 1
 
 
 def test_search_with_the_provider_down_returns_keyword_results(arcane: Arcane, ollama: FakeOllama) -> None:
