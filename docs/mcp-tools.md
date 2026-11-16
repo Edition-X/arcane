@@ -30,7 +30,7 @@ Save a memory for future sessions. Call this before ending any session where you
 | `ttl_days` | integer | no | Days until this memory expires from search results. Omit for permanent memories. |
 | `confidence` | number | no | Confidence in accuracy 0.0–1.0. Omit if not applicable. |
 
-A `decision` that records too little reasoning saves anyway and adds a warning for each gap: `no_why` (empty why), `why_only_says_who_asked` (why names who asked, no reason after it), `no_options` (details names no alternatives). A decision with no details gets the no-details warning and not `no_options`. Each warning names `memory_update` as the fix.
+A `decision` that records too little reasoning saves anyway and adds a warning for each gap: `no_why` (empty why), `why_only_says_who_asked` (why names who asked, no reason after it), `no_options` (details names no alternatives). A `decision` or `bug` with no details gets `no_details`, and a decision then gets no `no_options`. Each warning names `memory_update` as the fix.
 
 **Categories:**
 
@@ -130,7 +130,7 @@ The reply also carries `provenance`: `commit_sha`, `branch`, `dirty`, `session_i
 
 **Profile:** `core`
 
-Update a memory in place. Prefer this over `memory_save` when a save warns `near_duplicate`, or to fix a `no_why`, `why_only_says_who_asked` or `no_options` warning. The reply carries `warnings` for whatever still applies after the update, and omits the key when nothing does.
+Update a memory in place. Prefer this over `memory_save` when a save warns `near_duplicate`, or to fix a `no_why`, `why_only_says_who_asked` or `no_options` warning. When the update changes `why` or `details_append`, the reply carries `warnings` for whatever still applies, and omits the key when nothing does. An update of only `what`, `impact` or `tags` returns no warnings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

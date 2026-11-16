@@ -99,6 +99,12 @@ _OPTIONS_MARKER = re.compile(
 
 
 def _why_only_says_who_asked(why: str) -> bool:
+    """True when *why* opens with who asked and no reason follows.
+
+    A heuristic, tuned on the live store's 626 decisions: a clause break, a long
+    tail, or a reason marker followed by real words that do not restate the ask
+    all count as a reason. It only ever adds a warning, never blocks a save.
+    """
     match = _WHO_ASKED.match(why)
     if not match:
         return False
@@ -130,8 +136,9 @@ def quality_warnings(category: str | None, why: str | None, details: str | None)
     warnings: list[str] = []
     if not details_text:
         warnings.append(
-            f"'{kind}' memories should include details. "
-            "Capture context, options considered, decision, tradeoffs, and follow-up."
+            f"no_details: '{kind}' memories should include details. "
+            "Capture context, options considered, decision, tradeoffs, and follow-up "
+            "with memory_update (details_append=...)."
         )
     if kind != "decision":
         return warnings
@@ -401,7 +408,6 @@ class MemoryService:
         provenance = provenance or capture_provenance(os.getcwd())
         if project != resolve_write_scope(None, self.c.config).project:
             provenance = provenance.without_git()
-        quality = quality_warnings(raw.category, raw.why, raw.details)
         warnings: list[str] = []
         journey_id = self._resolve_journey(raw.journey_id, warnings)
         superseded_id = self._resolve_superseded(raw.supersedes, warnings)
@@ -457,7 +463,12 @@ class MemoryService:
         if existing is not None:
             return self._merge_into(existing, raw, today, warnings, provenance)
         logger.debug("Created memory id=%s project=%s", mem.id, project)
-        return {"id": mem.id, "file_path": str(file_path), "action": "created", "warnings": quality + warnings}
+        return {
+            "id": mem.id,
+            "file_path": str(file_path),
+            "action": "created",
+            "warnings": quality_warnings(raw.category, raw.why, raw.details) + warnings,
+        }
 
     def _merge_into(
         self,
