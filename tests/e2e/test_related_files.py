@@ -9,8 +9,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
-from tests.e2e.conftest import Arcane, Client
-from tests.e2e.test_details_search import FakeOllama, _titles, ollama  # noqa: F401  (ollama is a fixture)
+from tests.e2e.conftest import Arcane, Client, FakeOllama, _titles
 
 PATH = "src/zephyr/quux_handler.py"
 
@@ -40,7 +39,7 @@ def test_a_path_in_related_files_finds_the_memory_and_the_hit_lists_it(arcane: A
     assert out["plain"][0]["related_files"] == ["x/y.py"]
 
 
-def test_a_full_path_query_earns_the_whole_query_bonus(arcane: Arcane, ollama: FakeOllama) -> None:  # noqa: F811
+def test_a_full_path_query_earns_the_whole_query_bonus(arcane: Arcane, ollama: FakeOllama) -> None:
     async def scenario(c: Client) -> list[dict[str, Any]]:
         # The path is in related_files only, so the memory's vector is far from the query.
         await c.call(

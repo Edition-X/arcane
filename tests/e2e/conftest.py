@@ -9,13 +9,17 @@ is the FTS path and nothing depends on a local Ollama.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import sqlite3
 import subprocess
 import sys
-from collections.abc import Awaitable, Callable
+import threading
+import time
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -106,6 +110,12 @@ class Arcane:
 
         return asyncio.run(main())
 
+    def cli(self, *args: str, profile: str = "full", check: bool = True) -> subprocess.CompletedProcess[str]:
+        """Run ``arcane <args>`` in the repo against this store."""
+        return subprocess.run(
+            [ARCANE, *args], cwd=self.repo, env=self.env(profile), capture_output=True, text=True, check=check
+        )
+
     def sql(self, statement: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
         """Run SQL against the store directly, for state a test cannot reach through tools."""
         conn = sqlite3.connect(self.home / "index.db", timeout=5)
@@ -136,3 +146,70 @@ def arcane(tmp_path: Path) -> Arcane:
         git(repo, "add", ".")
         git(repo, "commit", "-q", "-m", f"feat: change {n}")
     return Arcane(home=home, repo=repo)
+
+
+DIM = 32
+
+
+def _vector(text: str) -> list[float]:
+    vec = [0.0] * DIM
+    for word in text.lower().split():
+        vec[int(hashlib.md5(word.encode()).hexdigest(), 16) % DIM] += 1.0
+    return vec
+
+
+class FakeOllama:
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+        self.delay = 0.0
+        self.max_chars: int | None = None  # longer prompts get Ollama's context-length error
+        outer = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
+                outer.prompts.append(body["prompt"])
+                if outer.max_chars is not None and len(body["prompt"]) > outer.max_chars:
+                    self.send_response(500)
+                    self.end_headers()
+                    self.wfile.write(b'{"error":"the input length exceeds the context length"}')
+                    return
+                if outer.delay:
+                    time.sleep(outer.delay)
+                payload = json.dumps({"embedding": _vector(body["prompt"])}).encode()
+                try:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(payload)
+                except OSError:  # the client gave up waiting
+                    pass
+
+            def log_message(self, *_args: Any) -> None:
+                pass
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server.daemon_threads = True
+        self.worker = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.worker.start()
+        self.url = f"http://127.0.0.1:{self.server.server_port}"
+
+    def stop(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+
+
+@pytest.fixture
+def ollama(arcane: Arcane) -> Iterator[FakeOllama]:
+    fake = FakeOllama()
+    (arcane.home / "config.yaml").write_text(
+        f"context:\n  semantic: never\nembedding:\n  base_url: {fake.url}\n  autostart: false\n", encoding="utf-8"
+    )
+    try:
+        yield fake
+    finally:
+        fake.stop()
+
+
+def _titles(hits: list[dict[str, Any]]) -> list[str]:
+    return [hit["title"] for hit in hits]

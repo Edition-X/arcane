@@ -7,16 +7,9 @@ faked, for the one test that needs vectors.
 from __future__ import annotations
 
 import json
-import subprocess
 from typing import Any
 
-from tests.e2e.conftest import ARCANE, Arcane, Client
-
-
-def _cli(arcane: Arcane, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [ARCANE, *args], cwd=arcane.repo, env=arcane.env("core"), capture_output=True, text=True, check=False
-    )
+from tests.e2e.conftest import Arcane, Client
 
 
 def test_memory_details_returns_the_whole_record(arcane: Arcane) -> None:
@@ -102,7 +95,7 @@ def test_cli_details_prints_the_same_record(arcane: Arcane) -> None:
         return {"full": full, "bare": bare, "record": record}
 
     ids = arcane.run(seed)
-    text = _cli(arcane, "details", ids["full"]["id"][:8]).stdout
+    text = arcane.cli("details", ids["full"]["id"][:8], profile="core", check=False).stdout
     for expected in (
         "Use redis",
         "What: Chose redis",
@@ -114,8 +107,11 @@ def test_cli_details_prints_the_same_record(arcane: Arcane) -> None:
         "memcached",
     ):
         assert expected in text
-    assert json.loads(_cli(arcane, "details", ids["full"]["id"], "--json").stdout) == ids["record"]
-    bare = _cli(arcane, "details", ids["bare"]["id"])
+    assert (
+        json.loads(arcane.cli("details", ids["full"]["id"], "--json", profile="core", check=False).stdout)
+        == ids["record"]
+    )
+    bare = arcane.cli("details", ids["bare"]["id"], profile="core", check=False)
     assert bare.returncode == 0 and "Details: none" in bare.stdout
-    missing = _cli(arcane, "details", "ffffffff")
+    missing = arcane.cli("details", "ffffffff", profile="core", check=False)
     assert missing.returncode != 0 and "not found" in missing.stderr.lower()

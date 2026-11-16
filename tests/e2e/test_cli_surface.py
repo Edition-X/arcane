@@ -2,46 +2,38 @@
 
 from __future__ import annotations
 
-import subprocess
-
-from tests.e2e.conftest import ARCANE, Arcane, Client
-
-
-def _cli(arcane: Arcane, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [ARCANE, *args], cwd=arcane.repo, env=arcane.env("full"), capture_output=True, text=True, check=check
-    )
+from tests.e2e.conftest import Arcane, Client
 
 
 def test_builtin_plugins_list_once_under_their_command_names(arcane: Arcane) -> None:
     # `gha` runs the `github_actions` entry point; listing both offered a
     # second, undocumented command for the same plugin.
-    commands = _cli(arcane, "ingest", "--help").stdout.split("Commands:", 1)[1].split()
+    commands = arcane.cli("ingest", "--help").stdout.split("Commands:", 1)[1].split()
     assert "gha" in commands and "github_actions" not in commands
     for group, names in (
         ("ingest", ("git", "gha", "linear")),
         ("analyze", ("velocity", "health", "usage")),
         ("draft", ("blog", "adr")),
     ):
-        listed = dict(line.split(": ", 1) for line in _cli(arcane, group, "--list").stdout.splitlines())
+        listed = dict(line.split(": ", 1) for line in arcane.cli(group, "--list").stdout.splitlines())
         assert set(names) <= set(listed), listed
         assert "(no description)" not in listed.values()
 
 
 def test_provider_none_is_keyword_search_without_warnings(arcane: Arcane) -> None:
     (arcane.home / "config.yaml").write_text("embedding:\n  provider: none\n", encoding="utf-8")
-    saved = _cli(arcane, "save", "--title", "Keyword only", "--what", "Stored without a vector")
+    saved = arcane.cli("save", "--title", "Keyword only", "--what", "Stored without a vector")
     assert "Embedding failed" not in saved.stderr and "Unknown embedding provider" not in saved.stderr
-    _cli(arcane, "save", "--title", "Categorised", "--what", "Stored without a vector", "--category", "bug")
+    arcane.cli("save", "--title", "Categorised", "--what", "Stored without a vector", "--category", "bug")
 
-    found = _cli(arcane, "search", "vector").stdout
+    found = arcane.cli("search", "vector").stdout
     assert "Keyword only" in found and "Categorised" in found
     # A memory with no category prints no placeholder for it.
     assert "None |" not in found
     assert "     bug | " in found
     assert arcane.sql("SELECT count(*) FROM memories") == [(2,)]
 
-    reindex = _cli(arcane, "reindex", check=False)
+    reindex = arcane.cli("reindex", check=False)
     assert reindex.returncode == 1
     assert "Embeddings are disabled (embedding.provider: none)" in reindex.stderr
 
@@ -56,7 +48,7 @@ def test_unusable_id_prefixes_are_reported_not_raised(arcane: Arcane) -> None:
         ("journey", "update", "abc", "--summary", "x"),
         ("journey", "complete", "abc"),
     ):
-        result = _cli(arcane, *args, check=False)
+        result = arcane.cli(*args, check=False)
         assert result.returncode == 1, args
         assert "Traceback" not in result.stderr, args
         assert "ID prefix must be at least 8 characters" in result.stderr, args
@@ -75,16 +67,16 @@ def test_merge_projects_moves_one_orgs_memories_only(arcane: Arcane) -> None:
     def orgs_in(project: str) -> list[str]:
         return [row[0] for row in arcane.sql("SELECT org FROM memories WHERE project = ? ORDER BY org", (project,))]
 
-    ambiguous = _cli(arcane, "merge-projects", "widget", "gadget", "--apply", check=False)
+    ambiguous = arcane.cli("merge-projects", "widget", "gadget", "--apply", check=False)
     assert ambiguous.returncode == 2
     assert "exists in several orgs: alpha (1), beta (1)" in ambiguous.stderr
     assert orgs_in("widget") == ["alpha", "beta"]
 
-    dry_run = _cli(arcane, "merge-projects", "widget", "gadget", "--org", "alpha").stdout
+    dry_run = arcane.cli("merge-projects", "widget", "gadget", "--org", "alpha").stdout
     assert "would move 1 memories, 0 journeys, 0 artifacts, 0 insights from 'widget' in org alpha" in dry_run
     assert orgs_in("widget") == ["alpha", "beta"]
 
-    applied = _cli(arcane, "merge-projects", "widget", "gadget", "--org", "alpha", "--apply").stdout
+    applied = arcane.cli("merge-projects", "widget", "gadget", "--org", "alpha", "--apply").stdout
     assert "Moved 1 memories, 0 journeys, 0 artifacts, 0 insights from 'widget' in org alpha into 'gadget'" in applied
     assert orgs_in("widget") == ["beta"]
     assert orgs_in("gadget") == ["alpha"]
@@ -93,14 +85,14 @@ def test_merge_projects_moves_one_orgs_memories_only(arcane: Arcane) -> None:
 def test_health_advice_for_orgless_memories_actually_repairs_them(arcane: Arcane) -> None:
     # The insight used to recommend `merge-projects '' <project>`, which left
     # org empty (still invisible) and would also sweep in every org-level memory.
-    _cli(arcane, "save", "--title", "Legacy", "--what", "predates orgs")
+    arcane.cli("save", "--title", "Legacy", "--what", "predates orgs")
     arcane.sql("UPDATE memories SET org = '', project = '' WHERE title = 'Legacy'")
 
-    _cli(arcane, "analyze", "health")
+    arcane.cli("analyze", "health")
     [(body,)] = arcane.sql("SELECT body FROM insights WHERE insight_type = 'health_empty_project'")
     assert "arcane migrate org-scope" in body
 
-    _cli(arcane, "migrate", "org-scope", "--apply")
+    arcane.cli("migrate", "org-scope", "--apply")
     [(org,)] = arcane.sql("SELECT org FROM memories WHERE title = 'Legacy'")
     assert org == "personal"
 
@@ -122,15 +114,15 @@ def test_merge_projects_dry_run_does_not_count_colliding_artifacts_as_moving(arc
     _artifact(arcane, "same", "gadget")
     _artifact(arcane, "other", "widget")
 
-    dry_run = _cli(arcane, "merge-projects", "widget", "gadget", "--org", "alpha").stdout
+    dry_run = arcane.cli("merge-projects", "widget", "gadget", "--org", "alpha").stdout
     assert "would move 1 memories, 0 journeys, 1 artifacts, 0 insights" in dry_run
     assert "1 artifacts stay in 'widget'" in dry_run
 
-    applied = _cli(arcane, "merge-projects", "widget", "gadget", "--org", "alpha", "--apply").stdout
+    applied = arcane.cli("merge-projects", "widget", "gadget", "--org", "alpha", "--apply").stdout
     assert "Moved 1 memories, 0 journeys, 1 artifacts, 0 insights" in applied
 
     # Only a colliding artifact is left: the dry run now says nothing moves, and --apply agrees.
-    dry_run = _cli(arcane, "merge-projects", "widget", "gadget", "--org", "alpha").stdout
+    dry_run = arcane.cli("merge-projects", "widget", "gadget", "--org", "alpha").stdout
     assert "would move 0 memories, 0 journeys, 0 artifacts, 0 insights" in dry_run
-    applied = _cli(arcane, "merge-projects", "widget", "gadget", "--org", "alpha", "--apply").stdout
+    applied = arcane.cli("merge-projects", "widget", "gadget", "--org", "alpha", "--apply").stdout
     assert "Nothing to move" in applied
