@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from arcane.infra.db.connection import Database
-from arcane.infra.db.fts import key_terms_query, prefix_or_query
+from arcane.infra.db.fts import all_key_terms_query, prefix_or_query
 from arcane.infra.db.ids import resolve_unique_id
 from arcane.infra.db.schema import FTS_COLUMNS
 from arcane.infra.redaction import redact, redact_values
@@ -474,10 +474,12 @@ class MemoryRepository:
     ) -> set[str]:
         """Ids of the memories that match every key word of *query*, among the rows ``fts_search`` can return.
 
-        Takes the same filters as ``fts_search`` but the strict ``key_terms_query``,
-        not the loose ``prefix_or_query``, where one stop word is enough.
+        Takes the same filters as ``fts_search`` but ``all_key_terms_query``, not the
+        loose ``prefix_or_query``, where one stop word is enough. ``key_terms_query``
+        would also do for a short query, but for a long one it lets a word go
+        missing, and a bonus for such near-matches buried the right answer.
         """
-        fts_query = key_terms_query(query)
+        fts_query = all_key_terms_query(query)
         if fts_query is None:
             return set()
         where_clause, params = self._fts_filters(project, source, org, include_org, include_global, reach)
