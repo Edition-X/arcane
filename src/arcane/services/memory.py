@@ -25,6 +25,7 @@ from arcane.domain.scope import (
 )
 from arcane.infra.db.fts import key_terms_query, prefix_or_query
 from arcane.infra.db.ids import IdentifierResolutionError, resolve_entity_id
+from arcane.infra.db.memory_repo import join_details
 from arcane.infra.db.schema import create_vec_table
 from arcane.infra.embeddings.base import EmbeddingsDisabled
 from arcane.infra.markdown import remove_session_memory, write_session_memory
@@ -401,9 +402,7 @@ class MemoryService:
         """The details body a memory will have once *details_append* is added, as the repository joins them."""
         row = self.c.memory_repo.get_details(memory_id)
         body = row["body"] if row else None
-        if not details_append:
-            return body
-        return f"{body}\n\n{details_append}" if body else details_append
+        return join_details(body, details_append)
 
     def _store_embedding(self, rowid: int, embedding: list[float]) -> None:
         """Store a precomputed embedding inside the caller's transaction."""

@@ -38,6 +38,13 @@ FTS_BM25_WEIGHTS = ", ".join(str(FTS_COLUMN_WEIGHTS.get(column, 1.0)) for column
 GLOBAL_ORG = "global"
 
 
+def join_details(body: str | None, addition: str | None) -> str | None:
+    """A details body with *addition* appended after a blank line; either may be empty."""
+    if not addition:
+        return body
+    return f"{body}\n\n{addition}" if body else addition
+
+
 def _parse_tags(raw: Any) -> list[str]:
     """Deserialise tags from whatever shape the DB row delivers.
 
@@ -221,10 +228,9 @@ class MemoryRepository:
         if details_append:
             existing = self.db.fetchone("SELECT body FROM memory_details WHERE memory_id = ?", (full_id,))
             if existing:
-                new_body = existing["body"] + "\n\n" + details_append
                 self.db.execute(
                     "UPDATE memory_details SET body = ? WHERE memory_id = ?",
-                    (new_body, full_id),
+                    (join_details(existing["body"], details_append), full_id),
                 )
             else:
                 self.db.execute(
