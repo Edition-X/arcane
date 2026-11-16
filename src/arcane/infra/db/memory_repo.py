@@ -45,10 +45,10 @@ def join_details(body: str | None, addition: str | None) -> str | None:
     return f"{body}\n\n{addition}" if body else addition
 
 
-def _parse_tags(raw: Any) -> list[str]:
+def _parse_list(raw: Any) -> list[str]:
     """Deserialise tags from whatever shape the DB row delivers.
 
-    Tags are stored as a JSON array string.  This helper normalises them so
+    Tags and related files are stored as a JSON array string.  This helper normalises them so
     callers always receive ``list[str]`` — no json.loads scattered everywhere.
     """
     if isinstance(raw, list):
@@ -67,7 +67,8 @@ PROVENANCE_COLUMNS = ("commit_sha", "branch", "dirty", "session_id", "thread_id"
 
 def _process_row(row: dict[str, Any]) -> dict[str, Any]:
     """Deserialise JSON fields on a raw DB row before returning to callers."""
-    row["tags"] = _parse_tags(row.get("tags"))
+    row["tags"] = _parse_list(row.get("tags"))
+    row["related_files"] = _parse_list(row.get("related_files"))
     return row
 
 

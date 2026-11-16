@@ -45,7 +45,7 @@ When this memory replaces an earlier one (a reversed decision, a newer fix), pas
 
 SEARCH_DESCRIPTION = f"""Search memories using keyword and semantic search. Call this at session start and when the user's request relates to a topic with prior context.
 
-Results omit why/impact by default; call memory_details for the full body. A result with `superseded_by` has been replaced by a newer memory; prefer the newer one.
+Results omit why/impact by default; call memory_details for the whole record. A hit lists its `related_files` when it has any, and a file path in the query finds the memories that name it. A result with `superseded_by` has been replaced by a newer memory; prefer the newer one.
 
 Every hit carries `project`, `org` and `scope_match` (project, org, global, other_project, other_org). When the current project matches fewer than {WIDEN_BELOW} memories, the search also reads the org's other projects; those hits are `other_project`. `scope` overrides this: project, org (org-level memories only), global, or all (every project in every org). When nothing matches, the response says so and names scope='all'."""
 
@@ -189,6 +189,7 @@ def _search_hit(r: dict, detail: str) -> dict:
     replaced = {"superseded_by": r["superseded_by"]} if r.get("superseded_by") else {}
     # Shown at every detail level: a hit from another project must be told from a local one.
     where = _location(r)
+    files = {"related_files": r["related_files"]} if r.get("related_files") else {}
     if detail == "minimal":
         return {
             "id": r["id"],
@@ -207,6 +208,7 @@ def _search_hit(r: dict, detail: str) -> dict:
             "impact": r.get("impact"),
             "category": r.get("category"),
             "tags": r.get("tags", []),  # already list[str] from repo
+            **files,
             **where,
             "created_at": r.get("created_at", "")[:10],
             "score": score,
@@ -223,6 +225,7 @@ def _search_hit(r: dict, detail: str) -> dict:
         "score": score,
         "what": r["what"],
         "tags": r.get("tags", []),
+        **files,
         **where,
         "date": r.get("created_at", "")[:10],
         "has_details": bool(r.get("has_details")),

@@ -362,13 +362,19 @@ def _repair_relationship_ids(db: Database) -> None:
         db.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')", (RELATIONSHIP_REPAIR_KEY,))
 
 
-FTS_COLUMNS = ("title", "what", "why", "impact", "tags", "category", "project", "source", "details")
+FTS_COLUMNS = ("title", "what", "why", "impact", "tags", "category", "project", "source", "details", "related_files")
+
+# related_files is a JSON array in memories; the index holds its paths as space-separated text.
+_FILES_TEXT = (
+    "CASE WHEN json_valid(m.related_files) THEN (SELECT group_concat(value, ' ') FROM json_each(m.related_files)) END"
+)
 
 # One row of memories_fts for the memory whose rowid and id are given, details included.
 _FTS_ROW = (
     "INSERT INTO memories_fts(rowid, {cols}) "
-    "SELECT m.rowid, m.title, m.what, m.why, m.impact, m.tags, m.category, m.project, m.source, {details} "
-    "FROM memories m {where}"
+    "SELECT m.rowid, m.title, m.what, m.why, m.impact, m.tags, m.category, m.project, m.source, {details}, "
+    + _FILES_TEXT
+    + " FROM memories m {where}"
 )
 
 
@@ -399,24 +405,31 @@ def _fts_trigger_sql() -> list[str]:
     ]
 
 
-def _fts_has_details(db: Database) -> bool:
-    return "details" in {row["name"] for row in db.fetchall("PRAGMA table_info(memories_fts)")}
+def _fts_is_current(db: Database) -> bool:
+    return set(FTS_COLUMNS) <= {row["name"] for row in db.fetchall("PRAGMA table_info(memories_fts)")}
 
 
 def _ensure_memories_fts(db: Database) -> None:
-    """Create the memory keyword index, or rebuild it when it predates details search.
+    """Create the memory keyword index, or rebuild it when it lacks a column of ``FTS_COLUMNS``.
 
     Older stores have an external-content table over ``memories`` alone, which
-    cannot hold a column from ``memory_details``. This swaps it for a table that
-    keeps its own copy, in one transaction. Once the ``details`` column exists
-    the function does nothing, so it is safe on every start.
+    cannot hold a column from ``memory_details``; later ones lack ``related_files``.
+    This swaps either for a table that keeps its own copy, in one transaction.
+    Once every column exists the function does nothing, so it is safe on every start.
     """
-    if _fts_has_details(db):
+    if _fts_is_current(db):
         return
     with db.transaction():
-        if _fts_has_details(db):  # another process rebuilt it while this one waited for the lock
+        if _fts_is_current(db):  # another process rebuilt it while this one waited for the lock
             return
-        for trigger in ("memories_ai", "memories_au", "memories_ad"):
+        for trigger in (
+            "memories_ai",
+            "memories_au",
+            "memories_ad",
+            "memory_details_ai",
+            "memory_details_au",
+            "memory_details_ad",
+        ):
             db.execute(f"DROP TRIGGER IF EXISTS {trigger}")
         db.execute("DROP TABLE IF EXISTS memories_fts")
         db.execute(f"""
