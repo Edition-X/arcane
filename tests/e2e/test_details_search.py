@@ -290,9 +290,7 @@ def test_a_widened_search_keeps_a_local_keyword_hit_in_the_top_results(arcane: A
     assert "Rollout plan" in _titles(hits)
 
 
-def test_an_exact_keyword_hit_outranks_vector_only_neighbours_in_the_project(
-    arcane: Arcane, ollama: FakeOllama
-) -> None:
+def test_an_exact_keyword_hit_outranks_vector_only_neighbours(arcane: Arcane, ollama: FakeOllama) -> None:
     async def scenario(c: Client) -> list[dict[str, Any]]:
         # The phrase sits in a long details body, so the memory's vector is far from the query.
         await c.call(
