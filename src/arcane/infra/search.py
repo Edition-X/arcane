@@ -154,7 +154,7 @@ def tiered_search(
         except EmbeddingsDisabled:
             pass
         except Exception:  # the provider has already logged why
-            logger.debug("Query embedding failed; keyword results only", exc_info=True)
+            logger.debug("Query embedding failed; keyword results only.", exc_info=True)
         else:
             vec_results = repo.vector_search(
                 query_vec,

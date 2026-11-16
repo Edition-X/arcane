@@ -15,7 +15,8 @@ class EmbeddingProvider(ABC):
     def embed(self, text: str) -> list[float]: ...
 
     def embed_query(self, text: str, timeout: float = QUERY_TIMEOUT_SECONDS) -> list[float]:
-        """Embed a search query: one attempt, no autostart, and *timeout* seconds at most per phase."""
+        """Embed a search query. Providers that can bound the wait, such as Ollama, make one attempt, start nothing
+        and wait *timeout* seconds at most per phase; this default does not, and ignores *timeout*."""
         return self.embed(text)
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
