@@ -334,6 +334,8 @@ def merge_projects(src: str, dest: str, org: str | None, apply_: bool) -> None:
         colliding_artifacts = (
             repos["artifacts"].count_collisions(src, dest_canon, org=source_org) if source_org is not None else 0
         )
+        # What both the dry run and --apply act on: a colliding artifact stays where it is.
+        movable = {**counts, "artifacts": counts["artifacts"] - colliding_artifacts}
         collision_note = (
             f" {colliding_artifacts} artifacts stay in '{src}': '{dest_canon}' already has the same type "
             "and external id."
@@ -342,13 +344,13 @@ def merge_projects(src: str, dest: str, org: str | None, apply_: bool) -> None:
         )
 
         if not apply_:
-            listed = ", ".join(f"{n} {name}" for name, n in counts.items())
+            listed = ", ".join(f"{n} {name}" for name, n in movable.items())
             click.echo(
                 f"Dry run: would move {listed} from {where} into '{dest_canon}'.{collision_note} "
                 "Pass --apply to commit."
             )
             return
-        if source_org is None or sum(counts.values()) - colliding_artifacts == 0:
+        if source_org is None or sum(movable.values()) == 0:
             click.echo(f"Nothing to move from {where} into '{dest_canon}'; no backup taken.")
             return
 
