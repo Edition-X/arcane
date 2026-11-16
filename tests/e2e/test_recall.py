@@ -200,13 +200,14 @@ OTHER_ORG_MEMORIES = [
     ("gamma", "forge", "Invoices round half to even", "Forge rounds invoices", "same pattern"),
 ]
 
-# How far down the hits each answer may sit. Today every case below ranks first.
-TOP_IN_PROJECT = 3
-TOP_WIDENED = 5  # the org's other projects compete for the places
-TOP_EXACT = 3
+# How far down the hits each answer may sit. Today every recall case ranks first, so the
+# answer must be the first hit; the floors' slack allows for a look-alike tipping one case.
+TOP_IN_PROJECT = 1
+TOP_WIDENED = 1
+TOP_EXACT = 1
 
-# Floors: the count the code scores today, less one case where a shared word or a hashed
-# vector could tip a single case.
+# Floors: the count the code scores today, less one case where a shared word could tip a
+# single case.
 # Questions and keywords: 10/10 today. A look-alike in the same project or a sibling could
 # push one answer down a place or two without it being a regression, so one case of slack.
 FLOOR_IN_PROJECT_QUESTION = 9
@@ -220,9 +221,10 @@ FLOOR_SIBLING_PROJECT = 9
 FLOOR_DETAILS_ONLY = 5
 FLOOR_BY_PATH = 5
 # A replaced memory is halved in score and gets no whole-query bonus. With the question as
-# asked, both memories hold every key word, so the bonus alone puts the new one first: 4/4,
-# no slack. With a word added that neither holds, neither gets the bonus and only the halving
-# separates them: 3/4 today ("where do logs ship to today" still ranks the old one first).
+# asked, both memories hold every key word, and either of the two alone puts the new one
+# first: 4/4, no slack. With a word added that neither holds, neither gets the bonus and only
+# the halving separates them: 3/4 today ("where do logs ship to today" still ranks the old
+# one first).
 FLOOR_REPLACED_BELOW_NEW = 4
 FLOOR_REPLACED_BELOW_NEW_NO_BONUS = 3
 
@@ -272,7 +274,7 @@ async def _seed(c: Client) -> None:
             "memory_save", title=f"{title} (sibling file)", what="Changed another file", related_files=[sibling_path]
         )
     for old, new, question in REPLACED:
-        # The old memory also quotes the question, so only the replacement's penalty puts the new one first.
+        # The old memory also quotes the question, so both memories hold every key word of it.
         saved = await c.call("memory_save", title=old, what=f"{old}. {question}", why="the first choice")
         await c.call(
             "memory_save", title=new, what=f"{new} for the service", why="the later choice", supersedes=saved["id"]
@@ -385,7 +387,7 @@ def test_a_replaced_memory_ranks_below_its_replacement(scores: Scores) -> None:
     _check(scores, REPLACED_BELOW_NEW, FLOOR_REPLACED_BELOW_NEW)
 
 
-def test_a_word_neither_memory_holds_still_ranks_the_replacement_first(scores: Scores) -> None:
+def test_a_word_neither_memory_holds_mostly_ranks_the_replacement_first(scores: Scores) -> None:
     _check(scores, REPLACED_BELOW_NEW_NO_BONUS, FLOOR_REPLACED_BELOW_NEW_NO_BONUS)
 
 
