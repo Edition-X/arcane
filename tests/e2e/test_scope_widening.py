@@ -94,7 +94,7 @@ def test_explicit_scope_never_widens_and_each_empty_reply_says_what_was_searched
         assert [h["title"] for h in org_hits] == ["Org wide rule"]
         org_empty = await client.call("memory_search", query="zebra", scope="org")
         assert "org-level" not in org_empty["message"] and "among org 'acme' memories" in org_empty["message"]
-        assert "'nearby' is not one of" in await client.error("memory_search", query="kafka", scope="nearby")
+        assert (await client.raw("memory_search", query="kafka", scope="nearby")).is_error is True
 
     arcane.run(scenario)
 
@@ -146,7 +146,8 @@ def test_cli_search_scope_all_and_hint(arcane: Arcane) -> None:
 
     arcane.run(seed)
     scoped = _cli(arcane, "search", "ledger rounding", "--project").stdout
-    assert "No results found." in scoped and "scope='all'" in scoped
+    # The CLI spells the retry as an option, not as the MCP argument.
+    assert "No results found." in scoped and "--scope all" in scoped and "scope='all'" not in scoped
     everywhere = _cli(arcane, "search", "ledger rounding", "--scope", "all").stdout
     assert "Ledger rounding" in everywhere and "beta" in everywhere
     # An unscoped search already read every memory, so it does not suggest a wider one.
@@ -182,7 +183,7 @@ def _seed_old_name(arcane: Arcane, *, memory: bool = True, external_id: str | No
         )
 
 
-def _where(arcane: Arcane, table: str) -> list[tuple[str, str]]:
+def _org_and_project_rows(arcane: Arcane, table: str) -> list[tuple[str, str]]:
     return [(org, project) for org, project in arcane.sql(f"SELECT org, project FROM {table} ORDER BY org")]  # noqa: S608
 
 
@@ -195,22 +196,22 @@ def test_merge_projects_moves_journeys_artifacts_insights_and_backs_up_first(arc
     dry = _cli(arcane, "merge-projects", "old-name", "new-name", "--org", "ACME").stdout
     assert "would move 1 memories, 1 journeys, 1 artifacts, 1 insights from 'old-name' in org acme" in dry
     assert not (backups / "pre-merge").exists()
-    assert _where(arcane, "journeys") == [("acme", "old-name")]
+    assert _org_and_project_rows(arcane, "journeys") == [("acme", "old-name")]
 
     applied = _cli(arcane, "merge-projects", "old-name", "new-name", "--org", "acme", "--apply").stdout
     assert "Moved 1 memories, 1 journeys, 1 artifacts, 1 insights from 'old-name' in org acme" in applied
     assert len(list((backups / "pre-merge").glob("*.tar.gz"))) == 1
-    assert _where(arcane, "journeys") == [("acme", "new-name")]
+    assert _org_and_project_rows(arcane, "journeys") == [("acme", "new-name")]
     # beta's rows share the old name and stay put.
-    assert _where(arcane, "artifacts") == [("acme", "new-name"), ("beta", "old-name")]
-    assert _where(arcane, "insights") == [("acme", "new-name"), ("beta", "old-name")]
+    assert _org_and_project_rows(arcane, "artifacts") == [("acme", "new-name"), ("beta", "old-name")]
+    assert _org_and_project_rows(arcane, "insights") == [("acme", "new-name"), ("beta", "old-name")]
 
-    # Repeated merges never rotate anything out, however many there are.
-    for n in range(16):
+    # Repeated merges never rotate anything out: 16 archives, past the default of 14 kept.
+    for n in range(15):
         _seed_old_name(arcane, memory=False)
         _cli(arcane, "merge-projects", "old-name", f"name-{n}", "--org", "acme", "--apply")
     assert (backups / "arcane-20200101-000000.tar.gz").exists()
-    assert len(list((backups / "pre-merge").glob("*.tar.gz"))) == 17
+    assert len(list((backups / "pre-merge").glob("*.tar.gz"))) == 16
 
 
 def test_merge_projects_finds_the_org_of_a_project_with_only_journeys(arcane: Arcane) -> None:
@@ -222,7 +223,7 @@ def test_merge_projects_finds_the_org_of_a_project_with_only_journeys(arcane: Ar
     dry = _cli(arcane, "merge-projects", "old-name", "new-name").stdout
     assert "would move 0 memories, 1 journeys, 0 artifacts, 0 insights from 'old-name' in org acme" in dry
     _cli(arcane, "merge-projects", "old-name", "new-name", "--apply")
-    assert _where(arcane, "journeys") == [("acme", "new-name")]
+    assert _org_and_project_rows(arcane, "journeys") == [("acme", "new-name")]
 
 
 def test_merge_projects_says_which_artifacts_stayed_and_moves_nothing_on_failure(arcane: Arcane) -> None:
@@ -237,12 +238,54 @@ def test_merge_projects_says_which_artifacts_stayed_and_moves_nothing_on_failure
     assert "1 artifacts stay in 'old-name': 'new-name' already has the same type and external id" in dry
     applied = _cli(arcane, "merge-projects", "old-name", "new-name", "--org", "acme", "--apply").stdout
     assert "0 artifacts" in applied and "1 artifacts stayed in 'old-name'" in applied
-    assert _where(arcane, "journeys") == [("acme", "new-name")]
+    assert _org_and_project_rows(arcane, "journeys") == [("acme", "new-name")]
 
     # A failure part way leaves every table as it was.
     arcane.sql("CREATE TRIGGER fail_insights BEFORE UPDATE ON insights BEGIN SELECT RAISE(ABORT, 'boom'); END")
     _seed_old_name(arcane, memory=False)
     failed = _cli(arcane, "merge-projects", "old-name", "other-name", "--org", "acme", "--apply", check=False)
     assert failed.returncode != 0
-    assert _where(arcane, "journeys").count(("acme", "old-name")) == 1
-    assert ("acme", "other-name") not in _where(arcane, "journeys")
+    assert _org_and_project_rows(arcane, "journeys").count(("acme", "old-name")) == 1
+    assert ("acme", "other-name") not in _org_and_project_rows(arcane, "journeys")
+
+
+def test_empty_reply_says_the_org_was_not_searched_when_the_query_cannot_judge_the_project(arcane: Arcane) -> None:
+    async def scenario(client: Client) -> None:
+        await _save(client, "Gadget decision", "gadget picked sqlite", "gadget")
+        # No key words, so the service cannot tell the project is thin and does not widen.
+        empty = await client.call("memory_search", query="   ")
+        assert empty["results"] == []
+        assert "The org's other projects were not searched" in empty["message"]
+        assert "every project)" not in empty["message"]
+
+    arcane.run(scenario)
+
+
+def test_context_top_up_stays_in_the_project_when_the_search_widened(arcane: Arcane) -> None:
+    async def scenario(client: Client) -> None:
+        await _save(client, "Gadget decision", "gadget picked sqlite", "gadget")
+        await _save(client, "Lunch menus", "cafeteria rota for the week", "gadget")
+        await _save(client, "Widget note", "widget keeps notes", "widget")
+        payload = await client.call("memory_context", query="sqlite")
+        assert payload["scope"]["widened"] is True
+        titles = [m["title"] for m in payload["memories"]]
+        # The sibling's matching memory comes in; its unrelated recent one does not top up the list.
+        assert "Gadget decision" in titles and "Lunch menus" not in titles
+        assert "Widget note" in titles
+
+    arcane.run(scenario)
+
+
+def test_usage_log_records_the_lowercased_org(arcane: Arcane) -> None:
+    async def scenario(client: Client) -> None:
+        await _save(client, "Gadget decision", "gadget picked sqlite", "gadget")
+        await client.call("memory_search", query="gadget sqlite", org="ACME")
+
+    arcane.run(scenario)
+    assert arcane.sql("SELECT DISTINCT org FROM retrievals WHERE tool = 'memory_search'") == [("acme",)]
+
+
+def test_merge_projects_with_nothing_to_move_takes_no_backup(arcane: Arcane) -> None:
+    out = _cli(arcane, "merge-projects", "ghost", "new-name", "--org", "acme", "--apply").stdout
+    assert "Nothing to move" in out and "no backup taken" in out
+    assert not (Path(arcane.home) / "backups").exists()

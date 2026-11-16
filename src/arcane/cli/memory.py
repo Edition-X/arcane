@@ -11,7 +11,18 @@ import click
 from arcane.cli._utils import create_container
 from arcane.domain.enums import Category
 from arcane.domain.models import RawMemoryInput
-from arcane.domain.scope import READ_SCOPES, ReadScope, plan_read, resolve_write_scope
+from arcane.domain.scope import (
+    READ_SCOPES,
+    WIDEN_BELOW,
+    Reach,
+    ReadScope,
+    canonicalize_project,
+    plan_read,
+    resolve_write_scope,
+    slugify,
+    validate_org,
+)
+from arcane.services.backup import BackupError, create_backup
 
 
 @click.command()
@@ -101,7 +112,7 @@ def save(
     is_flag=True,
     default=False,
     help="Search from the current project: its own memories, then the org's other projects when it has "
-    "fewer than 3 matches. Without it, every memory is searched.",
+    f"fewer than {WIDEN_BELOW} matches. Without it, every memory is searched.",
 )
 @click.option("--source", default=None)
 @click.option(
@@ -116,11 +127,12 @@ def search(query: str, limit: int, project: bool, source: str | None, scope: Rea
     from arcane.services.memory import MemoryService
 
     plan = None
+    reach: Reach = "layers"
     with create_container() as container:
         if project or scope:
             resolved = resolve_write_scope(None, container.config)
             plan = plan_read(scope, resolved.org, resolved.project)
-            results = MemoryService(container).search(
+            results, reach = MemoryService(container).search_reach(
                 query,
                 limit=limit,
                 project=plan.project,
@@ -134,7 +146,9 @@ def search(query: str, limit: int, project: bool, source: str | None, scope: Rea
             results = MemoryService(container).search(query, limit=limit, source=source)
 
     if not results:
-        click.echo("No results found." + (f" {plan.nothing_found()}" if plan and plan.nothing_found() else ""))
+        click.echo(
+            "No results found." + (f" {message}" if plan and (message := plan.nothing_found(reach, cli=True)) else "")
+        )
         return
 
     click.echo(f"\n Results ({len(results)} found) ")
@@ -256,8 +270,6 @@ def merge_projects(src: str, dest: str, org: str | None, apply_: bool) -> None:
     called SRC, --org says which. Dry-run by default — pass --apply to commit,
     which first backs up the store.
     """
-    from arcane.domain.scope import canonicalize_project, slugify, validate_org
-
     with create_container() as container:
         dest_canon = canonicalize_project(dest, container.config.projects.aliases)
         if src == dest_canon:
@@ -273,12 +285,12 @@ def merge_projects(src: str, dest: str, org: str | None, apply_: bool) -> None:
             "artifacts": container.artifact_repo,
             "insights": container.insight_repo,
         }
-        held: dict[str, dict[str, int]] = {
+        org_counts_by_table: dict[str, dict[str, int]] = {
             "memories": {r["org"]: r["cnt"] for r in container.memory_repo.list_projects() if r["project"] == src}
         }
         for name in ("journeys", "artifacts", "insights"):
-            held[name] = repos[name].count_by_org(src)
-        owners = {org_name for counts in held.values() for org_name in counts}
+            org_counts_by_table[name] = repos[name].count_by_org(src)
+        owners = {org_name for table_counts in org_counts_by_table.values() for org_name in table_counts}
         if org is not None:
             try:
                 org = validate_org(slugify(org))
@@ -286,18 +298,22 @@ def merge_projects(src: str, dest: str, org: str | None, apply_: bool) -> None:
                 raise click.BadParameter(str(exc), param_hint="--org") from exc
             owners = {org}
         elif len(owners) > 1:
-            listed = ", ".join(
-                f"{name or '<no org>'} ({sum(counts.get(name, 0) for counts in held.values())})"
+            totals = {
+                name: sum(table_counts.get(name, 0) for table_counts in org_counts_by_table.values())
                 for name in sorted(owners)
-            )
+            }
+            listed = ", ".join(f"{name or '<no org>'} ({total})" for name, total in totals.items())
             raise click.UsageError(f"Project '{src}' exists in several orgs: {listed}. Pass --org to choose one.")
         source_org = next(iter(owners), None)
         where = f"'{src}'" + (f" in org {source_org or '<no org>'}" if source_org is not None else "")
-        counts = {name: held[name].get(source_org, 0) if source_org is not None else 0 for name in repos}
-        stays = repos["artifacts"].count_collisions(src, dest_canon, org=source_org) if source_org is not None else 0
+        counts = {name: org_counts_by_table[name].get(source_org, 0) if source_org is not None else 0 for name in repos}
+        colliding_artifacts = (
+            repos["artifacts"].count_collisions(src, dest_canon, org=source_org) if source_org is not None else 0
+        )
         collision_note = (
-            f" {stays} artifacts stay in '{src}': '{dest_canon}' already has the same type and external id."
-            if stays
+            f" {colliding_artifacts} artifacts stay in '{src}': '{dest_canon}' already has the same type "
+            "and external id."
+            if colliding_artifacts
             else ""
         )
 
@@ -308,11 +324,9 @@ def merge_projects(src: str, dest: str, org: str | None, apply_: bool) -> None:
                 "Pass --apply to commit."
             )
             return
-        if source_org is None:
-            click.echo(f"Moved 0 memories from {where} into '{dest_canon}'.")
+        if source_org is None or sum(counts.values()) == 0:
+            click.echo(f"Nothing to move from {where} into '{dest_canon}'; no backup taken.")
             return
-
-        from arcane.services.backup import BackupError, create_backup
 
         # The home of the store this command opened, not the default home, so the
         # backup is always of the database about to change. An in-memory store has none.
@@ -331,10 +345,10 @@ def merge_projects(src: str, dest: str, org: str | None, apply_: bool) -> None:
         with container.db.transaction():
             moved = {name: repo.reassign_project(src, dest_canon, org=source_org) for name, repo in repos.items()}
         listed = ", ".join(f"{n} {name}" for name, n in moved.items())
-        left = counts["artifacts"] - moved["artifacts"]
+        left_behind = counts["artifacts"] - moved["artifacts"]
         note = (
-            f" {left} artifacts stayed in '{src}': '{dest_canon}' already has the same type and external id."
-            if left
+            f" {left_behind} artifacts stayed in '{src}': '{dest_canon}' already has the same type and external id."
+            if left_behind
             else ""
         )
         click.echo(f"Moved {listed} from {where} into '{dest_canon}'.{note}")

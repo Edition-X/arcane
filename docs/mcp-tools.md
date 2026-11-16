@@ -66,7 +66,7 @@ Search memories using keyword and vector search. Call at session start and whene
 | `project` | string | no | Restrict search to a specific project. Worktree-style variants of the current repo (`<repo>-<suffix>`) collapse to `<repo>`. An empty string means no project, so a search without `scope` reads every project of the org. |
 | `org` | string | no | Org slug, lowercased before use. Omit to detect it from the git remote. |
 | `include_org` | boolean | no | Include org-level memories (default: true). `false` also turns automatic widening off. |
-| `include_global` | boolean | no | Include global memories (default: true). |
+| `include_global` | boolean | no | Include global memories (default: true). `scope="all"` ignores it and reads every memory. |
 | `scope` | string | no | `project`, `org` (org-level memories only), `global` or `all` (every project in every org). Omit for automatic widening, below. |
 | `detail` | string | no | Level of detail per hit — see below |
 
@@ -80,7 +80,7 @@ Search memories using keyword and vector search. Call at session start and whene
 
 **Widening.** When the current project has fewer than 3 memories matching the query's key words, a search without `scope` also reads the org's other projects, and ranks all hits by relevance; the project's own hits win only near-ties. It never crosses into another org on its own. `scope_match` says where a hit came from: `project`, `org`, `global`, `other_project` or `other_org`. An explicit `scope` of `project`, `org` or `global` never widens, and neither does `include_org=false`.
 
-When nothing matches and `scope` was not `all`, the reply is `{"results": [], "message": ...}`. The message says what was searched (the project, the org's projects, or global memories) and names `scope="all"` as the wider option; otherwise the reply is a list of hits.
+**Empty result.** A search that matches nothing and was not `scope="all"` replies `{"results": [], "message": "..."}` instead of `[]`. The message says what was searched (the project, the org's projects, or global memories, as the service settled on) and names `scope="all"` as the wider option, which is how an agent learns it exists. A search that finds something, and any `scope="all"` search, replies with a plain list of hits.
 
 Default is `standard`, which omits `why`/`impact` to keep results small — call `memory_details` for the full body of a specific hit. Use `full` if your integration already depends on the previous shape.
 

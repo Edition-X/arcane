@@ -11,7 +11,15 @@ from typing import Any
 from arcane.domain.enums import Category
 from arcane.domain.models import RawMemoryInput
 from arcane.domain.provenance import capture_provenance
-from arcane.domain.scope import GLOBAL_ORG, ReadScope, plan_read, resolve_scope, resolve_write_scope, slugify
+from arcane.domain.scope import (
+    GLOBAL_ORG,
+    WIDEN_BELOW,
+    ReadScope,
+    plan_read,
+    resolve_scope,
+    resolve_write_scope,
+    slugify,
+)
 from arcane.infra.db.ids import IdentifierResolutionError
 from arcane.services.memory import MemoryService
 
@@ -33,20 +41,20 @@ When filling `details`, prefer: Context, Options considered, Decision, Tradeoffs
 
 When this memory replaces an earlier one (a reversed decision, a newer fix), pass `supersedes` with the old memory's ID: search then marks the old one as replaced and ranks it below the new one, and context leaves it out."""
 
-SEARCH_DESCRIPTION = """Search memories using keyword and semantic search. Call this at session start and when the user's request relates to a topic with prior context.
+SEARCH_DESCRIPTION = f"""Search memories using keyword and semantic search. Call this at session start and when the user's request relates to a topic with prior context.
 
 Results omit why/impact by default; call memory_details for the full body. A result with `superseded_by` has been replaced by a newer memory; prefer the newer one.
 
-Every hit carries `project`, `org` and `scope_match` (project, org, global, other_project, other_org). When the current project matches fewer than 3 memories, the search also reads the org's other projects; those hits are `other_project`. `scope` overrides this: project, org (org-level memories only), global, or all (every project in every org). When nothing matches, the response says so and names scope='all'."""
+Every hit carries `project`, `org` and `scope_match` (project, org, global, other_project, other_org). When the current project matches fewer than {WIDEN_BELOW} memories, the search also reads the org's other projects; those hits are `other_project`. `scope` overrides this: project, org (org-level memories only), global, or all (every project in every org). When nothing matches, the response says so and names scope='all'."""
 
-CONTEXT_DESCRIPTION = """Get memory context for the current project. Call this at session start to load prior decisions, bugs, and context.
+CONTEXT_DESCRIPTION = f"""Get memory context for the current project. Call this at session start to load prior decisions, bugs, and context.
 
 Use the `detail` parameter to control token usage:
 - minimal: title + category only (~500 tokens for 10 memories)
 - standard: title, category, tags, date, what (default)
 - full: all fields including why and impact
 
-When the project has fewer than 3 matching memories, context also reads the org's other projects; the `scope` block then has `widened: true` and each memory has `scope_match`. `scope` overrides this: project, org (org-level memories only), global, or all (every project in every org)."""
+When the project has fewer than {WIDEN_BELOW} matching memories, context also reads the org's other projects; the `scope` block then has `widened: true` and each memory has `scope_match`. `scope` overrides this: project, org (org-level memories only), global, or all (every project in every org)."""
 
 
 def handle_save(
@@ -178,7 +186,7 @@ def _search_hit(r: dict, detail: str) -> dict:
     # Shown at every detail level: acting on a replaced decision is the costly mistake.
     replaced = {"superseded_by": r["superseded_by"]} if r.get("superseded_by") else {}
     # Shown at every detail level: a hit from another project must be told from a local one.
-    where = _where(r)
+    where = _location(r)
     if detail == "minimal":
         return {
             "id": r["id"],
@@ -220,7 +228,7 @@ def _search_hit(r: dict, detail: str) -> dict:
     }
 
 
-def _where(r: dict) -> dict:
+def _location(r: dict) -> dict:
     """Where a memory lives, so a hit from another project is told from a local one."""
     return {"project": r.get("project"), "org": r.get("org", ""), "scope_match": r.get("scope_match")}
 
@@ -246,7 +254,7 @@ def handle_search(
     )
     detail = _normalize_detail(detail)
 
-    results = svc.search(
+    results, reach = svc.search_reach(
         query,
         limit=_normalize_limit(limit, 5),
         project=plan.project,
@@ -257,7 +265,7 @@ def handle_search(
     )
 
     clean = [_search_hit(r, detail) for r in results]
-    if not clean and (message := plan.nothing_found()):
+    if not clean and (message := plan.nothing_found(reach)):
         return json.dumps({"results": [], "message": message})
     return json.dumps(clean)
 
@@ -313,7 +321,7 @@ def handle_context(
                     "id": r["id"],
                     "title": r.get("title", "Untitled"),
                     "category": r.get("category", ""),
-                    **_where(r),
+                    **_location(r),
                 }
             )
         elif detail == "full":
@@ -327,7 +335,7 @@ def handle_context(
                     "what": r.get("what", ""),
                     "why": r.get("why"),
                     "impact": r.get("impact"),
-                    **_where(r),
+                    **_location(r),
                 }
             )
         else:
@@ -340,7 +348,7 @@ def handle_context(
                     "tags": r.get("tags", []),  # already list[str] from repo
                     "date": date_display,
                     "what": r.get("what", ""),
-                    **_where(r),
+                    **_location(r),
                 }
             )
 

@@ -13,7 +13,7 @@ import logging
 import os
 from typing import Any
 
-from arcane.domain.scope import canonicalize_project, resolve_scope
+from arcane.domain.scope import canonicalize_project, resolve_scope, slugify
 from arcane.infra.redaction import redact
 from arcane.services.container import ServiceContainer
 
@@ -81,7 +81,7 @@ def record_tool_call(
             org, project = scope.get("org"), scope.get("project")
         else:
             resolved = resolve_scope(os.getcwd(), container.config)
-            org = arguments.get("org") or resolved.org
+            org = slugify(str(arguments.get("org") or "")) or resolved.org
             explicit = arguments.get("project")
             project = (
                 canonicalize_project(explicit, container.config.projects.aliases) if explicit else resolved.project
