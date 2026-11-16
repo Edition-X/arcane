@@ -3,7 +3,8 @@
 Each test gets its own ``ARCANE_HOME`` and a real git repo with an
 ``Acme/widget`` remote as the server's working directory, so scope resolves to
 org ``acme``, project ``widget``. No embedder is reachable, as in CI, so search
-is the FTS path and nothing depends on a local Ollama.
+is the FTS path and nothing depends on a local Ollama. Tests that need vectors take
+the ``ollama`` fixture, a ``FakeOllama`` serving hashed bag-of-words embeddings.
 """
 
 from __future__ import annotations
@@ -128,6 +129,7 @@ class Arcane:
 
 
 def make_arcane(tmp_path: Path) -> Arcane:
+    """Make a store and an ``Acme/widget`` repo with two commits under *tmp_path*."""
     home = tmp_path / "home"
     home.mkdir()
     (home / "config.yaml").write_text(
@@ -156,6 +158,7 @@ DIM = 32
 
 
 def _vector(text: str) -> list[float]:
+    """Hash each word into one of DIM buckets: words in common make vectors close, nothing more."""
     vec = [0.0] * DIM
     for word in text.lower().split():
         vec[int(hashlib.md5(word.encode()).hexdigest(), 16) % DIM] += 1.0
@@ -163,6 +166,8 @@ def _vector(text: str) -> list[float]:
 
 
 class FakeOllama:
+    """An Ollama embeddings endpoint on a free local port that records every prompt."""
+
     def __init__(self) -> None:
         self.prompts: list[str] = []
         self.delay = 0.0
@@ -203,12 +208,18 @@ class FakeOllama:
         self.server.server_close()
 
 
-@pytest.fixture
-def ollama(arcane: Arcane) -> Iterator[FakeOllama]:
-    fake = FakeOllama()
+def use_fake_ollama(arcane: Arcane, fake: FakeOllama) -> None:
+    """Point the store's embedder at *fake*."""
     (arcane.home / "config.yaml").write_text(
         f"context:\n  semantic: never\nembedding:\n  base_url: {fake.url}\n  autostart: false\n", encoding="utf-8"
     )
+
+
+@pytest.fixture
+def ollama(arcane: Arcane) -> Iterator[FakeOllama]:
+    """Serve the store's embeddings from a FakeOllama for the length of the test."""
+    fake = FakeOllama()
+    use_fake_ollama(arcane, fake)
     try:
         yield fake
     finally:

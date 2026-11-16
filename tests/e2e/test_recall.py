@@ -1,26 +1,29 @@
 """E2E recall: a synthetic corpus, asked the way people and agents ask, scored as counts against floors.
 
 The real ``arcane mcp`` server runs against a temp store, with only Ollama faked
-(hashed bag-of-words vectors). The corpus is invented: three orgs, six projects,
+(hashed bag-of-words vectors). The corpus is invented: three orgs, five projects,
 answer memories with look-alike distractors in the same project, in a sibling
 project and in another org, and memories a newer one replaced. Each case has one
 known answer; each measure is the number of cases that find it, held to a floor.
 
 Run with ``-rA`` to see the counts of a green run; a red run prints them in the
-assertion message. A floor sits at what the code scores today, less one case where
-the fake's crude vectors or a shared word could tip a single case either way.
+assertion message. Each floor is what the code scores today, less one case where a
+shared word could tip a single case either way; the comments on the floors say which.
+
+The fake's vectors carry no meaning, so this holds keyword search, ranking, widening,
+indexing and the call to the embedder. It cannot show a regression in how well real
+embeddings match a paraphrase.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 import pytest
 
-from tests.e2e.conftest import Client, FakeOllama, make_arcane
+from tests.e2e.conftest import Client, FakeOllama, make_arcane, use_fake_ollama
 
 ORG = "acme"
 HOME_PROJECT = "widget"  # the repo the server runs in
@@ -197,8 +200,13 @@ OTHER_ORG_MEMORIES = [
     ("gamma", "forge", "Invoices round half to even", "Forge rounds invoices", "same pattern"),
 ]
 
+# How far down the hits each answer may sit. Today every case below ranks first.
+TOP_IN_PROJECT = 3
+TOP_WIDENED = 5  # the org's other projects compete for the places
+TOP_EXACT = 3
+
 # Floors: the count the code scores today, less one case where a shared word or a hashed
-# vector could tip a single case. Today every case below ranks first except where noted.
+# vector could tip a single case.
 # Questions and keywords: 10/10 today. A look-alike in the same project or a sibling could
 # push one answer down a place or two without it being a regression, so one case of slack.
 FLOOR_IN_PROJECT_QUESTION = 9
@@ -211,12 +219,28 @@ FLOOR_SIBLING_PROJECT = 9
 # distractors share none of them, so there is no reason to lose a case: no slack.
 FLOOR_DETAILS_ONLY = 5
 FLOOR_BY_PATH = 5
-# A replaced memory is halved in score and each pair has one clear answer: no slack.
+# A replaced memory is halved in score and gets no whole-query bonus. With the question as
+# asked, both memories hold every key word, so the bonus alone puts the new one first: 4/4,
+# no slack. With a word added that neither holds, neither gets the bonus and only the halving
+# separates them: 3/4 today ("where do logs ship to today" still ranks the old one first).
 FLOOR_REPLACED_BELOW_NEW = 4
+FLOOR_REPLACED_BELOW_NEW_NO_BONUS = 3
+
+
+IN_PROJECT_QUESTION = f"in-project question, top {TOP_IN_PROJECT}"
+IN_PROJECT_KEYWORDS = f"in-project keywords, top {TOP_IN_PROJECT}"
+OTHER_PROJECT = f"other project (empty), top {TOP_WIDENED}"
+SIBLING_PROJECT = f"sibling project (populated), top {TOP_WIDENED}"
+DETAILS_ONLY = f"phrase only in details, top {TOP_EXACT}"
+BY_OWN_PATH = f"own related file path, top {TOP_EXACT}"
+REPLACED_BELOW_NEW = "replaced memory ranks below its replacement"
+REPLACED_BELOW_NEW_NO_BONUS = "replaced memory ranks below its replacement, no whole-query bonus"
 
 
 @dataclass
 class Scores:
+    """Each measure's (found, cases), and what the server saw while scoring."""
+
     counts: dict[str, tuple[int, int]]
     embedded: list[str]  # every prompt the fake Ollama received after seeding
     searches: list[str]  # every query issued, in order
@@ -280,37 +304,41 @@ async def _score(c: Client, ollama: FakeOllama) -> Scores:
         total = 0
         for query, title in cases:
             r = rank(await search(query, **scope), title)
-            total += r is not None and r <= within
+            if r is not None and r <= within:
+                total += 1
         return total
 
     questions = [(a.question, a.title) for a in ANSWERS]
     n = len(ANSWERS)
-    counts["in-project question, top 5"] = (await found(questions, 5), n)
-    counts["in-project keywords, top 5"] = (await found([(a.keywords, a.title) for a in ANSWERS], 5), n)
-    counts["other project (empty), top 10"] = (await found(questions, 10, project=EMPTY_PROJECT, org=ORG), n)
-    counts["sibling project (populated), top 10"] = (await found(questions, 10, project=SIBLING_PROJECT, org=ORG), n)
+    counts[IN_PROJECT_QUESTION] = (await found(questions, TOP_IN_PROJECT), n)
+    keywords = [(a.keywords, a.title) for a in ANSWERS]
+    counts[IN_PROJECT_KEYWORDS] = (await found(keywords, TOP_IN_PROJECT), n)
+    counts[OTHER_PROJECT] = (await found(questions, TOP_WIDENED, project=EMPTY_PROJECT, org=ORG), n)
+    counts[SIBLING_PROJECT] = (await found(questions, TOP_WIDENED, project=SIBLING_PROJECT, org=ORG), n)
     phrases = [(" ".join(details.split()[:5]), title) for title, _, details in DETAIL_ONLY]
-    counts["phrase only in details, top 3"] = (await found(phrases, 3), len(DETAIL_ONLY))
-    counts["own related file path, top 3"] = (
-        await found([(path, title) for title, path, _ in BY_PATH], 3),
-        len(BY_PATH),
-    )
-    below = 0
-    for old, new, words in REPLACED:
-        hits = await search(words)
-        new_rank, old_rank = rank(hits, new), rank(hits, old)
-        below += new_rank is not None and (old_rank is None or new_rank < old_rank)
-    counts["replaced memory ranks below its replacement"] = (below, len(REPLACED))
+    counts[DETAILS_ONLY] = (await found(phrases, TOP_EXACT), len(DETAIL_ONLY))
+    counts[BY_OWN_PATH] = (await found([(path, title) for title, path, _ in BY_PATH], TOP_EXACT), len(BY_PATH))
+
+    async def new_first(query_suffix: str) -> int:
+        """How many replacements rank above the memory they replaced."""
+        total = 0
+        for old, new, question in REPLACED:
+            hits = await search(question + query_suffix)
+            new_rank, old_rank = rank(hits, new), rank(hits, old)
+            if new_rank is not None and (old_rank is None or new_rank < old_rank):
+                total += 1
+        return total
+
+    counts[REPLACED_BELOW_NEW] = (await new_first(""), len(REPLACED))
+    counts[REPLACED_BELOW_NEW_NO_BONUS] = (await new_first(" today"), len(REPLACED))
     return Scores(counts, list(ollama.prompts), searches, leaks)
 
 
 @pytest.fixture(scope="module")
 def scores(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Scores]:
     ollama = FakeOllama()
-    arcane = make_arcane(Path(tmp_path_factory.mktemp("recall")))
-    (arcane.home / "config.yaml").write_text(
-        f"context:\n  semantic: never\nembedding:\n  base_url: {ollama.url}\n  autostart: false\n", encoding="utf-8"
-    )
+    arcane = make_arcane(tmp_path_factory.mktemp("recall"))
+    use_fake_ollama(arcane, ollama)
 
     async def scenario(c: Client) -> Scores:
         await _seed(c)
@@ -330,42 +358,48 @@ def _check(scores: Scores, measure: str, floor: int) -> None:
 
 
 def test_a_natural_question_finds_the_memory_in_its_own_project(scores: Scores) -> None:
-    _check(scores, "in-project question, top 5", FLOOR_IN_PROJECT_QUESTION)
+    _check(scores, IN_PROJECT_QUESTION, FLOOR_IN_PROJECT_QUESTION)
 
 
 def test_an_agents_keywords_find_the_memory_in_its_own_project(scores: Scores) -> None:
-    _check(scores, "in-project keywords, top 5", FLOOR_IN_PROJECT_KEYWORDS)
+    _check(scores, IN_PROJECT_KEYWORDS, FLOOR_IN_PROJECT_KEYWORDS)
 
 
 def test_the_question_asked_from_an_empty_project_widens_to_the_org(scores: Scores) -> None:
-    _check(scores, "other project (empty), top 10", FLOOR_OTHER_PROJECT)
+    _check(scores, OTHER_PROJECT, FLOOR_OTHER_PROJECT)
 
 
 def test_the_question_asked_from_a_populated_sibling_still_finds_it(scores: Scores) -> None:
-    _check(scores, "sibling project (populated), top 10", FLOOR_SIBLING_PROJECT)
+    _check(scores, SIBLING_PROJECT, FLOOR_SIBLING_PROJECT)
 
 
 def test_a_phrase_only_in_details_finds_the_memory(scores: Scores) -> None:
-    _check(scores, "phrase only in details, top 3", FLOOR_DETAILS_ONLY)
+    _check(scores, DETAILS_ONLY, FLOOR_DETAILS_ONLY)
 
 
 def test_a_memorys_own_file_path_finds_it(scores: Scores) -> None:
-    _check(scores, "own related file path, top 3", FLOOR_BY_PATH)
+    _check(scores, BY_OWN_PATH, FLOOR_BY_PATH)
 
 
 def test_a_replaced_memory_ranks_below_its_replacement(scores: Scores) -> None:
-    _check(scores, "replaced memory ranks below its replacement", FLOOR_REPLACED_BELOW_NEW)
+    _check(scores, REPLACED_BELOW_NEW, FLOOR_REPLACED_BELOW_NEW)
+
+
+def test_a_word_neither_memory_holds_still_ranks_the_replacement_first(scores: Scores) -> None:
+    _check(scores, REPLACED_BELOW_NEW_NO_BONUS, FLOOR_REPLACED_BELOW_NEW_NO_BONUS)
 
 
 def test_no_search_reaches_another_org(scores: Scores) -> None:
-    print(f"recall org leaks: {len(scores.org_leaks)}/{len(scores.searches)} searches (floor 0)")
-    assert scores.org_leaks == []
+    line = f"recall hits from another org: {len(scores.org_leaks)} in {len(scores.searches)} searches (must be 0)"
+    print(line)
+    assert not scores.org_leaks, "\n".join([line, *scores.org_leaks])
 
 
 def test_every_search_embeds_its_query_once(scores: Scores) -> None:
     # The embedding model runs for every query, however many keyword matches there are;
     # a search that skips it falls back on keywords alone.
     embedded = len(scores.embedded)
-    line = f"recall query embeds: {embedded} for {len(scores.searches)} searches"
+    searches = len(scores.searches)
+    line = f"recall query embeds: {embedded} for {searches} searches (must be equal)"
     print(line)
-    assert embedded == len(scores.searches), line
+    assert embedded == searches, line
