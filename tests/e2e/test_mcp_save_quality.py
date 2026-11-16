@@ -56,7 +56,7 @@ def test_a_why_that_only_says_who_asked_warns(arcane: Arcane) -> None:
         "first_name": "Lukas asked for the cache layer to be rewritten",
         "adverb": "User explicitly asked for the cache layer to be rewritten",
         "has_asked": "The user has asked for the cache layer to be rewritten",
-        "present": "User wants the cache layer rewritten",
+        "short": "User asked for it",
     }
     fine = {
         "reason": "User asked for the cache rewrite because the old path lost data on restart",
@@ -69,6 +69,7 @@ def test_a_why_that_only_says_who_asked_warns(arcane: Arcane) -> None:
         "colon": "User asked: the old path lost data on restart",
         "semicolon": "User asked for the rewrite; the old path lost data on restart",
         "dash": "User asked for the rewrite - the old path lost data on restart",
+        "wants_goal": "User wants to eliminate drift from dual protection systems",
         "no_who": WHY,
         "name_reason": "Lukas asked for the rewrite because the old path lost data on restart",
         "name_other_verb": "Lukas wanted the cache layer rewritten",
