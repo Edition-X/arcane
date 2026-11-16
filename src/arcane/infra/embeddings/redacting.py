@@ -37,7 +37,10 @@ class RedactingEmbedding(EmbeddingProvider):
             raise RuntimeError("embedding provider failed recently")
         try:
             return self._provider.embed_query(redact(text, self._extra_patterns), timeout)
-        except (EmbeddingsDisabled, TextTooLong):  # the provider is fine; the next query may fit
+        except EmbeddingsDisabled:
+            raise
+        except TextTooLong:  # the provider is fine and the next query may fit, so no backoff
+            logger.warning("Query too long to embed — results are keyword matches only.")
             raise
         except Exception as exc:
             self._query_retry_at = time.monotonic() + QUERY_BACKOFF_SECONDS
