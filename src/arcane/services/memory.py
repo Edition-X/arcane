@@ -662,7 +662,7 @@ class MemoryService:
         return ranked, reach
 
     def _effective_reach(
-        self, reach: Reach, query: str | None, org: str | None, project: str | None, source: str | None = None
+        self, reach: Reach, query: str | None, org: str | None, project: str | None, source: str | None
     ) -> Reach:
         """Settle ``auto`` into ``org`` or ``layers``; any other reach stands.
 
