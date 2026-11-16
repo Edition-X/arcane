@@ -526,15 +526,19 @@ class MemoryRepository:
         only that source's memories count, as the search itself will filter them.
         """
         scope_sql, scope_params = self._scope_where(org, project, include_org=False, include_global=False)
-        source_sql = " AND m.source = ?" if source else ""
+        where_clauses = [MemoryRepository._not_expired_clause(), scope_sql]
+        params: list[Any] = [fts_query, *scope_params]
+        if source:
+            where_clauses.append("m.source = ?")
+            params.append(source)
         row = self.db.fetchone(
             f"""
             SELECT COUNT(*) AS cnt
             FROM memories_fts fts
             JOIN memories m ON m.rowid = fts.rowid
-            WHERE fts.memories_fts MATCH ? AND {MemoryRepository._not_expired_clause()} AND {scope_sql}{source_sql}
+            WHERE fts.memories_fts MATCH ? AND {" AND ".join(where_clauses)}
             """,
-            [fts_query, *scope_params, *([source] if source else [])],
+            params,
         )
         return int(row["cnt"]) if row else 0
 
