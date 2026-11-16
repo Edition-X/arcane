@@ -219,9 +219,9 @@ def test_live_semantic_scores_preserve_l2_order_and_strength(
         vector = struct.unpack(f"{len(packed) // 4}f", packed)
         distance = math.sqrt(sum((a - b) ** 2 for a, b in zip(query, vector, strict=True)))
         expected[memory_id] = 1 / (1 + distance)
-    best = max(expected.values())
+    best, worst = max(expected.values()), min(expected.values())
     assert [r["id"] for r in results] == sorted(expected, key=lambda key: expected[key], reverse=True)
     assert len({r["score"] for r in results}) > 1
     for row in results:
         # The MCP response intentionally rounds displayed scores to 2 places.
-        assert row["score"] == round(0.7 * expected[row["id"]] / best + 0.15, 2)
+        assert row["score"] == round(0.7 * (expected[row["id"]] - worst) / (best - worst) + 0.15, 2)

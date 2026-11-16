@@ -266,3 +266,25 @@ def test_details_only_matches_count_as_local_so_the_search_does_not_widen(arcane
     # Three local memories hold the words in their details, so the project is not thin and the sibling stays out.
     assert {hit["project"] for hit in hits} == {"widget"}
     assert len(hits) == 3
+
+
+def test_a_widened_search_keeps_a_local_keyword_hit_in_the_top_results(arcane: Arcane, ollama: FakeOllama) -> None:
+    async def scenario(c: Client) -> list[dict[str, Any]]:
+        # The phrase sits in a long details body, so the memory's vector is far from the query.
+        await c.call(
+            "memory_save",
+            title="Rollout plan",
+            what="Staged the deploy",
+            details="Options considered: quokka lattice. " + "filler text about other things " * 60,
+            project="widget",
+            org="acme",
+        )
+        # Sibling notes share no word with the query, at a spread of distances from it.
+        for n in range(1, 21):
+            await c.call("memory_save", title=f"Sibling {n}", what="item " * n, project="gadget", org="acme")
+        return await c.call("memory_search", query="quokka lattice", limit=5, project="widget", org="acme")
+
+    hits = arcane.run(scenario)
+    # One local match, so the search widens to the org. The exact keyword hit in
+    # the project must not fall below vector-only neighbours from another project.
+    assert "Rollout plan" in _titles(hits)

@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 SCOPE_BONUS = {3: 0.15, 2: 0.05, 1: 0.0, 0: 0.0}
 # After widening past the project, relevance decides and the local bonus only
 # breaks near-ties: a strong hit from another project beats a weak local one.
+# A local memory that matched the query's words keeps the full project bonus:
+# the project widened because such matches are few, so each is strong evidence.
 WIDENED_SCOPE_BONUS = {3: 0.03, 2: 0.02, 1: 0.0, 0: 0.0}
 
 
@@ -40,6 +42,16 @@ def _normalise(results: list[dict[str, Any]]) -> None:
         r["score"] = r["score"] / best if best > 0 else 0.0
 
 
+def _normalise_range(results: list[dict[str, Any]]) -> None:
+    """Scale scores in place onto 0..1 between their minimum and maximum; all 1.0 when they are equal."""
+    if not results:
+        return
+    low = min(r["score"] for r in results)
+    high = max(r["score"] for r in results)
+    for r in results:
+        r["score"] = (r["score"] - low) / (high - low) if high > low else 1.0
+
+
 def merge_results(
     fts_results: list[dict[str, Any]],
     vec_results: list[dict[str, Any]],
@@ -47,15 +59,17 @@ def merge_results(
     vec_weight: float = 0.7,
     limit: int = 5,
 ) -> list[dict[str, Any]]:
-    """Normalise positive per-backend scores by their maximum, then weight.
+    """Normalise each backend's scores, then weight.
 
-    Vector scores are reciprocal L2 distance, ``1 / (1 + distance)``, rather
-    than cosine similarity. Maximum normalisation preserves their ordering
-    and relative strengths before combining them with positive FTS ranks.
+    FTS ranks are scaled by their maximum. Vector scores are reciprocal L2
+    distance, ``1 / (1 + distance)``, which sit close together for every
+    neighbour, so they are spread over their range instead: scaled by the
+    maximum, a neighbour sharing no word with the query scored near 1.0 and
+    outranked an exact keyword hit.
     """
     _normalise(fts_results)
 
-    _normalise(vec_results)
+    _normalise_range(vec_results)
 
     scores: dict[str, dict[str, Any]] = {}
     for r in fts_results:
@@ -126,6 +140,11 @@ def tiered_search(
             )
             results = merge_results(fts_results, vec_results, limit=limit * 2)
 
+    if org is not None and reach != "layers":
+        keyword_ids = {r["id"] for r in fts_results}
+        for r in results:
+            if r.get("scope_rank") == 3 and r["id"] in keyword_ids:
+                r["score"] += SCOPE_BONUS[3] - WIDENED_SCOPE_BONUS[3]
     if org is not None:
         results = apply_scope_bonus(results, SCOPE_BONUS if reach == "layers" else WIDENED_SCOPE_BONUS)
     return results[:limit]
