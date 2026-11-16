@@ -385,7 +385,7 @@ class MemoryService:
         raw: RawMemoryInput,
         today: str,
         warnings: list[str],
-        provenance: Provenance | None = None,
+        provenance: Provenance,
     ) -> MemorySaveResult:
         """Fold a same-titled save into *existing* instead of creating a duplicate."""
         existing_id = existing["id"]
@@ -408,7 +408,7 @@ class MemoryService:
                     impact=raw.impact,
                     tags=merged_tags,
                     details_append=details_append,
-                    provenance=provenance.model_dump() if provenance else None,
+                    provenance=provenance.model_dump(),
                 )
                 if embedding is not None:
                     self._store_embedding(current["rowid"], embedding)

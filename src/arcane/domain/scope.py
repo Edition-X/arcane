@@ -148,7 +148,7 @@ def _git(cwd: str, *args: str) -> str | None:
             check=False,
         )
     except subprocess.TimeoutExpired:
-        logger.warning("git %s timed out in %s", args[0], cwd)
+        logger.warning("Git %s timed out after 2 s in %s.", args[0], cwd)
         return None
     except (OSError, subprocess.SubprocessError):
         return None

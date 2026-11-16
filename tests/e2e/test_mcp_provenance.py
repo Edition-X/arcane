@@ -41,7 +41,7 @@ def test_dirty_tree_and_detached_head(arcane: Arcane) -> None:
 def test_save_outside_a_git_repo_has_empty_fields(arcane: Arcane, tmp_path: Path) -> None:
     plain = tmp_path / "plain"
     plain.mkdir()
-    saved = arcane.run(lambda c: _save(c, "No repo", project="notes"), cwd=plain, extra_env=_NO_SESSION)
+    saved = arcane.run(lambda c: _save(c, "No repo"), cwd=plain, extra_env=_NO_SESSION)
     assert _row(arcane, saved["id"]) == (None, None, None, None, None)
 
 
