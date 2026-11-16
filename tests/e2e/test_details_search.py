@@ -295,12 +295,12 @@ def test_a_widened_search_keeps_a_local_keyword_hit_in_the_top_results(arcane: A
         # Sibling notes share no word with the query, at a spread of distances from it.
         for n in range(1, 21):
             await c.call("memory_save", title=f"Sibling {n}", what="item " * n, project="gadget", org="acme")
-        return await c.call("memory_search", query="quokka lattice", limit=5, project="widget", org="acme")
+        return await c.call("memory_search", query="quokka lattice", limit=3, project="widget", org="acme")
 
     hits = arcane.run(scenario)
     # One local match, so the search widens to the org. The exact keyword hit in
-    # the project must not fall below vector-only neighbours from another project.
-    assert "Rollout plan" in _titles(hits)
+    # the project must lead the vector-only neighbours from another project.
+    assert _titles(hits)[0] == "Rollout plan"
 
 
 def test_an_exact_keyword_hit_outranks_vector_only_neighbours(arcane: Arcane, ollama: FakeOllama) -> None:
