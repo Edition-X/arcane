@@ -35,12 +35,18 @@ class FakeOllama:
     def __init__(self) -> None:
         self.prompts: list[str] = []
         self.delay = 0.0
+        self.max_chars: int | None = None  # longer prompts get Ollama's context-length error
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self) -> None:
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
                 outer.prompts.append(body["prompt"])
+                if outer.max_chars is not None and len(body["prompt"]) > outer.max_chars:
+                    self.send_response(500)
+                    self.end_headers()
+                    self.wfile.write(b'{"error":"the input length exceeds the context length"}')
+                    return
                 if outer.delay:
                     time.sleep(outer.delay)
                 payload = json.dumps({"embedding": _vector(body["prompt"])}).encode()
@@ -228,3 +234,15 @@ def test_reindex_embeds_details_up_to_the_cut(arcane: Arcane, ollama: FakeOllama
     assert "early-marker" in by_title["Long"]
     assert "late-marker" not in by_title["Long"]
     assert by_title["No"].split() == ["No", "details", "Plain"]
+
+
+def test_a_text_too_long_for_the_model_is_cut_and_still_embedded(arcane: Arcane, ollama: FakeOllama) -> None:
+    ollama.max_chars = 500
+
+    async def scenario(c: Client) -> list[dict[str, Any]]:
+        await c.call("memory_save", title="Long what", what="word " * 400)
+        return await c.call("memory_search", query="word")
+
+    assert _titles(arcane.run(scenario)) == ["Long what"]
+    assert len(ollama.prompts) > 2  # the save was refused and retried, then the search embedded its query
+    assert arcane.sql("SELECT count(*) FROM memories_vec_rowids") == [(1,)]

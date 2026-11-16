@@ -30,6 +30,9 @@ DEFAULT_PORT = 11434
 # Concurrent requests per embed_batch call. Ollama serves embeddings in
 # parallel; 64 texts take about half as long at 4 as one at a time.
 BATCH_CONCURRENCY = 4
+# Attempts, and the share of the text kept on each, when Ollama rejects a prompt as too long.
+CONTEXT_RETRIES = 5
+CONTEXT_SHRINK = 0.6
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
 _MACOS_APP = "/Applications/Ollama.app"
 _BINARY_FALLBACKS = (
@@ -182,13 +185,22 @@ class OllamaEmbedding(EmbeddingProvider):
         self.autostart = autostart
 
     def _embed(self, text: str, timeout: float | None = None) -> list[float]:
-        resp = _http().post(
-            f"{self.base_url}/api/embeddings",
-            json={"model": self.model, "prompt": text},
-            timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
-        )
-        resp.raise_for_status()
-        return list(resp.json()["embedding"])
+        # The model reads 2048 tokens, which is 2300 characters of dense text
+        # (paths, code) and 10000 of prose. When Ollama says the text is too
+        # long, keep the front, which holds the title and the fields that name
+        # the memory, and ask again with less.
+        for _ in range(CONTEXT_RETRIES):
+            resp = _http().post(
+                f"{self.base_url}/api/embeddings",
+                json={"model": self.model, "prompt": text},
+                timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
+            )
+            if resp.status_code == 500 and "exceeds the context length" in resp.text:
+                text = text[: int(len(text) * CONTEXT_SHRINK)]
+                continue
+            resp.raise_for_status()
+            return list(resp.json()["embedding"])
+        raise ValueError("Text does not fit the embedding model's context, even when cut short.")
 
     def embed_query(self, text: str, timeout: float = QUERY_TIMEOUT_SECONDS) -> list[float]:
         # No autostart: a search must not wait for Ollama to boot.

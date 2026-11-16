@@ -87,6 +87,8 @@ arcane reindex
 
 This is safe to interrupt and re-run — the index is rebuilt atomically.
 
+Run it after upgrading to the release that searches details, too. The keyword index picks details up by itself the first time the store opens (a one-off rebuild that does nothing on later starts). The vectors do not: `arcane reindex` re-embeds every memory with the first 2000 characters of its details. Until then search still works, but a memory's vector reflects its title, what, why, impact and tags only.
+
 ---
 
 ## Context retrieval

@@ -41,10 +41,11 @@ class DimensionMismatchError(Exception):
         )
 
 
-# How much of a details body goes into the embedding. The model reads about
-# 2000 tokens; the cut keeps the fields that name the memory (title, what,
-# why) ahead of the body, and stops a long body from pulling the vector away from them.
-EMBED_DETAILS_CHARS = 6000
+# How much of a details body goes into the embedding. The model reads 2048
+# tokens, and a long body pulls the vector away from the title and why that
+# name the memory. On the live store a 6000-character cut lost one of 25
+# in-project questions from the top 5; 2000 matched the baseline.
+EMBED_DETAILS_CHARS = 2000
 
 
 def _embedding_text(

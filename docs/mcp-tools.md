@@ -69,6 +69,10 @@ Search memories using keyword and vector search. Call at session start and whene
 
 Default is `standard`, which omits `why`/`impact` to keep results small — call `memory_details` for the full body of a specific hit. Use `full` if your integration already depends on the previous shape.
 
+Search reads the whole memory, `memory_details` body included: words that appear only in a memory's details find it. A match in the title, `what`, `why`, `impact` or tags outranks the same match in details (the details column has a quarter of their weight in the keyword ranking).
+
+Every search runs both backends. The keyword search always runs; the query is also embedded once and its nearest vectors are merged with the keyword hits by score. Embedding a query takes about 10 ms with a local Ollama. If the provider is `none`, down, or slower than 2 seconds, the search returns keyword results and no error, and skips the provider for the next 30 seconds so a hung server costs one wait, not one per search.
+
 At every level, a memory that a newer one replaced carries `superseded_by` (`id`, `title`, `date`) and its score is halved, so it stays findable as history but ranks below current answers.
 
 ---
