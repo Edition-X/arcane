@@ -127,8 +127,7 @@ class Arcane:
             conn.close()
 
 
-@pytest.fixture
-def arcane(tmp_path: Path) -> Arcane:
+def make_arcane(tmp_path: Path) -> Arcane:
     home = tmp_path / "home"
     home.mkdir()
     (home / "config.yaml").write_text(
@@ -146,6 +145,11 @@ def arcane(tmp_path: Path) -> Arcane:
         git(repo, "add", ".")
         git(repo, "commit", "-q", "-m", f"feat: change {n}")
     return Arcane(home=home, repo=repo)
+
+
+@pytest.fixture
+def arcane(tmp_path: Path) -> Arcane:
+    return make_arcane(tmp_path)
 
 
 DIM = 32
