@@ -184,11 +184,14 @@ def test_a_query_too_long_for_the_model_is_embedded_once_not_retried(arcane: Arc
         await c.call("memory_save", title="Cache layer", what="Added a cache")
         ollama.max_chars = 10
         ollama.prompts.clear()
-        return await c.call("memory_search", query="cache layer sessions and the queue behind them")
+        await c.call("memory_search", query="cache layer sessions and the queue behind them")
+        assert len(ollama.prompts) == 1  # a search never waits through the save path's cut-and-retry loop
+        ollama.prompts.clear()
+        return await c.call("memory_search", query="cache")
 
     arcane.run(scenario)
-    # A search never waits through the save path's cut-and-retry loop.
-    assert len(ollama.prompts) == 1
+    # One query too long for the model is no reason to stop embedding the next one.
+    assert ollama.prompts == ["cache"]
 
 
 def test_search_with_the_provider_down_returns_keyword_results(arcane: Arcane, ollama: FakeOllama) -> None:
@@ -354,3 +357,47 @@ def test_a_keyword_only_cli_search_puts_a_whole_query_match_first(arcane: Arcane
     )
     # Only "Notes" holds both words. Three other memories out-score it on keywords alone.
     assert "[1] Notes" in result.stdout
+
+
+def _cli_search(arcane: Arcane, query: str) -> str:
+    """The first hit of a keyword-only ``arcane search`` with no org (the provider is unreachable)."""
+    result = subprocess.run(
+        [ARCANE, "search", query, "--limit", "1"],
+        cwd=arcane.repo,
+        env=arcane.env("core"),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout
+
+
+def test_a_key_word_must_match_whole_to_earn_the_bonus(arcane: Arcane) -> None:
+    async def seed(c: Client) -> None:
+        for n in range(8):  # enough that the query words are not in every memory and carry weight
+            await c.call("memory_save", title=f"Other {n}", what="Something else entirely")
+        for n in range(3):
+            await c.call("memory_save", title=f"Circuit {n}", what="Circuit runner city", why="runner", impact="runner")
+        await c.call("memory_save", title="Pipeline", what="The ci job uses a runner, with " + "filler words " * 40)
+
+    arcane.run(seed)
+    # "ci" is a prefix of "circuit" and "city", but only "Pipeline" holds the word itself.
+    assert "[1] Pipeline" in _cli_search(arcane, "ci runner")
+
+
+def test_a_replaced_memory_gets_no_bonus_over_its_replacement(arcane: Arcane, ollama: FakeOllama) -> None:
+    async def scenario(c: Client) -> list[dict[str, Any]]:
+        for n in range(8):
+            await c.call("memory_save", title=f"Other {n}", what="Something else entirely")
+        old = await c.call("memory_save", title="Quokka lattice plan", what="Quokka lattice for the rollout")
+        await c.call(
+            "memory_save",
+            title="Lattice plan",
+            what="Lattice approach for the deploy, staged by region",
+            supersedes=old["id"],
+        )
+        return await c.call("memory_search", query="quokka lattice", limit=10)
+
+    titles = _titles(arcane.run(scenario))
+    # The old memory holds both words, but a replaced memory ranks below the one that replaced it.
+    assert titles.index("Lattice plan") < titles.index("Quokka lattice plan")

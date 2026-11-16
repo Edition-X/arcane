@@ -25,7 +25,8 @@ VEC_WEIGHT = 0.7
 # bonus has to exceed that to lead it. It also covers the widest scope gap
 # (the 0.15 project bonus), so a vector-only neighbour from a nearer layer
 # cannot pass it either. Every reach gets it: a keyword hit that names the
-# whole query is strong evidence in the project or across the org.
+# whole query is strong evidence in the project or across the org. It does
+# not always lead a row that misses a word but is strong on both scores.
 STRICT_MATCH_BONUS = VEC_WEIGHT + SCOPE_BONUS[3]
 
 
@@ -82,7 +83,7 @@ def merge_results(
     neighbour, so they are spread over their range instead: scaled by the
     maximum, a neighbour sharing no word with the query scored near 1.0 and
     outranked an exact keyword hit. Rows in *strict_ids*, which match every key
-    word of the query, then get ``STRICT_MATCH_BONUS`` so they lead the rest.
+    word of the query, then get ``STRICT_MATCH_BONUS`` so they lead every vector-only row.
     """
     _normalise(fts_results)
 
@@ -137,17 +138,8 @@ def tiered_search(
     )
 
     _normalise(fts_results)
-    strict_ids = repo.strict_match_ids(
-        query,
-        project=project,
-        source=source,
-        org=org,
-        include_org=include_org,
-        include_global=include_global,
-        reach=reach,
-    )
 
-    results: list[dict[str, Any]] | None = None
+    vec_results: list[dict[str, Any]] | None = None
     if embedding_provider is not None:
         try:
             query_vec = embedding_provider.embed_query(query)
@@ -166,9 +158,12 @@ def tiered_search(
                 include_global=include_global,
                 reach=reach,
             )
-            results = merge_results(fts_results, vec_results, limit=limit * 2, strict_ids=strict_ids)
 
-    if results is None:
+    candidate_ids = {r["id"] for r in fts_results} | {r["id"] for r in vec_results or []}
+    strict_ids = repo.strict_match_ids(query, candidate_ids)
+    if vec_results is not None:
+        results = merge_results(fts_results, vec_results, limit=limit * 2, strict_ids=strict_ids)
+    else:
         results = fts_results
         apply_strict_bonus(results, strict_ids)
         results.sort(key=lambda x: x["score"], reverse=True)

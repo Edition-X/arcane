@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from arcane.infra.embeddings.base import QUERY_TIMEOUT_SECONDS, EmbeddingProvider
+from arcane.infra.embeddings.base import QUERY_TIMEOUT_SECONDS, EmbeddingProvider, TextTooLong
 
 logger = logging.getLogger(__name__)
 
@@ -200,7 +200,7 @@ class OllamaEmbedding(EmbeddingProvider):
                 continue
             resp.raise_for_status()
             return list(resp.json()["embedding"])
-        raise ValueError("Text does not fit the embedding model's context, even when cut short.")
+        raise TextTooLong("Text does not fit the embedding model's context, even when cut short.")
 
     def embed_query(self, text: str, timeout: float = QUERY_TIMEOUT_SECONDS) -> list[float]:
         # No autostart: a search must not wait for Ollama to boot. One attempt,

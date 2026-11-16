@@ -27,6 +27,10 @@ class EmbeddingsDisabled(RuntimeError):
     """Raised by the ``none`` provider: the store runs on keyword search only."""
 
 
+class TextTooLong(ValueError):
+    """The text does not fit the embedding model's context: a fault of this text, not of the provider."""
+
+
 class NoEmbedding(EmbeddingProvider):
     """``embedding.provider: none``. Saves skip the vector and search uses FTS5 only."""
 

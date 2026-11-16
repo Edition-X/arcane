@@ -438,58 +438,31 @@ class MemoryRepository:
         self.db.commit()
         return int(cursor.rowcount)
 
-    def _fts_filters(
-        self,
-        project: str | None,
-        source: str | None,
-        org: str | None,
-        include_org: bool,
-        include_global: bool,
-        reach: Reach,
-    ) -> tuple[str, list[Any]]:
-        """The ``AND ...`` filters an FTS search applies to ``memories m``: live, in scope, of *source*."""
-        clauses: list[str] = [MemoryRepository._not_expired_clause()]
-        params: list[Any] = []
-        if org is not None:
-            scope_sql, scope_params = self._scope_where(org, project, include_org, include_global, reach=reach)
-            clauses.append(scope_sql)
-            params += scope_params
-        elif project:
-            clauses.append("m.project = ?")
-            params.append(project)
-        if source:
-            clauses.append("m.source = ?")
-            params.append(source)
-        return "AND " + " AND ".join(clauses), params
+    def strict_match_ids(self, query: str, candidate_ids: set[str]) -> set[str]:
+        """The ids among *candidate_ids* that hold every key word of *query* and no newer memory replaces.
 
-    def strict_match_ids(
-        self,
-        query: str,
-        project: str | None = None,
-        source: str | None = None,
-        org: str | None = None,
-        include_org: bool = True,
-        include_global: bool = True,
-        reach: Reach = "layers",
-    ) -> set[str]:
-        """Ids of the memories that match every key word of *query*, among the rows ``fts_search`` can return.
-
-        Takes the same filters as ``fts_search`` but ``all_key_terms_query``, not the
-        loose ``prefix_or_query``, where one stop word is enough. ``key_terms_query``
-        would also do for a short query, but for a long one it lets a word go
-        missing, and a bonus for such near-matches buried the right answer.
+        Uses ``all_key_terms_query``, not the loose ``prefix_or_query``, where one
+        stop word is enough. ``key_terms_query`` would also do for a short query,
+        but for a long one it lets a word go missing, and a bonus for such
+        near-matches buried the right answer. A replaced memory gets no bonus, so
+        it keeps ranking below current answers.
         """
         fts_query = all_key_terms_query(query)
-        if fts_query is None:
+        if fts_query is None or not candidate_ids:
             return set()
-        where_clause, params = self._fts_filters(project, source, org, include_org, include_global, reach)
+        ids = sorted(candidate_ids)
         rows = self.db.fetchall(
             f"""
             SELECT m.id FROM memories_fts
             JOIN memories m ON m.rowid = memories_fts.rowid
-            WHERE memories_fts MATCH ? {where_clause}
+            WHERE memories_fts MATCH ?
+              AND m.id IN ({",".join("?" * len(ids))})
+              AND NOT EXISTS (
+                  SELECT 1 FROM relationships r
+                  WHERE r.relation = 'supersedes' AND r.target_type = 'memory' AND r.target_id = m.id
+              )
             """,
-            [fts_query, *params],
+            [fts_query, *ids],
         )
         return {r["id"] for r in rows}
 
@@ -508,8 +481,23 @@ class MemoryRepository:
         if fts_query is None:
             return []
 
-        where_clause, params = self._fts_filters(project, source, org, include_org, include_global, reach)
-        params = [fts_query, *params, limit]
+        where_clauses: list[str] = [MemoryRepository._not_expired_clause()]
+        params: list[Any] = [fts_query]
+
+        if org is not None:
+            scope_sql, scope_params = self._scope_where(org, project, include_org, include_global, reach=reach)
+            where_clauses.append(scope_sql)
+            params += scope_params
+        elif project:
+            where_clauses.append("m.project = ?")
+            params.append(project)
+        if source:
+            where_clauses.append("m.source = ?")
+            params.append(source)
+
+        where_clause = "AND " + " AND ".join(where_clauses)
+
+        params.append(limit)
 
         rows = self.db.fetchall(
             f"""

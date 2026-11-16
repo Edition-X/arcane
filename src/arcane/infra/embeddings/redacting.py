@@ -10,6 +10,7 @@ from arcane.infra.embeddings.base import (
     QUERY_TIMEOUT_SECONDS,
     EmbeddingProvider,
     EmbeddingsDisabled,
+    TextTooLong,
 )
 from arcane.infra.redaction import redact
 
@@ -36,7 +37,7 @@ class RedactingEmbedding(EmbeddingProvider):
             raise RuntimeError("embedding provider failed recently")
         try:
             return self._provider.embed_query(redact(text, self._extra_patterns), timeout)
-        except EmbeddingsDisabled:
+        except (EmbeddingsDisabled, TextTooLong):  # the provider is fine; the next query may fit
             raise
         except Exception as exc:
             self._query_retry_at = time.monotonic() + QUERY_BACKOFF_SECONDS
