@@ -18,17 +18,19 @@ Save a memory for future sessions. Call this before ending any session where you
 |---|---|---|---|
 | `title` | string | yes | Short title, max 60 characters |
 | `what` | string | yes | 1–2 sentences — the essence of the memory |
-| `why` | string | no | Reasoning behind the decision or action |
+| `why` | string | no | The reasoning: why this was chosen. "User asked for X" says who, not why |
 | `impact` | string | no | What changed or what it affects |
 | `tags` | array of strings | no | 2–5 relevant tags |
 | `category` | string | no | One of: `decision`, `bug`, `pattern`, `learning`, `context`, `poc`, `milestone` |
 | `related_files` | array of strings | no | File paths relevant to this memory |
-| `details` | string | no | Full context — options considered, tradeoffs, follow-up |
+| `details` | string | no | Full context — options considered, tradeoffs, follow-up. A decision's alternatives go here |
 | `project` | string | no | Project name (defaults to current directory name). Worktree-style variants of the current repo (`<repo>-<suffix>`) collapse to `<repo>`. |
 | `journey_id` | string | no | Journey ID or unambiguous prefix to link this memory to. An unknown or ambiguous ID adds a `journey_not_found`/`journey_not_linked` warning and saves the memory unlinked. |
 | `supersedes` | string | no | ID or unambiguous prefix of an earlier memory this one replaces (a reversed decision, a newer fix). Search then marks the old one `superseded_by` and ranks it lower; context leaves it out. A bad reference adds a `supersedes_not_found`/`supersedes_not_linked` warning and saves unlinked. |
 | `ttl_days` | integer | no | Days until this memory expires from search results. Omit for permanent memories. |
 | `confidence` | number | no | Confidence in accuracy 0.0–1.0. Omit if not applicable. |
+
+A `decision` that records too little reasoning saves anyway and adds a warning for each gap: `no_why` (empty why), `why_only_says_who_asked` (why names who asked, no reason after it), `no_options` (details names no alternatives). A `decision` or `bug` with no details gets `no_details`, and a decision then gets no `no_options`. Each warning names `memory_update` as the fix.
 
 **Categories:**
 
@@ -43,6 +45,13 @@ Save a memory for future sessions. Call this before ending any session where you
 | `milestone` | Significant work shipped |
 
 **In `details`, prefer this structure:** Context, Options considered, Decision, Tradeoffs, Follow-up.
+
+**Recorded automatically.** The server stores where each save came from, with no parameters from you: `commit_sha`, `branch` and `dirty` (tracked files differ from HEAD; untracked files do not count) of the working directory, and `session_id` and `thread_id` of the agent session. Limits:
+
+- The commit, branch and dirty flag are stored only when the memory belongs to the working directory's own project. A save with another `project`, or with `scope` `org` or `global`, keeps the session and thread ids and no commit.
+- A folder that is not a git repo stores no commit, branch or dirty flag. A detached HEAD stores the commit and no branch.
+- `session_id` comes from the call's `_meta` (Codex) or from `CLAUDE_CODE_SESSION_ID` (Claude Code). The environment is read when the server starts, so after `/clear` or a resume in Claude Code it is still the session that started the server. `thread_id` is `T3CODE_THREAD_ID` when T3 Code set it, else the client's own `threadId`. A client that sends neither stores nothing.
+- A same-titled save that updates an existing memory replaces its provenance with the new save's.
 
 ---
 
@@ -113,6 +122,8 @@ The key is omitted entirely when no journeys are stale.
 
 Get full details for a single memory, including the extended `details` field. The reply adds `superseded_by` when a newer memory replaced this one, and `supersedes` listing the memories this one replaced.
 
+The reply also carries `provenance`: `commit_sha`, `branch`, `dirty`, `session_id` and `thread_id`, recorded by the server when the memory was saved. A field is `null` when unknown (a folder that is not a git repo, a client that sends no session id). `dirty` means tracked files differed from HEAD.
+
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `memory_id` | string | yes | Memory ID or unambiguous prefix |
@@ -123,7 +134,7 @@ Get full details for a single memory, including the extended `details` field. Th
 
 **Profile:** `core`
 
-Update a memory in place. Prefer this over `memory_save` when a save warns `near_duplicate`.
+Update a memory in place. Prefer this over `memory_save` when a save warns `near_duplicate`, or to fix a `no_why`, `why_only_says_who_asked`, `no_options` or `no_details` warning. When the update changes `why` or `details_append`, the reply carries `warnings` for whatever still applies, and omits the key when nothing does. An update of only `what`, `impact`, `tags` or `supersedes` returns no warnings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

@@ -227,7 +227,8 @@ def _create_server(container: ServiceContainer) -> Server:
                 description=(
                     "Update an existing memory in place — what, why, impact, tags, or appended "
                     "details. Prefer this over memory_save when a near_duplicate warning points "
-                    "at an existing memory."
+                    "at an existing memory. Changing why or details returns warnings for what "
+                    "a decision still lacks."
                 ),
                 input_schema={
                     "type": "object",
@@ -568,6 +569,8 @@ def _create_server(container: ServiceContainer) -> Server:
         if name == "memory_save":
             # Stamp the connecting client as the source unless the caller set one.
             args = {**args, "source": args.get("source") or client}
+            # Out-of-band: where the call came from, never taken from the agent's arguments.
+            args["caller"] = {"meta": params.meta}
 
         spec = handlers.get(name)
         is_error = False

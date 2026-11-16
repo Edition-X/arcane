@@ -6,9 +6,11 @@ import json
 import logging
 import os
 from datetime import datetime
+from typing import Any
 
 from arcane.domain.enums import Category
 from arcane.domain.models import RawMemoryInput
+from arcane.domain.provenance import capture_provenance
 from arcane.domain.scope import GLOBAL_ORG, resolve_scope, resolve_write_scope
 from arcane.infra.db.ids import IdentifierResolutionError
 from arcane.services.memory import MemoryService
@@ -28,6 +30,8 @@ Save when you:
 - Set up infrastructure, tooling, or configuration
 
 When filling `details`, prefer: Context, Options considered, Decision, Tradeoffs, Follow-up.
+
+`why` is the reasoning, the reason this was chosen; "User asked for X" is not one. For a decision, put the alternatives you weighed in `details` ("Options considered: ..."), not in `why`. Gaps come back as warnings; fix them with memory_update.
 
 When this memory replaces an earlier one (a reversed decision, a newer fix), pass `supersedes` with the old memory's ID: search then marks the old one as replaced and ranks it below the new one, and context leaves it out."""
 
@@ -61,7 +65,9 @@ def handle_save(
     confidence: float | None = None,
     source: str | None = None,
     supersedes: str | None = None,
+    caller: dict[str, Any] | None = None,
 ) -> str:
+    """Save a memory. ``caller`` holds the call's ``_meta``, set by the server, never by the agent."""
     handler_warnings: list[str] = []
 
     # Sanitise category at the handler boundary so the domain model stays strict
@@ -133,7 +139,9 @@ def handle_save(
         ttl_days=ttl_days,
         confidence=confidence,
     )
-    result = svc.save(raw, project=project_final, org=org_final)
+    caller = caller or {}
+    provenance = capture_provenance(os.getcwd(), meta=caller.get("meta"))
+    result = svc.save(raw, project=project_final, org=org_final, provenance=provenance)
     result["scope"] = {"org": org_final, "project": project_final}
     if handler_warnings:
         result["warnings"] = handler_warnings + result.get("warnings", [])
@@ -365,6 +373,9 @@ def handle_details(svc: MemoryService, memory_id: str) -> str:
         return json.dumps({"error": f"No details found for {memory_id}"})
     full_id = detail["memory_id"]
     payload: dict = {"memory_id": full_id, "body": detail["body"]}
+    memory = svc.c.memory_repo.get(full_id) or {}
+    payload["provenance"] = {k: memory.get(k) for k in ("commit_sha", "branch", "session_id", "thread_id")}
+    payload["provenance"]["dirty"] = None if memory.get("dirty") is None else bool(memory["dirty"])
     replaced_by = svc.c.relationship_repo.superseded_by([full_id]).get(full_id)
     if replaced_by:
         payload["superseded_by"] = replaced_by
@@ -401,7 +412,12 @@ def handle_update(
         return json.dumps({"error": str(exc)})
     if not updated:
         return json.dumps({"error": f"Memory not found: {memory_id}"})
-    return json.dumps({"updated": True, "memory_id": memory_id})
+    result: dict[str, Any] = {"updated": True, "memory_id": memory_id}
+    if why is not None or details_append is not None:  # a tag edit on an old memory must not nag
+        warnings = svc.quality_warnings_for(memory_id)
+        if warnings:
+            result["warnings"] = warnings
+    return json.dumps(result)
 
 
 def handle_delete(svc: MemoryService, memory_id: str) -> str:
