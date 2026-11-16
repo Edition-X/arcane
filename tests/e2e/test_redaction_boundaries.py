@@ -176,9 +176,7 @@ def test_live_embedding_requests_redact_queries_and_reindex_batches(
     assert any("[REDACTED]" in prompt for prompt in prompts)
 
 
-def test_live_semantic_scores_preserve_l2_order_and_strength(
-    arcane: Arcane, live_ollama: tuple[str, list[str]]
-) -> None:
+def test_live_semantic_scores_preserve_l2_order(arcane: Arcane, live_ollama: tuple[str, list[str]]) -> None:
     base_url, _ = live_ollama
 
     async def scenario(c: Client) -> list[dict[str, Any]]:
