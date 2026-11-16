@@ -79,7 +79,7 @@ def handle_save(
     supersedes: str | None = None,
     caller: dict[str, Any] | None = None,
 ) -> str:
-    """Save a memory. ``caller`` holds the call's ``_meta``, set by the server, never by the agent."""
+    """Save a memory. ``caller`` is set by the server, never by the agent; ``caller["meta"]`` is the call's ``_meta``."""
     handler_warnings: list[str] = []
 
     # Sanitise category at the handler boundary so the domain model stays strict
