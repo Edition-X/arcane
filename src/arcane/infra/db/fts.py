@@ -25,8 +25,9 @@ STOPWORDS = frozenset(
 MAX_KEY_TERMS = 8
 
 
-def _quote(term: str) -> str:
-    return '"' + term.replace('"', '""') + '"*'
+def _quote(term: str, prefix: bool = True) -> str:
+    """*term* as an FTS5 string, with ``*`` after it to match as a prefix unless *prefix* is false."""
+    return '"' + term.replace('"', '""') + ('"*' if prefix else '"')
 
 
 def key_terms(text: str) -> list[str]:
@@ -64,4 +65,4 @@ def all_key_terms_query(text: str) -> str | None:
     *text* has no key words.
     """
     terms = key_terms(text)
-    return " AND ".join('"' + t.replace('"', '""') + '"' for t in terms) if terms else None
+    return " AND ".join(_quote(t, prefix=False) for t in terms) if terms else None
