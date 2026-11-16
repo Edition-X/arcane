@@ -16,9 +16,17 @@ logger = logging.getLogger(__name__)
 SCOPE_BONUS = {3: 0.15, 2: 0.05, 1: 0.0, 0: 0.0}
 # After widening past the project, relevance decides and the local bonus only
 # breaks near-ties: a strong hit from another project beats a weak local one.
-# A local memory that matched the query's words keeps the full project bonus:
-# the project widened because such matches are few, so each is strong evidence.
 WIDENED_SCOPE_BONUS = {3: 0.03, 2: 0.02, 1: 0.0, 0: 0.0}
+
+FTS_WEIGHT = 0.3
+VEC_WEIGHT = 0.7
+# Added to a row that holds every key word of the query. Such a row may have
+# little vector score, and a vector-only row scores up to VEC_WEIGHT, so the
+# bonus has to exceed that to lead it. It also covers the widest scope gap
+# (the 0.15 project bonus), so a vector-only neighbour from a nearer layer
+# cannot pass it either. Every reach gets it: a keyword hit that names the
+# whole query is strong evidence in the project or across the org.
+STRICT_MATCH_BONUS = VEC_WEIGHT + SCOPE_BONUS[3]
 
 
 def apply_scope_bonus(rows: list[dict[str, Any]], bonus: dict[int, float] = SCOPE_BONUS) -> list[dict[str, Any]]:
@@ -52,12 +60,20 @@ def _normalise_range(results: list[dict[str, Any]]) -> None:
         r["score"] = (r["score"] - low) / (high - low) if high > low else 1.0
 
 
+def apply_strict_bonus(rows: list[dict[str, Any]], strict_ids: set[str]) -> None:
+    """Add ``STRICT_MATCH_BONUS`` in place to each row whose id is in *strict_ids*."""
+    for r in rows:
+        if r["id"] in strict_ids:
+            r["score"] += STRICT_MATCH_BONUS
+
+
 def merge_results(
     fts_results: list[dict[str, Any]],
     vec_results: list[dict[str, Any]],
-    fts_weight: float = 0.3,
-    vec_weight: float = 0.7,
+    fts_weight: float = FTS_WEIGHT,
+    vec_weight: float = VEC_WEIGHT,
     limit: int = 5,
+    strict_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Normalise each backend's scores, then weight.
 
@@ -65,7 +81,8 @@ def merge_results(
     distance, ``1 / (1 + distance)``, which sit close together for every
     neighbour, so they are spread over their range instead: scaled by the
     maximum, a neighbour sharing no word with the query scored near 1.0 and
-    outranked an exact keyword hit.
+    outranked an exact keyword hit. Rows in *strict_ids*, which match every key
+    word of the query, then get ``STRICT_MATCH_BONUS`` so they lead the rest.
     """
     _normalise(fts_results)
 
@@ -84,7 +101,9 @@ def merge_results(
             scores[rid] = dict(r)
             scores[rid]["score"] = vec_weight * r["score"]
 
-    ranked = sorted(scores.values(), key=lambda x: x["score"], reverse=True)
+    ranked = list(scores.values())
+    apply_strict_bonus(ranked, strict_ids or set())
+    ranked.sort(key=lambda x: x["score"], reverse=True)
     return ranked[:limit]
 
 
@@ -118,8 +137,17 @@ def tiered_search(
     )
 
     _normalise(fts_results)
+    strict_ids = repo.strict_match_ids(
+        query,
+        project=project,
+        source=source,
+        org=org,
+        include_org=include_org,
+        include_global=include_global,
+        reach=reach,
+    )
 
-    results = fts_results
+    results: list[dict[str, Any]] | None = None
     if embedding_provider is not None:
         try:
             query_vec = embedding_provider.embed_query(query)
@@ -138,13 +166,12 @@ def tiered_search(
                 include_global=include_global,
                 reach=reach,
             )
-            results = merge_results(fts_results, vec_results, limit=limit * 2)
+            results = merge_results(fts_results, vec_results, limit=limit * 2, strict_ids=strict_ids)
 
-    if org is not None and reach != "layers":
-        keyword_ids = {r["id"] for r in fts_results}
-        for r in results:
-            if r.get("scope_rank") == 3 and r["id"] in keyword_ids:
-                r["score"] += SCOPE_BONUS[3] - WIDENED_SCOPE_BONUS[3]
+    if results is None:
+        results = fts_results
+        apply_strict_bonus(results, strict_ids)
+
     if org is not None:
         results = apply_scope_bonus(results, SCOPE_BONUS if reach == "layers" else WIDENED_SCOPE_BONUS)
     return results[:limit]

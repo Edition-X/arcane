@@ -9,8 +9,9 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from arcane.infra.db.connection import Database
-from arcane.infra.db.fts import prefix_or_query
+from arcane.infra.db.fts import key_terms_query, prefix_or_query
 from arcane.infra.db.ids import resolve_unique_id
+from arcane.infra.db.schema import FTS_COLUMNS
 from arcane.infra.redaction import redact, redact_values
 
 if TYPE_CHECKING:
@@ -24,12 +25,13 @@ logger = logging.getLogger(__name__)
 KNN_MIN_CANDIDATES = 200
 VEC0_MAX_K = 4096
 
-# bm25 column weights for memories_fts, in column order: title, what, why,
-# impact, tags, category, project, source, details. A details body is several
-# times longer than the other fields, so at full weight it would outrank a
-# title or why match; at 0.25 it finds a memory by its own words and loses to
-# a field-level hit.
-FTS_BM25_WEIGHTS = "1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.25"
+# bm25 weight per memories_fts column; any column not listed counts 1.0. A
+# details body is several times longer than the other fields, so at full weight
+# it would outrank a title or why match; at 0.25 it finds a memory by its own
+# words and loses to a field-level hit. Built in FTS_COLUMNS order, which bm25()
+# reads its weights in.
+FTS_COLUMN_WEIGHTS = {"details": 0.25}
+FTS_BM25_WEIGHTS = ", ".join(str(FTS_COLUMN_WEIGHTS.get(column, 1.0)) for column in FTS_COLUMNS)
 
 # Reserved org for the "applies everywhere" layer. Mirrors
 # ``arcane.domain.scope.GLOBAL_ORG`` (kept local to avoid an infra→domain import).
@@ -430,6 +432,59 @@ class MemoryRepository:
         self.db.commit()
         return int(cursor.rowcount)
 
+    def _fts_filters(
+        self,
+        project: str | None,
+        source: str | None,
+        org: str | None,
+        include_org: bool,
+        include_global: bool,
+        reach: Reach,
+    ) -> tuple[str, list[Any]]:
+        """The ``AND ...`` filters an FTS search applies to ``memories m``: live, in scope, of *source*."""
+        clauses: list[str] = [MemoryRepository._not_expired_clause()]
+        params: list[Any] = []
+        if org is not None:
+            scope_sql, scope_params = self._scope_where(org, project, include_org, include_global, reach=reach)
+            clauses.append(scope_sql)
+            params += scope_params
+        elif project:
+            clauses.append("m.project = ?")
+            params.append(project)
+        if source:
+            clauses.append("m.source = ?")
+            params.append(source)
+        return "AND " + " AND ".join(clauses), params
+
+    def strict_match_ids(
+        self,
+        query: str,
+        project: str | None = None,
+        source: str | None = None,
+        org: str | None = None,
+        include_org: bool = True,
+        include_global: bool = True,
+        reach: Reach = "layers",
+    ) -> set[str]:
+        """Ids of the memories that match every key word of *query*, among the rows ``fts_search`` can return.
+
+        Takes the same filters as ``fts_search`` but the strict ``key_terms_query``,
+        not the loose ``prefix_or_query``, where one stop word is enough.
+        """
+        fts_query = key_terms_query(query)
+        if fts_query is None:
+            return set()
+        where_clause, params = self._fts_filters(project, source, org, include_org, include_global, reach)
+        rows = self.db.fetchall(
+            f"""
+            SELECT m.id FROM memories_fts
+            JOIN memories m ON m.rowid = memories_fts.rowid
+            WHERE memories_fts MATCH ? {where_clause}
+            """,
+            [fts_query, *params],
+        )
+        return {r["id"] for r in rows}
+
     def fts_search(
         self,
         query: str,
@@ -445,23 +500,8 @@ class MemoryRepository:
         if fts_query is None:
             return []
 
-        where_clauses: list[str] = [MemoryRepository._not_expired_clause()]
-        params: list[Any] = [fts_query]
-
-        if org is not None:
-            scope_sql, scope_params = self._scope_where(org, project, include_org, include_global, reach=reach)
-            where_clauses.append(scope_sql)
-            params += scope_params
-        elif project:
-            where_clauses.append("m.project = ?")
-            params.append(project)
-        if source:
-            where_clauses.append("m.source = ?")
-            params.append(source)
-
-        where_clause = "AND " + " AND ".join(where_clauses)
-
-        params.append(limit)
+        where_clause, params = self._fts_filters(project, source, org, include_org, include_global, reach)
+        params = [fts_query, *params, limit]
 
         rows = self.db.fetchall(
             f"""

@@ -288,3 +288,34 @@ def test_a_widened_search_keeps_a_local_keyword_hit_in_the_top_results(arcane: A
     # One local match, so the search widens to the org. The exact keyword hit in
     # the project must not fall below vector-only neighbours from another project.
     assert "Rollout plan" in _titles(hits)
+
+
+def test_an_exact_keyword_hit_outranks_vector_only_neighbours_in_the_project(
+    arcane: Arcane, ollama: FakeOllama
+) -> None:
+    async def scenario(c: Client) -> list[dict[str, Any]]:
+        # The phrase sits in a long details body, so the memory's vector is far from the query.
+        await c.call(
+            "memory_save",
+            title="Rollout plan",
+            what="Staged the deploy",
+            details="Options considered: quokka lattice. " + "filler text about other things " * 60,
+        )
+        # Unrelated memories share no word with the query, at a spread of distances from it.
+        for n in range(1, 21):
+            await c.call("memory_save", title=f"Unrelated {n}", what="item " * n)
+        return await c.call("memory_search", query="quokka lattice", limit=3)
+
+    # Every key word is in the memory, so it leads however near the others sit.
+    assert _titles(arcane.run(scenario))[0] == "Rollout plan"
+
+
+def test_a_stopword_match_does_not_earn_the_local_bonus_when_widened(arcane: Arcane, ollama: FakeOllama) -> None:
+    async def scenario(c: Client) -> list[dict[str, Any]]:
+        # Shares only the stopword "the" with the query, so the loose keyword match fires and the strict one does not.
+        await c.call("memory_save", title="The roster", what="Names", project="widget", org="acme")
+        await c.call("memory_save", title="Hazelcast cluster sizing", what="Sizing", project="gadget", org="acme")
+        return await c.call("memory_search", query="the hazelcast cluster", limit=2, project="widget", org="acme")
+
+    # Hazelcast in a sibling project answers the query; the local row matches only "the".
+    assert _titles(arcane.run(scenario))[0] == "Hazelcast cluster sizing"
