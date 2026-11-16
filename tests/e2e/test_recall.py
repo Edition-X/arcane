@@ -247,8 +247,9 @@ async def _seed(c: Client) -> None:
         await c.call(
             "memory_save", title=f"{title} (sibling file)", what="Changed another file", related_files=[sibling_path]
         )
-    for old, new, _ in REPLACED:
-        saved = await c.call("memory_save", title=old, what=f"{old} for the service", why="the first choice")
+    for old, new, question in REPLACED:
+        # The old memory also quotes the question, so only the replacement's penalty puts the new one first.
+        saved = await c.call("memory_save", title=old, what=f"{old}. {question}", why="the first choice")
         await c.call(
             "memory_save", title=new, what=f"{new} for the service", why="the later choice", supersedes=saved["id"]
         )
