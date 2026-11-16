@@ -227,7 +227,8 @@ def _create_server(container: ServiceContainer) -> Server:
                 description=(
                     "Update an existing memory in place — what, why, impact, tags, or appended "
                     "details. Prefer this over memory_save when a near_duplicate warning points "
-                    "at an existing memory."
+                    "at an existing memory. Changing why or details returns warnings for what "
+                    "a decision still lacks."
                 ),
                 input_schema={
                     "type": "object",
