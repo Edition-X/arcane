@@ -611,7 +611,7 @@ class MemoryService:
         """
         if project:
             project = resolve_read_project(project, self.c.config)
-        reach = self._effective_reach(reach, query, org, project)
+        reach = self._effective_reach(reach, query, org, project, source)
         candidates = self._ranked_search(
             query,
             limit=limit * 2,
@@ -630,14 +630,17 @@ class MemoryService:
         label_scope(ranked, org, project)
         return ranked, reach
 
-    def _effective_reach(self, reach: Reach, query: str | None, org: str | None, project: str | None) -> Reach:
+    def _effective_reach(
+        self, reach: Reach, query: str | None, org: str | None, project: str | None, source: str | None = None
+    ) -> Reach:
         """Settle ``auto`` into ``org`` or ``layers``; any other reach stands.
 
         ``auto`` becomes ``layers`` for an unscoped search (no *org*), or when the
         query has no key words to judge the project by (only stop words). It becomes
         ``org`` when there is no project, or when the project has fewer than
         ``WIDEN_BELOW`` memories (no query) or matching memories (strict key-term
-        query), and ``layers`` otherwise.
+        query), and ``layers`` otherwise. Only memories from *source* count when it
+        is given, since the search filters on it too.
         """
         if reach != "auto":
             return reach
@@ -648,14 +651,16 @@ class MemoryService:
         if not query:
             return (
                 "org"
-                if self.c.memory_repo.count(project=project, org=org, include_org=False, include_global=False)
+                if self.c.memory_repo.count(
+                    project=project, source=source, org=org, include_org=False, include_global=False
+                )
                 < WIDEN_BELOW
                 else "layers"
             )
         fts_query = key_terms_query(query) or prefix_or_query(query)
         if fts_query is None:
             return "layers"
-        own = self.c.memory_repo.count_project_matches(fts_query, org, project)
+        own = self.c.memory_repo.count_project_matches(fts_query, org, project, source)
         return "org" if own < WIDEN_BELOW else "layers"
 
     def _ranked_search(
@@ -782,7 +787,7 @@ class MemoryService:
         """``get_context`` plus the reach it settled on (``layers``, ``org`` or ``all``)."""
         if project:
             project = resolve_read_project(project, self.c.config)
-        reach = self._effective_reach(reach, query, org, project)
+        reach = self._effective_reach(reach, query, org, project, source)
         total = self.c.memory_repo.count(
             project=project, source=source, org=org, include_org=include_org, include_global=include_global, reach=reach
         )
@@ -819,7 +824,9 @@ class MemoryService:
                     org=org,
                     include_org=include_org,
                     include_global=include_global,
-                    reach="layers",
+                    # A widened search must not fill up with unrelated recent rows of
+                    # sibling projects; an explicit every-org read keeps its reach.
+                    reach="all" if reach == "all" else "layers",
                 )
                 seen = {r["id"] for r in results}
                 for r in recent:

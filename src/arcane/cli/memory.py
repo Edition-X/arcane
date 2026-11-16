@@ -127,7 +127,7 @@ def search(query: str, limit: int, project: bool, source: str | None, scope: Rea
     from arcane.services.memory import MemoryService
 
     plan = None
-    reach: Reach = "layers"
+    reach: Reach | None = None
     with create_container() as container:
         if project or scope:
             resolved = resolve_write_scope(None, container.config)
@@ -147,7 +147,8 @@ def search(query: str, limit: int, project: bool, source: str | None, scope: Rea
 
     if not results:
         click.echo(
-            "No results found." + (f" {message}" if plan and (message := plan.nothing_found(reach, cli=True)) else "")
+            "No results found."
+            + (f" {message}" if plan and reach and (message := plan.nothing_found(reach, cli=True)) else "")
         )
         return
 
@@ -268,7 +269,7 @@ def merge_projects(src: str, dest: str, org: str | None, apply_: bool) -> None:
     (normalised, aliases applied) so merges always heal towards the canonical
     name. Only one org's rows move: when several orgs have a project
     called SRC, --org says which. Dry-run by default — pass --apply to commit,
-    which first backs up the store.
+    which first backs up the store unless there is nothing to move.
     """
     with create_container() as container:
         dest_canon = canonicalize_project(dest, container.config.projects.aliases)
@@ -324,7 +325,7 @@ def merge_projects(src: str, dest: str, org: str | None, apply_: bool) -> None:
                 "Pass --apply to commit."
             )
             return
-        if source_org is None or sum(counts.values()) == 0:
+        if source_org is None or sum(counts.values()) - colliding_artifacts == 0:
             click.echo(f"Nothing to move from {where} into '{dest_canon}'; no backup taken.")
             return
 

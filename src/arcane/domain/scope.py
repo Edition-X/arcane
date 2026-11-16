@@ -261,14 +261,6 @@ Reach = Literal["auto", "layers", "org", "all"]
 # alone, so an automatic search also reads the org's other projects.
 WIDEN_BELOW = 3
 
-# The `scope` argument as agents read it, shared by the MCP tool schemas.
-READ_SCOPE_DESCRIPTION = (
-    "project: this project only. org: org-level memories only. global: global memories only. "
-    "all: every project in every org, and it ignores include_global=false. "
-    f"Omit for the project + org + global chain, widened to the org's other projects when the project has "
-    f"fewer than {WIDEN_BELOW} matches."
-)
-
 
 @dataclass(frozen=True)
 class ReadPlan:
@@ -286,22 +278,28 @@ class ReadPlan:
     reach: Reach
     scope: ReadScope | None
 
-    def nothing_found(self, reach: Reach, *, cli: bool = False) -> str | None:
+    def nothing_found(self, settled_reach: Reach, *, cli: bool = False) -> str | None:
         """What to tell a caller whose search matched nothing, true to what was searched.
 
-        *reach* is what the service settled on (``search_reach``), not the plan's
-        ``auto``. *cli* spells the retry hints as command-line options rather than
-        MCP arguments. ``None`` when every project of every org was already searched.
+        Args:
+            settled_reach: The reach the service settled on (``search_reach``), not
+                the plan's ``auto``.
+            cli: Spell the retry hints as command-line options rather than MCP
+                arguments. On the CLI a search without ``--project`` or ``--scope``
+                reads every org, so the automatic retry is ``--project``.
+
+        Returns:
+            The message, or ``None`` when every project of every org was already searched.
         """
         if self.scope == "all":
             return None
         everywhere = "--scope all" if cli else "scope='all'"
-        without_scope = "--scope" if cli else "scope"
+        automatic = "with --project instead" if cli else "without scope"
         if self.scope == "global":
-            return f"Nothing matched in global memories. Retry without {without_scope}, or with {everywhere}."
+            return f"Nothing matched in global memories. Retry {automatic}, or with {everywhere}."
         if self.scope == "org":
             return (
-                f"Nothing matched among org '{self.org}' memories. Retry without {without_scope}, "
+                f"Nothing matched among org '{self.org}' memories. Retry {automatic}, "
                 f"or with {everywhere} to search every project in every org."
             )
         where = f"project '{self.project}'" if self.project else "this project"
@@ -309,11 +307,11 @@ class ReadPlan:
             f"to include org '{self.org}' and its other projects, or {everywhere} to search every project in every org"
         )
         if self.scope == "project":
-            return f"Nothing matched in {where}. Retry without {without_scope} {wider}."
+            return f"Nothing matched in {where}. Retry {automatic} {wider}."
         if not self.include_org:
             return f"Nothing matched in {where} (include_org was false). Retry with include_org=true {wider}."
         global_part = " and global memories" if self.include_global else ""
-        if reach == "layers":
+        if settled_reach == "layers":
             return (
                 f"Nothing matched in {where}, org-level{global_part} memories. The org's other projects were not "
                 f"searched, because the query has no key words to judge the project by. "

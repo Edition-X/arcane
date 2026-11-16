@@ -39,7 +39,7 @@ from mcp.types import (
 
 from arcane import __version__
 from arcane.domain.enums import RelationType
-from arcane.domain.scope import READ_SCOPE_DESCRIPTION, READ_SCOPES, slugify
+from arcane.domain.scope import READ_SCOPES, WIDEN_BELOW, slugify
 from arcane.infra.config import ConfigError
 from arcane.mcp_server.prompts import (
     PROMPTS,
@@ -87,6 +87,15 @@ from arcane.services.journey import JourneyService
 from arcane.services.memory import MemoryService
 
 logger = logging.getLogger(__name__)
+
+# The `scope` argument as agents read it, shared by the memory_search and
+# memory_context schemas.
+READ_SCOPE_DESCRIPTION = (
+    "project: this project only. org: org-level memories only. global: global memories only. "
+    "all: every project in every org, and it ignores include_global=false. "
+    f"Omit for the project + org + global chain, widened to the org's other projects when the project has "
+    f"fewer than {WIDEN_BELOW} matches."
+)
 
 # Tools advertised by default. Everything else ("full" profile only) was
 # called fewer than ten times across every harness and all time, per usage

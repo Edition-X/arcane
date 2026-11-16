@@ -474,21 +474,23 @@ class MemoryRepository:
             self._annotate_scope_rank(processed, org, project)
         return processed
 
-    def count_project_matches(self, fts_query: str, org: str, project: str) -> int:
+    def count_project_matches(self, fts_query: str, org: str, project: str, source: str | None = None) -> int:
         """Live memories of one project that match the FTS expression *fts_query*.
 
         Judges whether a project can answer a search on its own, so it takes the
-        strict ``key_terms_query``, not the loose ``prefix_or_query``.
+        strict ``key_terms_query``, not the loose ``prefix_or_query``. With *source*,
+        only that source's memories count, as the search itself will filter them.
         """
         scope_sql, scope_params = self._scope_where(org, project, include_org=False, include_global=False)
+        source_sql = " AND m.source = ?" if source else ""
         row = self.db.fetchone(
             f"""
             SELECT COUNT(*) AS cnt
             FROM memories_fts fts
             JOIN memories m ON m.rowid = fts.rowid
-            WHERE fts.memories_fts MATCH ? AND {MemoryRepository._not_expired_clause()} AND {scope_sql}
+            WHERE fts.memories_fts MATCH ? AND {MemoryRepository._not_expired_clause()} AND {scope_sql}{source_sql}
             """,
-            [fts_query, *scope_params],
+            [fts_query, *scope_params, *([source] if source else [])],
         )
         return int(row["cnt"]) if row else 0
 

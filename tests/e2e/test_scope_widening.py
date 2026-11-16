@@ -289,3 +289,37 @@ def test_merge_projects_with_nothing_to_move_takes_no_backup(arcane: Arcane) -> 
     out = _cli(arcane, "merge-projects", "ghost", "new-name", "--org", "acme", "--apply").stdout
     assert "Nothing to move" in out and "no backup taken" in out
     assert not (Path(arcane.home) / "backups").exists()
+
+
+def test_cli_hint_after_an_explicit_scope_points_to_project_not_every_org(arcane: Arcane) -> None:
+    async def seed(client: Client) -> None:
+        await _save(client, "Ledger rounding", "ledger rounding is bankers", "ledger", org="beta")
+
+    arcane.run(seed)
+    # On the CLI, leaving out --scope without --project reads every org, so that is not the retry offered.
+    for scope in ("project", "org", "global"):
+        out = _cli(arcane, "search", "ledger rounding", "--scope", scope).stdout
+        assert "with --project instead" in out and "without --scope" not in out, scope
+
+
+def test_thin_check_counts_only_the_searched_source(arcane: Arcane) -> None:
+    async def seed(client: Client) -> None:
+        for n in ("one", "two", "three"):
+            await _save(client, f"Kafka retry {n}", "kafka retry backs off", "widget")
+        await client.call(
+            "memory_save", title="Kafka retry run", what="kafka retry in ci", project="gadget", org="acme", source="gha"
+        )
+
+    arcane.run(seed)
+    # Three local matches from another source cannot answer a gha-only search, so it widens.
+    out = _cli(arcane, "search", "kafka retry", "--project", "--source", "gha").stdout
+    assert "Kafka retry run" in out
+
+
+def test_context_top_up_of_an_every_org_read_reads_every_org(arcane: Arcane) -> None:
+    async def scenario(client: Client) -> None:
+        await _save(client, "Ledger rounding", "ledger rounding is bankers", "ledger", org="beta")
+        payload = await client.call("memory_context", query="zebra unicorn", scope="all")
+        assert [m["title"] for m in payload["memories"]] == ["Ledger rounding"]
+
+    arcane.run(scenario)
