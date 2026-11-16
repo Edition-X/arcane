@@ -81,11 +81,11 @@ def test_merge_projects_moves_one_orgs_memories_only(arcane: Arcane) -> None:
     assert orgs_in("widget") == ["alpha", "beta"]
 
     dry_run = _cli(arcane, "merge-projects", "widget", "gadget", "--org", "alpha").stdout
-    assert "would move 1 memories from 'widget' in org alpha" in dry_run
+    assert "would move 1 memories, 0 journeys, 0 artifacts, 0 insights from 'widget' in org alpha" in dry_run
     assert orgs_in("widget") == ["alpha", "beta"]
 
     applied = _cli(arcane, "merge-projects", "widget", "gadget", "--org", "alpha", "--apply").stdout
-    assert "Moved 1 memories from 'widget' in org alpha into 'gadget'" in applied
+    assert "Moved 1 memories, 0 journeys, 0 artifacts, 0 insights from 'widget' in org alpha into 'gadget'" in applied
     assert orgs_in("widget") == ["beta"]
     assert orgs_in("gadget") == ["alpha"]
 

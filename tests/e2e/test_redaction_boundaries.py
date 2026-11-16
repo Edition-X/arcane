@@ -188,7 +188,7 @@ def test_live_semantic_scores_preserve_l2_order_and_strength(
             ("Physics", "Neutrinos electrons photons relativity"),
         ):
             await c.call("memory_save", title=title, what=what)
-        return await c.call("memory_search", query="quantum particles", limit=3)
+        return await c.call("memory_search", query="quantum particles", limit=3, scope="project")
 
     results = arcane.run(scenario)
     assert len(results) == 3

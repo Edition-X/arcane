@@ -212,6 +212,17 @@ class JourneyRepository:
         self.db.commit()
         return True
 
+    def reassign_project(self, old: str, new: str, *, org: str) -> int:
+        """Move *org*'s journeys from project *old* to *new*; return rows moved."""
+        cursor = self.db.execute("UPDATE journeys SET project = ? WHERE project = ? AND org = ?", (new, old, org))
+        self.db.commit()
+        return int(cursor.rowcount)
+
+    def count_by_org(self, project: str) -> dict[str, int]:
+        """How many journeys each org holds under *project*."""
+        rows = self.db.fetchall("SELECT org, COUNT(*) AS cnt FROM journeys WHERE project = ? GROUP BY org", (project,))
+        return {r["org"]: int(r["cnt"]) for r in rows}
+
     def count(self, project: str | None = None, org: str | None = None) -> int:
         clauses: list[str] = []
         params: list[Any] = []
