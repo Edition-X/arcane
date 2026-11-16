@@ -460,7 +460,8 @@ class MemoryRepository:
               AND m.id IN ({",".join("?" * len(ids))})
               AND NOT EXISTS (
                   SELECT 1 FROM relationships r
-                  WHERE r.relation = 'supersedes' AND r.target_type = 'memory' AND r.target_id = m.id
+                  WHERE r.relation = 'supersedes' AND r.source_type = 'memory' AND r.target_type = 'memory'
+                    AND r.target_id = m.id
               )
             """,
             [fts_query, *ids],
