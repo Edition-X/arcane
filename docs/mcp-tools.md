@@ -90,9 +90,9 @@ Search reads the whole memory, `memory_details` body included: words that appear
 
 A memory's `related_files` are searched too, at the weight of the other fields: a file path in the query, such as `src/arcane/infra/db/schema.py`, finds the memories that name it. The query's path stays one term, and a hit needs every part of it in order, so `schema.py` alone also matches, but `db/schema.py` does not match `infra/schema.py`.
 
-Every search runs both backends. The keyword search always runs; the query is also embedded once and its nearest vectors are merged with the keyword hits by score. Embedding a query takes about 10 ms with a local Ollama. If the provider is `none`, down, or slower than 2 seconds, the search returns keyword results and no error, and skips the provider for the next 30 seconds so a hung server costs one wait, not one per search.
+Every search runs both backends. The keyword search always runs; the query is also embedded once and its nearest vectors are merged with the keyword hits by score. Embedding a query takes about 10 ms with a local Ollama. If the provider is `none`, down, or slower than 2 seconds, the search returns keyword results and no error, and skips the provider for the next 30 seconds so a hung server costs one wait, not one per search. A query too long for the embedding model also gets keyword results only, with the warning `Query too long to embed` in the server log; that does not pause the provider, so the next query is embedded as usual.
 
-At every level, a memory that a newer one replaced carries `superseded_by` (`id`, `title`, `date`) and its score is halved, so it stays findable as history but ranks below current answers.
+At every level, a memory that a newer one replaced carries `superseded_by` (`id`, `title`, `date`) and its score is halved, so it stays findable as history but ranks below current answers. It also earns no whole-query bonus (the one for holding every key word of the query), even when it holds them all.
 
 ---
 
