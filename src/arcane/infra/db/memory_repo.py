@@ -46,7 +46,7 @@ def join_details(body: str | None, addition: str | None) -> str | None:
 
 
 def _parse_list(raw: Any) -> list[str]:
-    """Deserialise tags from whatever shape the DB row delivers.
+    """Deserialise a JSON list column (tags, related_files) from whatever shape the DB row delivers.
 
     Tags and related files are stored as a JSON array string.  This helper normalises them so
     callers always receive ``list[str]`` — no json.loads scattered everywhere.

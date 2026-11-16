@@ -88,7 +88,7 @@ Default is `standard`, which omits `why`/`impact` to keep results small — call
 
 Search reads the whole memory, `memory_details` body included: words that appear only in a memory's details find it. A match in the title, `what`, `why`, `impact` or tags outranks the same match in details (the details column has a quarter of their weight in the keyword ranking).
 
-A memory's `related_files` are searched too, at the weight of the other fields: a file path in the query, such as `src/arcane/infra/db/schema.py`, finds the memories that name it. The query's path stays one term, and a hit needs every part of it in order, so `schema.py` alone also matches, but `db/schema.py` does not match `infra/schema.py`.
+A memory's `related_files` are searched too, at the weight of the other fields: a file path in the query, such as `src/arcane/infra/db/schema.py`, finds the memories that name it. The query's path stays one term, and a hit needs every part of it in order, so `schema.py` alone also matches, but `db/schema.py` does not match `infra/schema.py` by keyword.
 
 Every search runs both backends. The keyword search always runs; the query is also embedded once and its nearest vectors are merged with the keyword hits by score. Embedding a query takes about 10 ms with a local Ollama. If the provider is `none`, down, or slower than 2 seconds, the search returns keyword results and no error, and skips the provider for the next 30 seconds so a hung server costs one wait, not one per search. A query too long for the embedding model also gets keyword results only, with the warning `Query too long to embed` in the server log; that does not pause the provider, so the next query is embedded as usual.
 
@@ -137,7 +137,7 @@ The key is omitted entirely when no journeys are stale.
 
 **Profile:** `core`
 
-Get the whole record of a memory. The reply holds `memory_id`, `title`, `category`, `tags`, `date`, `what`, `why`, `impact`, `related_files`, `journey` (`id`, `title`, `status`, or `null` when the memory is in none), `has_details` and `body` (the extended `details` text). It adds `superseded_by` when a newer memory replaced this one, and `supersedes` listing the memories this one replaced.
+Get the whole record of a memory. The reply holds `memory_id`, `title`, `category`, `tags`, `date`, `what`, `why`, `impact`, `related_files`, `journeys` (each `id`, `title`, `status`, oldest link first; empty when the memory is in none), `has_details` and `body` (the extended `details` text). It adds `superseded_by` when a newer memory replaced this one, and `supersedes` listing the memories this one replaced.
 
 A memory saved without `details` has no body: `has_details` is `false` and `body` is `""`, not an error. An ID that matches no memory is an error.
 

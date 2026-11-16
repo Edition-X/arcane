@@ -36,6 +36,9 @@ def test_memory_details_returns_the_whole_record(arcane: Arcane) -> None:
             journey_id=journey["id"],
             supersedes=old["id"],
         )
+        # Saved again under a second journey, the memory belongs to both.
+        second = await c.call("journey_start", title="Cache follow-up")
+        await c.call("memory_save", title="Use redis", what="Chose redis for sessions", journey_id=second["id"])
         return {
             "journey": journey,
             "old": old,
@@ -53,8 +56,8 @@ def test_memory_details_returns_the_whole_record(arcane: Arcane) -> None:
         "Ops runs a redis cluster",
     )
     assert record["related_files"] == ["src/cache.py", "docs/cache.md"]
-    assert record["journey"]["id"] == out["journey"]["id"]
-    assert record["journey"]["title"] == "Cache rollout"
+    assert [j["title"] for j in record["journeys"]] == ["Cache rollout", "Cache follow-up"]
+    assert record["journeys"][0]["id"] == out["journey"]["id"]
     assert [m["id"] for m in record["supersedes"]] == [out["old"]["id"]]
     assert record["body"] == "Options considered: memcached, redis"
     assert record["has_details"] is True
@@ -75,29 +78,43 @@ def test_memory_details_works_for_a_memory_with_no_details_row(arcane: Arcane) -
     assert out["record"]["related_files"] == ["a/b.py"]
     assert out["record"]["body"] == ""
     assert out["record"]["has_details"] is False
-    assert out["record"]["journey"] is None
+    assert out["record"]["journeys"] == []
     assert "not found" in out["missing"].lower()
 
 
 def test_cli_details_prints_the_same_record(arcane: Arcane) -> None:
     async def seed(c: Client) -> dict[str, Any]:
+        journey = await c.call("journey_start", title="Cache rollout")
+        old = await c.call("memory_save", title="Use memcached", what="Chose memcached")
         full = await c.call(
             "memory_save",
             title="Use redis",
             what="Chose redis",
             why="Persistence",
+            impact="Ops runs redis",
             related_files=["src/cache.py"],
             details="Options considered: memcached",
+            journey_id=journey["id"],
+            supersedes=old["id"],
         )
         bare = await c.call("memory_save", title="Bare note", what="Only a what")
-        return {"full": full, "bare": bare}
+        record = await c.call("memory_details", memory_id=full["id"])
+        return {"full": full, "bare": bare, "record": record}
 
     ids = arcane.run(seed)
     text = _cli(arcane, "details", ids["full"]["id"][:8]).stdout
-    for expected in ("Use redis", "What: Chose redis", "Why: Persistence", "Files: src/cache.py", "memcached"):
+    for expected in (
+        "Use redis",
+        "What: Chose redis",
+        "Why: Persistence",
+        "Impact: Ops runs redis",
+        "Files: src/cache.py",
+        "Journey: Cache rollout",
+        "Replaces: Use memcached",
+        "memcached",
+    ):
         assert expected in text
-    raw = json.loads(_cli(arcane, "details", ids["full"]["id"], "--json").stdout)
-    assert raw["related_files"] == ["src/cache.py"] and raw["body"] == "Options considered: memcached"
+    assert json.loads(_cli(arcane, "details", ids["full"]["id"], "--json").stdout) == ids["record"]
     bare = _cli(arcane, "details", ids["bare"]["id"])
     assert bare.returncode == 0 and "Details: none" in bare.stdout
     missing = _cli(arcane, "details", "ffffffff")

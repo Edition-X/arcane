@@ -959,9 +959,9 @@ class MemoryService:
         except IdentifierResolutionError as exc:
             return {"error": str(exc)}
         memory = self.c.memory_repo.get(full_id) if full_id else None
-        if full_id is None or memory is None:
+        if memory is None:
             return {"error": f"Memory not found: {memory_id}"}
-        detail = self.get_details(full_id)
+        detail = self.get_details(memory["id"])
         record: dict[str, Any] = {
             "memory_id": full_id,
             "title": memory["title"],
@@ -974,8 +974,9 @@ class MemoryService:
             "date": memory.get("created_at", "")[:10],
             "has_details": detail is not None,
             "body": detail["body"] if detail else "",
-            "journey": self._journey_of(full_id),
+            "journeys": self._journeys_of(memory["id"]),
         }
+        full_id = memory["id"]
         record["provenance"] = {k: memory.get(k) for k in ("commit_sha", "branch", "session_id", "thread_id")}
         record["provenance"]["dirty"] = None if memory.get("dirty") is None else bool(memory["dirty"])
         replaced_by = self.c.relationship_repo.superseded_by([full_id]).get(full_id)
@@ -986,14 +987,19 @@ class MemoryService:
             record["supersedes"] = replaces
         return record
 
-    def _journey_of(self, memory_id: str) -> dict[str, Any] | None:
-        """The journey a memory is part of, as ``{id, title, status}``, or ``None``."""
-        for rel in self.c.relationship_repo.get_from("memory", memory_id):
-            if rel["relation"] == "part_of" and rel["target_type"] == "journey":
+    def _journeys_of(self, memory_id: str) -> list[dict[str, Any]]:
+        """Every journey a memory is part of, as ``{id, title, status}``, oldest link first.
+
+        A memory saved again with another ``journey_id`` belongs to both.
+        """
+        edges = sorted(self.c.relationship_repo.get_from("memory", memory_id), key=lambda rel: rel["created_at"])
+        journeys = []
+        for rel in edges:
+            if rel["relation"] == RelationType.PART_OF.value and rel["target_type"] == "journey":
                 journey = self.c.journey_repo.get(rel["target_id"])
                 if journey:
-                    return {"id": journey["id"], "title": journey["title"], "status": journey["status"]}
-        return None
+                    journeys.append({"id": journey["id"], "title": journey["title"], "status": journey["status"]})
+        return journeys
 
     def get_details(self, memory_id: str) -> dict[str, Any] | None:
         return self.c.memory_repo.get_details(memory_id)

@@ -174,7 +174,7 @@ def search(query: str, limit: int, project: bool, source: str | None, scope: Rea
 @click.argument("memory_id")
 @click.option("--json", "as_json", is_flag=True, help="Print the record as JSON, as memory_details returns it")
 def details(memory_id: str, as_json: bool) -> None:
-    """Show the whole record of a memory: what, why, impact, files, journey and details."""
+    """Show the whole record of a memory: what, why, impact, files, journeys and details."""
     from arcane.services.memory import MemoryService
 
     with create_container() as container:
@@ -194,11 +194,12 @@ def details(memory_id: str, as_json: bool) -> None:
             click.echo(f"{label}: {record[key]}")
     if record["related_files"]:
         click.echo("Files: " + ", ".join(record["related_files"]))
-    if record["journey"]:
-        click.echo(f"Journey: {record['journey']['title']} ({record['journey']['id']}, {record['journey']['status']})")
-    for key, label in (("supersedes", "Replaces"), ("superseded_by", "Replaced by")):
-        for other in [record[key]] if isinstance(record.get(key), dict) else record.get(key, []):
-            click.echo(f"{label}: {other['title']} ({other['id']})")
+    for journey in record["journeys"]:
+        click.echo(f"Journey: {journey['title']} ({journey['id']}, {journey['status']})")
+    for replaced in record.get("supersedes", []):
+        click.echo(f"Replaces: {replaced['title']} ({replaced['id']})")
+    if "superseded_by" in record:
+        click.echo(f"Replaced by: {record['superseded_by']['title']} ({record['superseded_by']['id']})")
     provenance = {k: v for k, v in record["provenance"].items() if v is not None}
     if provenance:
         click.echo("Provenance: " + ", ".join(f"{k}={v}" for k, v in provenance.items()))

@@ -105,6 +105,14 @@ def test_a_store_whose_index_has_details_but_no_files_is_upgraded_without_losing
     index = arcane.sql("SELECT rowid, title, details, related_files FROM memories_fts ORDER BY rowid")
     assert index[0] == (1, "Handler rewrite", "Notes here", PATH)
     triggers = arcane.sql("SELECT name FROM sqlite_master WHERE type = 'trigger' ORDER BY name")
+    assert {
+        "memories_ai",
+        "memories_au",
+        "memories_ad",
+        "memory_details_ai",
+        "memory_details_au",
+        "memory_details_ad",
+    } <= {name for (name,) in triggers}
 
     assert arcane.run(search) == first  # a second start changes nothing
     assert arcane.sql("SELECT rowid, title, details, related_files FROM memories_fts ORDER BY rowid") == index

@@ -229,7 +229,7 @@ def _create_server(container: ServiceContainer) -> Server:
                 name="memory_details",
                 description=(
                     "Get the whole record of a memory by ID or prefix: what, why, impact, related_files, "
-                    "journey, supersedes and superseded_by, provenance and the details body. "
+                    "journeys, supersedes and superseded_by, provenance and the details body. "
                     "Works when the memory has no details body (`has_details` false, `body` empty)."
                 ),
                 input_schema={
