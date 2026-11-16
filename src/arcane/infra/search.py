@@ -171,6 +171,7 @@ def tiered_search(
     if results is None:
         results = fts_results
         apply_strict_bonus(results, strict_ids)
+        results.sort(key=lambda x: x["score"], reverse=True)
 
     if org is not None:
         results = apply_scope_bonus(results, SCOPE_BONUS if reach == "layers" else WIDENED_SCOPE_BONUS)

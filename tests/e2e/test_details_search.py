@@ -330,3 +330,27 @@ def test_a_stopword_match_does_not_earn_the_local_bonus_when_widened(arcane: Arc
 
     # Hazelcast in a sibling project answers the query; the local row matches only "the".
     assert _titles(arcane.run(scenario))[0] == "Hazelcast cluster sizing"
+
+
+def test_a_keyword_only_cli_search_puts_a_whole_query_match_first(arcane: Arcane) -> None:
+    async def seed(c: Client) -> None:
+        for n in range(8):  # enough that "cache" is not in every memory and carries weight
+            await c.call("memory_save", title=f"Other {n}", what="Something else entirely")
+        for n in range(3):
+            await c.call("memory_save", title=f"Cache {n}", what="Cache cache cache", why="cache", impact="cache")
+        await c.call(
+            "memory_save", title="Notes", what="Sessions live in the cache, with " + "filler words " * 40, why="x"
+        )
+
+    arcane.run(seed)
+    # No --project or --scope, so the search has no org; the provider is unreachable, so only keywords rank.
+    result = subprocess.run(
+        [ARCANE, "search", "cache sessions", "--limit", "1"],
+        cwd=arcane.repo,
+        env=arcane.env("core"),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    # Only "Notes" holds both words. Three other memories out-score it on keywords alone.
+    assert "[1] Notes" in result.stdout
