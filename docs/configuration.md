@@ -89,6 +89,8 @@ This is safe to interrupt and re-run — the index is rebuilt atomically.
 
 Run it after upgrading to the release that searches details, too. The keyword index picks details up by itself the first time the store opens (a one-off rebuild that does nothing on later starts). The vectors do not: `arcane reindex` re-embeds every memory with the first 2000 characters of its details. Until then search still works, but a memory's vector reflects its title, what, why, impact and tags only. The same cut applies to later appends: text that lands past the first 2000 characters of a memory's details is searchable by keyword but is not in its vector.
 
+The release that searches `related_files` needs no reindex. The first start rebuilds the keyword index once, in one transaction, so every memory keeps its row and gains its file paths; later starts do nothing. File paths are not part of the embedding text, so they find a memory by keyword only.
+
 ---
 
 ## Context retrieval
