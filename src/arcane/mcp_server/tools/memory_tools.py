@@ -397,24 +397,7 @@ def handle_context(
 
 
 def handle_details(svc: MemoryService, memory_id: str) -> str:
-    try:
-        detail = svc.get_details(memory_id)
-    except IdentifierResolutionError as exc:
-        return json.dumps({"error": str(exc)})
-    if not detail:
-        return json.dumps({"error": f"No details found for {memory_id}"})
-    full_id = detail["memory_id"]
-    payload: dict = {"memory_id": full_id, "body": detail["body"]}
-    memory = svc.c.memory_repo.get(full_id) or {}
-    payload["provenance"] = {k: memory.get(k) for k in ("commit_sha", "branch", "session_id", "thread_id")}
-    payload["provenance"]["dirty"] = None if memory.get("dirty") is None else bool(memory["dirty"])
-    replaced_by = svc.c.relationship_repo.superseded_by([full_id]).get(full_id)
-    if replaced_by:
-        payload["superseded_by"] = replaced_by
-    replaces = svc.c.relationship_repo.supersedes(full_id)
-    if replaces:
-        payload["supersedes"] = replaces
-    return json.dumps(payload)
+    return json.dumps(svc.get_record(memory_id))
 
 
 def handle_update(

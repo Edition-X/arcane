@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -163,23 +164,45 @@ def search(query: str, limit: int, project: bool, source: str | None, scope: Rea
             click.echo(f"     Why: {r['why']}")
         if r.get("impact"):
             click.echo(f"     Impact: {r['impact']}")
+        if r.get("related_files"):
+            click.echo(f"     Files: {', '.join(r['related_files'])}")
         if r.get("has_details"):
             click.echo(f"     Details: available (use `arcane details {r['id'][:12]}`)")
 
 
 @click.command()
 @click.argument("memory_id")
-def details(memory_id: str) -> None:
-    """Fetch full details for a memory."""
+@click.option("--json", "as_json", is_flag=True, help="Print the record as JSON, as memory_details returns it")
+def details(memory_id: str, as_json: bool) -> None:
+    """Show the whole record of a memory: what, why, impact, files, journey and details."""
     from arcane.services.memory import MemoryService
 
     with create_container() as container:
-        detail = MemoryService(container).get_details(memory_id)
+        record = MemoryService(container).get_record(memory_id)
 
-    if not detail:
-        click.echo(f"No details found for {memory_id}")
+    if "error" in record:
+        raise click.ClickException(record["error"])
+    if as_json:
+        click.echo(json.dumps(record, indent=2))
         return
-    click.echo(detail["body"])
+    click.echo(f"{record['title']} ({record['memory_id']})")
+    meta = (record["category"], record["date"], ", ".join(record["tags"]))
+    click.echo(" | ".join(part for part in meta if part))
+    click.echo(f"What: {record['what']}")
+    for label, key in (("Why", "why"), ("Impact", "impact")):
+        if record[key]:
+            click.echo(f"{label}: {record[key]}")
+    if record["related_files"]:
+        click.echo("Files: " + ", ".join(record["related_files"]))
+    if record["journey"]:
+        click.echo(f"Journey: {record['journey']['title']} ({record['journey']['id']}, {record['journey']['status']})")
+    for key, label in (("supersedes", "Replaces"), ("superseded_by", "Replaced by")):
+        for other in [record[key]] if isinstance(record.get(key), dict) else record.get(key, []):
+            click.echo(f"{label}: {other['title']} ({other['id']})")
+    provenance = {k: v for k, v in record["provenance"].items() if v is not None}
+    if provenance:
+        click.echo("Provenance: " + ", ".join(f"{k}={v}" for k, v in provenance.items()))
+    click.echo(f"Details:\n{record['body']}" if record["has_details"] else "Details: none")
 
 
 @click.command()

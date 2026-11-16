@@ -949,6 +949,52 @@ class MemoryService:
         details = self.c.memory_repo.get_details(full_id)
         return quality_warnings(existing.get("category"), existing.get("why"), (details or {}).get("body"))
 
+    def get_record(self, memory_id: str) -> dict[str, Any]:
+        """The whole record of one memory, details body included, or ``{"error": ...}``.
+
+        Shared by the ``memory_details`` tool and ``arcane details`` so both show the same fields.
+        """
+        try:
+            full_id = self.c.memory_repo.resolve_prefix(memory_id)
+        except IdentifierResolutionError as exc:
+            return {"error": str(exc)}
+        memory = self.c.memory_repo.get(full_id) if full_id else None
+        if full_id is None or memory is None:
+            return {"error": f"Memory not found: {memory_id}"}
+        detail = self.get_details(full_id)
+        record: dict[str, Any] = {
+            "memory_id": full_id,
+            "title": memory["title"],
+            "category": memory.get("category"),
+            "tags": memory.get("tags", []),
+            "what": memory["what"],
+            "why": memory.get("why"),
+            "impact": memory.get("impact"),
+            "related_files": memory.get("related_files", []),
+            "date": memory.get("created_at", "")[:10],
+            "has_details": detail is not None,
+            "body": detail["body"] if detail else "",
+            "journey": self._journey_of(full_id),
+        }
+        record["provenance"] = {k: memory.get(k) for k in ("commit_sha", "branch", "session_id", "thread_id")}
+        record["provenance"]["dirty"] = None if memory.get("dirty") is None else bool(memory["dirty"])
+        replaced_by = self.c.relationship_repo.superseded_by([full_id]).get(full_id)
+        if replaced_by:
+            record["superseded_by"] = replaced_by
+        replaces = self.c.relationship_repo.supersedes(full_id)
+        if replaces:
+            record["supersedes"] = replaces
+        return record
+
+    def _journey_of(self, memory_id: str) -> dict[str, Any] | None:
+        """The journey a memory is part of, as ``{id, title, status}``, or ``None``."""
+        for rel in self.c.relationship_repo.get_from("memory", memory_id):
+            if rel["relation"] == "part_of" and rel["target_type"] == "journey":
+                journey = self.c.journey_repo.get(rel["target_id"])
+                if journey:
+                    return {"id": journey["id"], "title": journey["title"], "status": journey["status"]}
+        return None
+
     def get_details(self, memory_id: str) -> dict[str, Any] | None:
         return self.c.memory_repo.get_details(memory_id)
 
