@@ -246,3 +246,23 @@ def test_a_text_too_long_for_the_model_is_cut_and_still_embedded(arcane: Arcane,
     assert _titles(arcane.run(scenario)) == ["Long what"]
     assert len(ollama.prompts) > 2  # the save was refused and retried, then the search embedded its query
     assert arcane.sql("SELECT count(*) FROM memories_vec_rowids") == [(1,)]
+
+
+def test_details_only_matches_count_as_local_so_the_search_does_not_widen(arcane: Arcane) -> None:
+    async def scenario(c: Client) -> list[dict[str, Any]]:
+        for n in ("one", "two", "three"):
+            await c.call(
+                "memory_save",
+                title=f"Burrow survey {n}",
+                what="Counted burrows",
+                details="Notes on marsupial habitat",
+                project="widget",
+                org="acme",
+            )
+        await c.call("memory_save", title="Marsupial habitat", what="Sibling note", project="gadget", org="acme")
+        return await c.call("memory_search", query="marsupial habitat")
+
+    hits = arcane.run(scenario)
+    # Three local memories hold the words in their details, so the project is not thin and the sibling stays out.
+    assert {hit["project"] for hit in hits} == {"widget"}
+    assert len(hits) == 3
