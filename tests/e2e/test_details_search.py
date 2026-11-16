@@ -283,11 +283,11 @@ def test_details_only_matches_count_as_local_so_the_search_does_not_widen(arcane
 
 def test_a_widened_search_keeps_a_local_keyword_hit_in_the_top_results(arcane: Arcane, ollama: FakeOllama) -> None:
     async def scenario(c: Client) -> list[dict[str, Any]]:
-        # The phrase sits in a long details body, so the memory's vector is far from the query.
+        # The phrase is only in details, and the long what puts the memory's vector far from the query.
         await c.call(
             "memory_save",
             title="Rollout plan",
-            what="Staged the deploy",
+            what="Staged the deploy. " + "filler text about other things " * 20,
             details="Options considered: quokka lattice. " + "filler text about other things " * 60,
             project="widget",
             org="acme",
