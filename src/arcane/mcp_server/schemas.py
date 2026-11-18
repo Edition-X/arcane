@@ -34,6 +34,7 @@ def memory_save_schema() -> dict[str, Any]:
         "supersedes": "ID or prefix of an earlier memory this one replaces.",
         "ttl_days": "Days until this memory expires. Omit for permanent memories.",
         "confidence": "Confidence in accuracy 0.0–1.0. Default: omit.",
+        "revisit_when": "YYYY-MM-DD: memory_context lists this memory from that date on. Omit for none.",
     }
     for name, description in descriptions.items():
         properties[name]["description"] = description

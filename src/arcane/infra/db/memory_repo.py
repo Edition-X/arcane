@@ -62,6 +62,9 @@ def _parse_list(raw: Any) -> list[str]:
     return []
 
 
+# Most memories memory_context lists as due for a second look.
+REVISIT_CAP = 5
+
 PROVENANCE_COLUMNS = ("commit_sha", "branch", "dirty", "session_id", "thread_id")
 
 
@@ -89,8 +92,8 @@ class MemoryRepository:
                 id, title, what, why, impact, tags, category, project, org,
                 source, related_files, file_path, section_anchor,
                 created_at, updated_at, metadata, ttl_days, confidence,
-                commit_sha, branch, dirty, session_id, thread_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                commit_sha, branch, dirty, session_id, thread_id, revisit_when
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 mem["id"],
@@ -116,6 +119,7 @@ class MemoryRepository:
                 None if mem.get("dirty") is None else int(bool(mem["dirty"])),
                 mem.get("session_id"),
                 mem.get("thread_id"),
+                mem.get("revisit_when"),
             ),
         )
         rowid = cursor.lastrowid
@@ -139,6 +143,50 @@ class MemoryRepository:
             (memory_id,),
         )
         return _process_row(row) if row else None
+
+    def _within(self, org: str | None, project: str | None) -> tuple[str, list[Any]]:
+        """WHERE fragment for unexpired rows of exactly *org* and *project*; *org* ``None`` reads every project."""
+        not_expired = self._not_expired_clause()
+        if org is None:
+            return not_expired, []
+        return f"m.org = ? AND m.project = ? AND {not_expired}", [org, project or ""]
+
+    def by_commit_sha(self, sha: str, org: str | None = None, project: str | None = None) -> list[dict[str, Any]]:
+        """Memories saved at commit *sha*, whether the stored SHA is full or abbreviated (7+ characters)."""
+        where, params = self._within(org, project)
+        # The prefix match cannot use an index; a scan of the scoped rows (every row with --all) is cheap at this size.
+        rows = self.db.fetchall(
+            "SELECT m.* FROM memories m WHERE "
+            "(m.commit_sha = ? OR (length(m.commit_sha) >= 7 AND ? LIKE m.commit_sha || '%')) "
+            f"AND {where}",
+            [sha, sha, *params],
+        )
+        return [_process_row(r) for r in rows]
+
+    def why_candidates_for_files(
+        self,
+        basenames: list[str],
+        categories: tuple[str, ...],
+        org: str | None = None,
+        project: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Memories of *categories* whose ``related_files`` text contains any of *basenames*.
+
+        A superset of the memories that name those files: the caller decides on the full path.
+        """
+        if not basenames or not categories:
+            return []
+        where, params = self._within(org, project)
+        marks = " OR ".join("m.related_files LIKE ? ESCAPE '\\'" for _ in basenames)
+        # related_files is stored as JSON with ASCII escapes ("café" as "caf\u00e9"), so match that form.
+        stored = [json.dumps(b)[1:-1] for b in basenames]
+        likes = ["%" + b.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%" for b in stored]
+        cats = ",".join("?" * len(categories))
+        rows = self.db.fetchall(
+            f"SELECT m.* FROM memories m WHERE m.category IN ({cats}) AND ({marks}) AND {where}",
+            [*categories, *likes, *params],
+        )
+        return [_process_row(r) for r in rows]
 
     def get_many(self, memory_ids: list[str]) -> list[dict[str, Any]]:
         """Fetch multiple memories by exact ID in a single query."""
@@ -186,8 +234,11 @@ class MemoryRepository:
         tags: list[str] | None = None,
         details_append: str | None = None,
         provenance: dict[str, Any] | None = None,
+        revisit_when: str | None = None,
     ) -> bool:
         """Update an existing memory by exact ID.
+
+        ``revisit_when`` is set to a date, cleared by an empty string, left alone when ``None``.
 
         ``provenance`` replaces all five origin columns (``None`` values included),
         so a re-save that rewrote the content also records where it was rewritten.
@@ -216,6 +267,10 @@ class MemoryRepository:
         if tags is not None:
             sets.append("tags = ?")
             params.append(json.dumps(tags))
+
+        if revisit_when is not None:
+            sets.append("revisit_when = ?")
+            params.append(revisit_when or None)
 
         if provenance is not None:
             for column in PROVENANCE_COLUMNS:
@@ -264,6 +319,15 @@ class MemoryRepository:
     def _not_expired_clause() -> str:
         """SQL fragment that filters out expired memories (lazy expiry)."""
         return "(m.ttl_days IS NULL OR (unixepoch('now') - unixepoch(m.created_at)) < m.ttl_days * 86400)"
+
+    @staticmethod
+    def _not_superseded_clause() -> str:
+        """SQL fragment that filters out memories a newer one replaced (a ``supersedes`` edge points at them)."""
+        return """NOT EXISTS (
+            SELECT 1 FROM relationships r
+            WHERE r.relation = 'supersedes' AND r.source_type = 'memory' AND r.target_type = 'memory'
+              AND r.target_id = m.id
+        )"""
 
     @staticmethod
     def _scope_where(
@@ -329,6 +393,50 @@ class MemoryRepository:
             else:
                 r["scope_rank"] = 0
         return rows
+
+    def due_for_revisit(
+        self,
+        today: str,
+        limit: int = REVISIT_CAP,
+        project: str | None = None,
+        source: str | None = None,
+        org: str | None = None,
+        include_org: bool = True,
+        include_global: bool = True,
+        reach: Reach = "layers",
+    ) -> list[dict[str, Any]]:
+        """Live memories whose ``revisit_when`` is *today* or earlier, oldest date first.
+
+        Live means not expired and not replaced (no ``supersedes`` edge points at it).
+        The scope arguments match ``list_recent`` so the block covers what context reads.
+        """
+        where_clauses = [
+            "m.revisit_when IS NOT NULL",
+            "m.revisit_when <= ?",
+            MemoryRepository._not_expired_clause(),
+            MemoryRepository._not_superseded_clause(),
+        ]
+        params: list[Any] = [today]
+        if org is not None:
+            scope_sql, scope_params = self._scope_where(org, project, include_org, include_global, reach=reach)
+            where_clauses.append(scope_sql)
+            params += scope_params
+        elif project:
+            where_clauses.append("m.project = ?")
+            params.append(project)
+        if source:
+            where_clauses.append("m.source = ?")
+            params.append(source)
+        rows = self.db.fetchall(
+            f"""
+            SELECT m.* FROM memories m
+            WHERE {" AND ".join(where_clauses)}
+            ORDER BY m.revisit_when ASC, m.created_at ASC
+            LIMIT ?
+            """,
+            [*params, limit],
+        )
+        return [_process_row(r) for r in rows]
 
     def find_by_title(self, title: str, project: str, org: str | None = None) -> dict[str, Any] | None:
         """Newest live memory titled *title* (ignoring case and edge spaces) in the exact scope layer.
@@ -436,12 +544,16 @@ class MemoryRepository:
         )
         return [_process_row(r) for r in rows]
 
-    def list_for_export(self, org: str) -> list[dict[str, Any]]:
-        """Every memory in *org*, with its details body, oldest first."""
+    def list_for_export(self, org: str, project: str | None = None) -> list[dict[str, Any]]:
+        """Every memory in *org* (only *project*'s when given), with its details body, oldest first."""
+        where, params = ("m.org = ?", [org])
+        if project is not None:
+            where += " AND m.project = ?"
+            params.append(project)
         rows = self.db.fetchall(
             "SELECT m.*, d.body AS details FROM memories m LEFT JOIN memory_details d ON d.memory_id = m.id "
-            "WHERE m.org = ? ORDER BY m.created_at",
-            (org,),
+            f"WHERE {where} ORDER BY m.created_at",
+            tuple(params),
         )
         return [_process_row(r) for r in rows]
 
@@ -475,11 +587,7 @@ class MemoryRepository:
             JOIN memories m ON m.rowid = memories_fts.rowid
             WHERE memories_fts MATCH ?
               AND m.id IN ({",".join("?" * len(ids))})
-              AND NOT EXISTS (
-                  SELECT 1 FROM relationships r
-                  WHERE r.relation = 'supersedes' AND r.source_type = 'memory' AND r.target_type = 'memory'
-                    AND r.target_id = m.id
-              )
+              AND {MemoryRepository._not_superseded_clause()}
             """,
             [fts_query, *ids],
         )
