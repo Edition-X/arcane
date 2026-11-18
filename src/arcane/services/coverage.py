@@ -10,12 +10,12 @@ branch, a ``pr-N`` style tag names the PR, or its text says "PR N", "PR #N" or "
 from __future__ import annotations
 
 import re
-import subprocess
 from collections import defaultdict
 from datetime import date
 from typing import Any
 
 from arcane.domain.scope import resolve_scope
+from arcane.infra.git import git_output
 from arcane.services.container import ServiceContainer
 
 RULES = ("commit_sha", "branch", "tag", "text")
@@ -31,27 +31,7 @@ _PR_TEXT = re.compile(r"(?<![A-Za-z0-9])prs?[-_ ]?#?(\d+)(?!\d)", re.IGNORECASE)
 _BARE_NUMBER = re.compile(r"(?<![A-Za-z0-9-])#(\d+)(?!\d)")
 
 _FIELD_SEP, _RECORD_SEP = "\x1f", "\x1e"
-_GIT_TIMEOUT_S = 60
 SHORT_SHA_LEN = 7
-
-
-def _git(cwd: str, *args: str) -> str | None:
-    """Stdout of ``git -C cwd <args>``, or None when git fails, times out or is missing.
-
-    Empty stdout is a real answer (``rev-list`` of an empty range), so it comes back as "".
-    ``--no-optional-locks`` keeps a read from taking ``index.lock`` under the agent's own git.
-    """
-    try:
-        done = subprocess.run(
-            ["git", "--no-optional-locks", "-C", cwd, *args],
-            capture_output=True,
-            text=True,
-            timeout=_GIT_TIMEOUT_S,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return done.stdout if done.returncode == 0 else None
 
 
 def default_branch(cwd: str) -> str | None:
@@ -60,7 +40,7 @@ def default_branch(cwd: str) -> str | None:
     Tried in order: ``origin/HEAD``, ``origin/main``, ``origin/master``, local ``main``, ``master``,
     then ``HEAD``. A remote branch wins over the local one, so merges not yet pushed are not counted.
     """
-    remote_head = _git(cwd, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+    remote_head = git_output(cwd, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
     if remote_head and remote_head.strip():
         return remote_head.strip()
     for name, ref in (
@@ -69,9 +49,9 @@ def default_branch(cwd: str) -> str | None:
         ("main", "refs/heads/main"),
         ("master", "refs/heads/master"),
     ):
-        if _git(cwd, "rev-parse", "--verify", "--quiet", ref) is not None:
+        if git_output(cwd, "rev-parse", "--verify", "--quiet", ref) is not None:
             return name
-    return "HEAD" if _git(cwd, "rev-parse", "--verify", "--quiet", "HEAD") is not None else None
+    return "HEAD" if git_output(cwd, "rev-parse", "--verify", "--quiet", "HEAD") is not None else None
 
 
 def walk_history(cwd: str, branch: str, since: date) -> list[tuple[dict[str, Any], list[str]]] | None:
@@ -87,7 +67,7 @@ def walk_history(cwd: str, branch: str, since: date) -> list[tuple[dict[str, Any
     the same name to the branch rule, so a memory saved on it matches both.
     """
     fmt = _FIELD_SEP.join(["%H", "%P", "%cs", "%s", "%b"]) + _RECORD_SEP
-    out = _git(cwd, "log", "--first-parent", f"--format={fmt}", branch)
+    out = git_output(cwd, "log", "--first-parent", f"--format={fmt}", branch)
     if out is None:
         return None
     walked: list[tuple[dict[str, Any], list[str]]] = []
@@ -113,7 +93,7 @@ def walk_history(cwd: str, branch: str, since: date) -> list[tuple[dict[str, Any
             # GitHub puts the PR title on the first body line; the subject only says "Merge pull request".
             title = next((line for line in body.splitlines() if line.strip()), subject)
             item["subject"] = title.strip()
-            merged = _git(cwd, "rev-list", f"{sha}^1..{sha}^2")
+            merged = git_output(cwd, "rev-list", f"{sha}^1..{sha}^2")
             shas += (merged or "").split()
         elif squash and len(parents.split()) == 1:
             item.update(kind="pr", number=int(squash.group(1)))

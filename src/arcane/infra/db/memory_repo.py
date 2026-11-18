@@ -144,6 +144,50 @@ class MemoryRepository:
         )
         return _process_row(row) if row else None
 
+    def _within(self, org: str | None, project: str | None) -> tuple[str, list[Any]]:
+        """WHERE fragment for unexpired rows of exactly *org* and *project*; *org* ``None`` reads every project."""
+        not_expired = self._not_expired_clause()
+        if org is None:
+            return not_expired, []
+        return f"m.org = ? AND m.project = ? AND {not_expired}", [org, project or ""]
+
+    def by_commit_sha(self, sha: str, org: str | None = None, project: str | None = None) -> list[dict[str, Any]]:
+        """Memories saved at commit *sha*, whether the stored SHA is full or abbreviated (7+ characters)."""
+        where, params = self._within(org, project)
+        # The prefix match cannot use an index; a scan of the scoped rows (every row with --all) is cheap at this size.
+        rows = self.db.fetchall(
+            "SELECT m.* FROM memories m WHERE "
+            "(m.commit_sha = ? OR (length(m.commit_sha) >= 7 AND ? LIKE m.commit_sha || '%')) "
+            f"AND {where}",
+            [sha, sha, *params],
+        )
+        return [_process_row(r) for r in rows]
+
+    def why_candidates_for_files(
+        self,
+        basenames: list[str],
+        categories: tuple[str, ...],
+        org: str | None = None,
+        project: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Memories of *categories* whose ``related_files`` text contains any of *basenames*.
+
+        A superset of the memories that name those files: the caller decides on the full path.
+        """
+        if not basenames or not categories:
+            return []
+        where, params = self._within(org, project)
+        marks = " OR ".join("m.related_files LIKE ? ESCAPE '\\'" for _ in basenames)
+        # related_files is stored as JSON with ASCII escapes ("café" as "caf\u00e9"), so match that form.
+        stored = [json.dumps(b)[1:-1] for b in basenames]
+        likes = ["%" + b.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%" for b in stored]
+        cats = ",".join("?" * len(categories))
+        rows = self.db.fetchall(
+            f"SELECT m.* FROM memories m WHERE m.category IN ({cats}) AND ({marks}) AND {where}",
+            [*categories, *likes, *params],
+        )
+        return [_process_row(r) for r in rows]
+
     def get_many(self, memory_ids: list[str]) -> list[dict[str, Any]]:
         """Fetch multiple memories by exact ID in a single query."""
         if not memory_ids:
