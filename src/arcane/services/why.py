@@ -6,7 +6,7 @@ import os
 import posixpath
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from arcane.domain.scope import resolve_write_scope
 from arcane.infra.git import git_output
@@ -34,7 +34,7 @@ def path_matches(stored: str, target: str) -> bool:
     absolute when the file lies outside the repo. They match when they are equal,
     or when *stored* ends with *target* at a ``/`` boundary, so ``src/a.py`` finds
     ``/x/repo/src/a.py`` but ``a.py`` never finds ``src/data.py`` or ``src/xa.py``.
-    Shared by any caller that looks up memories by file.
+    Kept public for prior decisions on save, which looks up memories by file the same way.
     """
     stored, target = normalize_path(stored), normalize_path(target)
     return stored == target or stored.endswith("/" + target.lstrip("/"))
@@ -42,8 +42,10 @@ def path_matches(stored: str, target: str) -> bool:
 
 @dataclass
 class WhyResult:
+    """What ``why`` found: the files looked up, and the current and replaced memories behind them."""
+
     target: str
-    kind: str  # "file" or "commit"
+    kind: Literal["file", "commit"]
     commit: str | None = None
     files: list[str] = field(default_factory=list)
     memories: list[dict[str, Any]] = field(default_factory=list)
@@ -67,6 +69,8 @@ def _git(cwd: str, *args: str) -> str | None:
 
 
 class WhyService:
+    """Looks up the decisions and bugs behind a file or a commit in the memory store."""
+
     def __init__(self, container: ServiceContainer) -> None:
         self.c = container
 
@@ -83,16 +87,20 @@ class WhyService:
             WhyError: *target* looks like a commit that the repo does not have.
         """
         cwd = cwd or os.getcwd()
-        root = _git(cwd, "rev-parse", "--show-toplevel") or cwd
-        sha = _git(cwd, "rev-parse", "--verify", "--quiet", f"{target}^{{commit}}") if _SHA.fullmatch(target) else None
-        if _SHA.fullmatch(target) and not sha and not os.path.exists(os.path.join(cwd, target)):
-            raise WhyError(f"{target} is not a commit in this repository, and no such file exists.")
+        toplevel = _git(cwd, "rev-parse", "--show-toplevel")
+        root = toplevel or cwd
+        looks_like_sha = _SHA.fullmatch(target) is not None
+        sha = _git(cwd, "rev-parse", "--verify", "--quiet", f"{target}^{{commit}}") if looks_like_sha else None
+        if looks_like_sha and not sha and not os.path.exists(os.path.join(cwd, target)):
+            where = "this repository" if toplevel else f"{cwd}, which is not inside a git repository"
+            raise WhyError(f"{target} is not a commit in {where}, and no such file exists.")
 
         scope = None if everywhere else resolve_write_scope(None, self.c.config, repo_path=cwd)
+        org, project = (None, None) if scope is None else (scope.org, scope.project)
         if sha:
             names = self._touched(cwd, sha)
             result = WhyResult(target=target, kind="commit", commit=sha, files=[normalize_path(n) for n in names if n])
-            rows = [dict(r, via="commit") for r in self._by_commit(sha, scope)]
+            rows = [dict(r, via="commit") for r in self.c.memory_repo.by_commit_sha(sha, org, project)]
         else:
             absolute = os.path.abspath(os.path.join(cwd, target))
             try:
@@ -103,7 +111,7 @@ class WhyService:
             result = WhyResult(target=target, kind="file", files=[path])
             rows = []
         seen = {r["id"] for r in rows}
-        for r in self._by_files(result.files, scope):
+        for r in self._by_files(result.files, org, project):
             if r["id"] not in seen:
                 seen.add(r["id"])
                 rows.append(dict(r, via="file"))
@@ -122,20 +130,20 @@ class WhyService:
 
     @staticmethod
     def _touched(cwd: str, sha: str) -> list[str]:
-        """Files *sha* changed; for a merge, the files it brought in from the second parent onto the first."""
+        """Files *sha* changed; for a merge, the files it brought in from the second parent onto the first.
+
+        ``core.quotePath=false`` keeps non-ASCII names as they are, not quoted octal escapes.
+        """
         parents = (_git(cwd, "rev-list", "--parents", "-n", "1", sha) or "").split()[1:]
+        unquoted = ("-c", "core.quotePath=false")
         if len(parents) > 1:
-            out = _git(cwd, "diff", "--name-only", f"{sha}^1", sha)
+            out = _git(cwd, *unquoted, "diff", "--name-only", f"{sha}^1", sha)
         else:
-            out = _git(cwd, "show", "--name-only", "--format=", sha)
+            out = _git(cwd, *unquoted, "show", "--name-only", "--format=", sha)
         return (out or "").splitlines()
 
-    def _by_commit(self, sha: str, scope: Any) -> list[dict[str, Any]]:
-        org, project = (None, None) if scope is None else (scope.org, scope.project)
-        return self.c.memory_repo.by_commit_sha(sha, org, project)
-
-    def _by_files(self, files: list[str], scope: Any) -> list[dict[str, Any]]:
-        org, project = (None, None) if scope is None else (scope.org, scope.project)
+    def _by_files(self, files: list[str], org: str | None, project: str | None) -> list[dict[str, Any]]:
+        """Decisions and bugs in *org*/*project* (``None`` for all) whose related files name one of *files*."""
         rows = self.c.memory_repo.why_candidates_for_files(
             [os.path.basename(f) for f in files], WHY_CATEGORIES, org, project
         )

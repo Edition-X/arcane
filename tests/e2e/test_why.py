@@ -26,7 +26,7 @@ def _why(arcane: Arcane, *args: str) -> dict[str, Any]:
     return out
 
 
-def _ids(entries: list[dict[str, Any]]) -> list[str]:
+def _titles(entries: list[dict[str, Any]]) -> list[str]:
     return [e["title"] for e in entries]
 
 
@@ -87,6 +87,14 @@ def _seed(arcane: Arcane) -> tuple[str, str]:
             category="bug",
             related_files=["src/ttl.py"],
         )
+        await c.call(
+            "memory_save",
+            title="Cache stampede",
+            what="Misses piled up on expiry",
+            why="No lock around refill",
+            category="bug",
+            related_files=["src/cache.py"],
+        )
 
     arcane.run(at_second)
     return first, second
@@ -97,19 +105,23 @@ def test_why_file_lists_current_then_replaced(arcane: Arcane) -> None:
 
     out = _why(arcane, "src/cache.py")
     assert out["kind"] == "file" and out["files"] == ["src/cache.py"]
-    assert _ids(out["memories"]) == ["Use redis"]
-    assert out["memories"][0]["why"] == "Persistence"
-    assert out["memories"][0]["project"] == "widget"
-    assert _ids(out["superseded"]) == ["Use memcached"]
-    assert out["superseded"][0]["superseded_by"]["id"] == out["memories"][0]["id"]
+    # Newest first: the bug saved at the second commit, then the decision from the first.
+    assert _titles(out["memories"]) == ["Cache stampede", "Use redis"]
+    redis = out["memories"][1]
+    assert redis["why"] == "Persistence"
+    assert redis["project"] == "widget"
+    assert _titles(out["superseded"]) == ["Use memcached"]
+    assert out["superseded"][0]["superseded_by"]["id"] == redis["id"]
     # An absolute path under the repo means the same file.
     assert _why(arcane, str(arcane.repo / "src/cache.py")) == {**out, "target": str(arcane.repo / "src/cache.py")}
 
     everywhere = _why(arcane, "src/cache.py", "--all")
-    assert sorted(_ids(everywhere["memories"])) == ["Cache elsewhere", "Use redis"]
+    assert sorted(_titles(everywhere["memories"])) == ["Cache elsewhere", "Cache stampede", "Use redis"]
 
     text = arcane.cli("why", "src/cache.py").stdout
-    assert text.index("Use redis") < text.index("Replaced:") < text.index("Use memcached")
+    assert (
+        text.index("Cache stampede") < text.index("Use redis") < text.index("Replaced:") < text.index("Use memcached")
+    )
     assert "Replaced by" in text
 
 
@@ -128,8 +140,12 @@ def test_why_commit_lists_its_memories_then_file_decisions(arcane: Arcane) -> No
     out = _why(arcane, second[:8])
     assert out["kind"] == "commit" and out["commit"] == second
     assert out["files"] == ["src/cache.py"]
-    assert [(m["title"], m["via"]) for m in out["memories"]] == [("Evict by TTL", "commit"), ("Use redis", "file")]
-    assert _ids(out["superseded"]) == ["Use memcached"]
+    assert [(m["title"], m["via"]) for m in out["memories"]] == [
+        ("Cache stampede", "commit"),
+        ("Evict by TTL", "commit"),
+        ("Use redis", "file"),
+    ]
+    assert _titles(out["superseded"]) == ["Use memcached"]
 
     # Memories saved at the first commit match by their stamped SHA, whatever their category.
     at_first = _why(arcane, first)
@@ -170,3 +186,24 @@ def test_why_merge_commit_lists_the_files_it_brought_in(arcane: Arcane) -> None:
     out = _why(arcane, merge[:8])
     assert out["files"] == ["src/merged.py"]
     assert [(m["title"], m["via"]) for m in out["memories"]] == [("Merge the parser", "file")]
+
+
+def test_why_finds_a_file_with_a_non_ascii_name(arcane: Arcane) -> None:
+    sha = _commit(arcane, "src/café.py", "accents\n")
+
+    async def save(c: Client) -> None:
+        await c.call(
+            "memory_save",
+            title="Keep the accent",
+            what="The module name is café",
+            why="Matches the product",
+            category="decision",
+            related_files=["src/café.py"],
+        )
+
+    arcane.run(save)
+    assert _titles(_why(arcane, "src/café.py")["memories"]) == ["Keep the accent"]
+    # git quotes non-ASCII names by default; the commit route must still see the real path.
+    by_commit = _why(arcane, sha[:8])
+    assert by_commit["files"] == ["src/café.py"]
+    assert [(m["title"], m["via"]) for m in by_commit["memories"]] == [("Keep the accent", "commit")]

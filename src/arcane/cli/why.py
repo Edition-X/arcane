@@ -25,7 +25,15 @@ def _print_entry(entry: dict[str, Any]) -> None:
 
 @click.command()
 @click.argument("target")
-@click.option("--all", "everywhere", is_flag=True, help="Read every project, not only the current one.")
+@click.option(
+    "--all",
+    "everywhere",
+    is_flag=True,
+    help=(
+        "Read every project, not only the current one. "
+        "A stored absolute path from another repo matches by its repo-relative tail."
+    ),
+)
 @click.option("--json", "as_json", is_flag=True, help="Print the result as JSON, for agents.")
 def why(target: str, everywhere: bool, as_json: bool) -> None:
     """Show the decisions and bugs behind a file path or a commit (7+ hex characters).

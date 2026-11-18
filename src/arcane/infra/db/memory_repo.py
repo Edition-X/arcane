@@ -145,7 +145,7 @@ class MemoryRepository:
         return _process_row(row) if row else None
 
     def _within(self, org: str | None, project: str | None) -> tuple[str, list[Any]]:
-        """WHERE fragment for unexpired rows of exactly *org* and *project*; both ``None`` reads every project."""
+        """WHERE fragment for unexpired rows of exactly *org* and *project*; *org* ``None`` reads every project."""
         not_expired = self._not_expired_clause()
         if org is None:
             return not_expired, []
@@ -154,6 +154,7 @@ class MemoryRepository:
     def by_commit_sha(self, sha: str, org: str | None = None, project: str | None = None) -> list[dict[str, Any]]:
         """Memories saved at commit *sha*, whether the stored SHA is full or abbreviated (7+ characters)."""
         where, params = self._within(org, project)
+        # The prefix match cannot use an index; a scan of one project's rows is cheap at this size.
         rows = self.db.fetchall(
             "SELECT m.* FROM memories m WHERE "
             "(m.commit_sha = ? OR (length(m.commit_sha) >= 7 AND ? LIKE m.commit_sha || '%')) "
@@ -177,7 +178,9 @@ class MemoryRepository:
             return []
         where, params = self._within(org, project)
         marks = " OR ".join("m.related_files LIKE ? ESCAPE '\\'" for _ in basenames)
-        likes = ["%" + b.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%" for b in basenames]
+        # related_files is stored as JSON with ASCII escapes ("café" as "caf\u00e9"), so match that form.
+        stored = [json.dumps(b)[1:-1] for b in basenames]
+        likes = ["%" + b.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%" for b in stored]
         cats = ",".join("?" * len(categories))
         rows = self.db.fetchall(
             f"SELECT m.* FROM memories m WHERE m.category IN ({cats}) AND ({marks}) AND {where}",
