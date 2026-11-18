@@ -15,13 +15,16 @@ EXCERPT_CHARS = 300
 # Only decisions are weighed against a new decision.
 PRIOR_CATEGORIES = ("decision",)
 
-# The heading that opens an options section: "## Options considered", "**Rejected**", or a
-# plain "Alternatives:" line. The words end the heading or take a colon, so prose such as
-# "Options were limited" or "### Rejected approach" is not taken for one.
+# The heading that opens an options section: a markdown heading ("## Alternatives considered"),
+# a bold one ("**Rejected**", "**Options considered:**"), a bare "Options considered" line, or a
+# plain line whose words end in a colon within 80 characters ("Options considered for the
+# cache:"). Prose such as "Options were limited." has no colon, so it is not taken for one.
 _OPTIONS_WORDS = r"(?:options(?:[ \t]+considered)?|rejected(?:[ \t]+options)?|alternatives)"
 _OPTIONS_HEADING = re.compile(
-    rf"^[ \t]*(?:#{{1,6}}[ \t]*|\*\*)?{_OPTIONS_WORDS}"
-    r"(?:(?:\*\*)?[ \t]*:(?:\*\*)?[ \t]*(?P<rest>.*)|(?:\*\*)?[ \t]*)$",
+    rf"^[ \t]*(?:#{{1,6}}[ \t]*{_OPTIONS_WORDS}\b[^:\n]*:?"
+    rf"|\*\*{_OPTIONS_WORDS}\b[^*\n]*\*\*[ \t]*:?|\*\*{_OPTIONS_WORDS}\b[^*:\n]*:\*\*"
+    rf"|{_OPTIONS_WORDS}\b[^:\n]{{0,80}}:|{_OPTIONS_WORDS}[ \t]*$)"
+    r"[ \t]*(?P<rest>.*)$",
     re.IGNORECASE,
 )
 # What ends an options section, besides a blank line after it: a markdown heading, a bold-only

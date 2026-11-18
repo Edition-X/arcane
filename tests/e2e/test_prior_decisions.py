@@ -146,10 +146,22 @@ def test_options_excerpt_stops_at_the_next_section_or_paragraph(arcane: Arcane) 
     async def scenario(c: Client) -> dict[str, Any]:
         await _decision(c, "Bold", [FILE], "**Options considered:** A, B\n**Decision:** A")
         await _decision(c, "Paragraph after", [FILE], "Options: A, B\n\nWe chose A since it is fast.")
-        await _decision(c, "Heading prose", [FILE], "### Rejected approach\nfoo")
+        await _decision(c, "Qualified", [FILE], "Context: x\n\nOptions considered for the cache:\n1. A\n2. B")
+        await _decision(c, "Bare", [FILE], "Options considered\n- A\n- B\n\nDecision: A")
         return await _decision(c, "Newest", [FILE])
+
+    async def headings(c: Client) -> dict[str, Any]:
+        await _decision(c, "Alternatives heading", [FILE], "## Alternatives considered\n- A\n- B")
+        await _decision(c, "Counted heading", [FILE], "## Options Considered (3)\n- A")
+        await _decision(c, "Titled heading", [FILE], "### Rejected approach\nfoo")
+        return await _decision(c, "Newest after headings", [FILE])
 
     by_title = {p["title"]: p for p in arcane.run(scenario)["prior_decisions"]}
     assert by_title["Bold"]["options"] == "A, B"
     assert by_title["Paragraph after"]["options"] == "A, B"
-    assert "options" not in by_title["Heading prose"]
+    assert by_title["Qualified"]["options"] == "1. A 2. B"
+    assert by_title["Bare"]["options"] == "- A - B"
+    by_title = {p["title"]: p for p in arcane.run(headings)["prior_decisions"]}
+    assert by_title["Alternatives heading"]["options"] == "- A - B"
+    assert by_title["Counted heading"]["options"] == "- A"
+    assert by_title["Titled heading"]["options"] == "foo"
