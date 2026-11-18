@@ -12,6 +12,8 @@ def git_output(cwd: str, *args: str) -> str | None:
 
     Empty stdout is a real answer (``rev-list`` of an empty range), so it comes back as "".
     ``--no-optional-locks`` keeps a read from taking ``index.lock`` under the agent's own git.
+    Git prints path names and messages as UTF-8 whatever the platform, so stdout is decoded as
+    UTF-8; Windows' locale code page would turn ``café`` into ``cafÃ©``.
 
     Args:
         cwd: The directory git runs in.
@@ -22,6 +24,8 @@ def git_output(cwd: str, *args: str) -> str | None:
             ["git", "--no-optional-locks", "-C", cwd, *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=GIT_TIMEOUT_S,
             check=False,
         )
