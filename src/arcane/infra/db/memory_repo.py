@@ -154,7 +154,7 @@ class MemoryRepository:
     def by_commit_sha(self, sha: str, org: str | None = None, project: str | None = None) -> list[dict[str, Any]]:
         """Memories saved at commit *sha*, whether the stored SHA is full or abbreviated (7+ characters)."""
         where, params = self._within(org, project)
-        # The prefix match cannot use an index; a scan of one project's rows is cheap at this size.
+        # The prefix match cannot use an index; a scan of the scoped rows (every row with --all) is cheap at this size.
         rows = self.db.fetchall(
             "SELECT m.* FROM memories m WHERE "
             "(m.commit_sha = ? OR (length(m.commit_sha) >= 7 AND ? LIKE m.commit_sha || '%')) "

@@ -159,7 +159,11 @@ def test_why_rejects_an_unknown_commit(arcane: Arcane) -> None:
 
     bad = arcane.cli("why", "deadbeef1", check=False)
     assert bad.returncode != 0
-    assert "not a commit" in bad.stderr
+    assert "names no single commit" in bad.stderr
+
+    # Hex characters that name an existing file take the file route.
+    _commit(arcane, "abcdef12", "a file with a hex name\n")
+    assert _why(arcane, "abcdef12")["kind"] == "file"
 
 
 def test_why_merge_commit_lists_the_files_it_brought_in(arcane: Arcane) -> None:

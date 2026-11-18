@@ -34,7 +34,7 @@ def path_matches(stored: str, target: str) -> bool:
     absolute when the file lies outside the repo. They match when they are equal,
     or when *stored* ends with *target* at a ``/`` boundary, so ``src/a.py`` finds
     ``/x/repo/src/a.py`` but ``a.py`` never finds ``src/data.py`` or ``src/xa.py``.
-    Kept public for prior decisions on save, which looks up memories by file the same way.
+    Public so that prior decisions on save can match files the same way.
     """
     stored, target = normalize_path(stored), normalize_path(target)
     return stored == target or stored.endswith("/" + target.lstrip("/"))
@@ -93,7 +93,9 @@ class WhyService:
         sha = _git(cwd, "rev-parse", "--verify", "--quiet", f"{target}^{{commit}}") if looks_like_sha else None
         if looks_like_sha and not sha and not os.path.exists(os.path.join(cwd, target)):
             where = "this repository" if toplevel else f"{cwd}, which is not inside a git repository"
-            raise WhyError(f"{target} is not a commit in {where}, and no such file exists.")
+            raise WhyError(
+                f"{target} names no single commit in {where} (unknown or ambiguous), and no such file exists."
+            )
 
         scope = None if everywhere else resolve_write_scope(None, self.c.config, repo_path=cwd)
         org, project = (None, None) if scope is None else (scope.org, scope.project)
