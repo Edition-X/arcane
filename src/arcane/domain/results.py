@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 
 class MemorySaveResult(TypedDict):
@@ -11,3 +11,4 @@ class MemorySaveResult(TypedDict):
     action: Literal["created", "updated"]
     warnings: list[str]
     scope: NotRequired[dict[str, str]]
+    prior_decisions: NotRequired[list[dict[str, Any]]]
