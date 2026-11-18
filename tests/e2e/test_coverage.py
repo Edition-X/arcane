@@ -264,7 +264,9 @@ def test_edge_cases_exit_zero(arcane: Arcane, tmp_path: Path) -> None:
 def test_a_failing_git_log_is_an_error_not_an_empty_window(arcane: Arcane) -> None:
     repo = arcane.repo
     root = git(repo, "rev-list", "--max-parents=0", "HEAD").strip()
-    (repo / ".git" / "objects" / root[:2] / root[2:]).unlink()
+    loose = repo / ".git" / "objects" / root[:2] / root[2:]
+    loose.chmod(0o600)  # git writes objects read-only, which Windows will not unlink
+    loose.unlink()
 
     result = _coverage(arcane)
     assert result == {"error": "git log failed on main"}
