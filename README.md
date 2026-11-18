@@ -110,7 +110,7 @@ The CLI reads and writes the same store as the MCP server. `arcane <command> --h
 
 | Task | Command |
 |---|---|
-| Save a memory | `arcane save --title "..." --what "..." --category decision` |
+| Save a memory | `arcane save --title "..." --what "..." --category decision` (`--revisit-when YYYY-MM-DD` to resurface it later) |
 | Search | `arcane search "query"`, or `--project` / `--scope project\|org\|global\|all` to search from the current project |
 | Print context for an agent prompt | `arcane context` |
 | Read or delete one memory | `arcane details <id>`, `arcane delete <id>` |
@@ -119,6 +119,7 @@ The CLI reads and writes the same store as the MCP server. `arcane <command> --h
 | Ingest evidence | `arcane ingest git`, `arcane ingest gha --owner <owner> --repo <repo>`, `arcane ingest linear --team <key>` |
 | Analyse the store | `arcane analyze velocity`, `arcane analyze health`, `arcane analyze usage` |
 | Report on a period | `arcane report --days 7`, or `--since`/`--until`, `--org`, `--format json` |
+| Find PRs and commits with no memory | `arcane coverage`, in a git repo; `--days 30`, `--since`, `--json` |
 | Draft content | `arcane draft blog`, `arcane draft adr <memory-id>` |
 | Link and trace | `arcane link <source> <target> --relation led_to`, `arcane trace <id>` |
 | Export one org | `arcane export --org <org>` |

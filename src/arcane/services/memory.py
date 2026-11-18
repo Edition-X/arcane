@@ -25,7 +25,7 @@ from arcane.domain.scope import (
 )
 from arcane.infra.db.fts import key_terms_query, prefix_or_query
 from arcane.infra.db.ids import IdentifierResolutionError, resolve_entity_id
-from arcane.infra.db.memory_repo import join_details
+from arcane.infra.db.memory_repo import REVISIT_CAP, join_details
 from arcane.infra.db.schema import create_vec_table
 from arcane.infra.embeddings.base import EmbeddingsDisabled
 from arcane.infra.markdown import remove_session_memory, write_session_memory
@@ -570,6 +570,7 @@ class MemoryService:
                     tags=merged_tags,
                     details_append=details_append,
                     provenance=provenance.model_dump(),
+                    revisit_when=raw.revisit_when,
                 )
                 if embedding is not None:
                     self._store_embedding(current["rowid"], embedding)
@@ -893,10 +894,12 @@ class MemoryService:
         tags: list[str] | None = None,
         details_append: str | None = None,
         supersedes: str | None = None,
+        revisit_when: str | None = None,
     ) -> bool:
         """Update an existing memory (by ID or prefix) and refresh its embedding.
 
         ``supersedes`` is the full ID of a memory this one replaces (callers resolve prefixes).
+        ``revisit_when`` is a ``YYYY-MM-DD`` date (callers validate it), or an empty string to clear it.
         """
         full_id = self.c.memory_repo.resolve_prefix(memory_id)
         if full_id is None:
@@ -912,13 +915,19 @@ class MemoryService:
         assert sanitized_tags is None or isinstance(sanitized_tags, list)
         tags = sanitized_tags
         details_append = redact(details_append, self.c.ignore_patterns) if details_append is not None else None
-        embedding = self._prepare_embedding(
-            existing["title"],
-            what if what is not None else existing["what"],
-            why if why is not None else existing.get("why"),
-            impact if impact is not None else existing.get("impact"),
-            tags if tags is not None else existing.get("tags") or [],
-            self._details_after_append(full_id, details_append),
+        # A change to the date alone leaves the embedded text as it was.
+        text_changed = any(field is not None for field in (what, why, impact, tags, details_append))
+        embedding = (
+            self._prepare_embedding(
+                existing["title"],
+                what if what is not None else existing["what"],
+                why if why is not None else existing.get("why"),
+                impact if impact is not None else existing.get("impact"),
+                tags if tags is not None else existing.get("tags") or [],
+                self._details_after_append(full_id, details_append),
+            )
+            if text_changed
+            else None
         )
 
         with self.c.db.transaction():
@@ -929,6 +938,7 @@ class MemoryService:
                 impact=impact,
                 tags=tags,
                 details_append=details_append,
+                revisit_when=revisit_when,
             )
             if not updated:
                 return False
@@ -939,6 +949,37 @@ class MemoryService:
                 self.link_supersedes(full_id, supersedes)
             self._refresh_mirror(full_id)
         return True
+
+    def revisit_due(
+        self,
+        today: date,
+        limit: int = REVISIT_CAP,
+        project: str | None = None,
+        source: str | None = None,
+        org: str | None = None,
+        include_org: bool = True,
+        include_global: bool = True,
+        reach: Reach = "auto",
+    ) -> list[dict[str, Any]]:
+        """Current memories whose ``revisit_when`` has come, oldest date first.
+
+        Settles the reach as ``get_context_reach`` does for a call with no query, so the block
+        is the same whatever query the context was asked for. *today* comes from the caller
+        (``infra.clock.today``), so a malformed ``ARCANE_TODAY`` is reported before this runs.
+        """
+        if project:
+            project = resolve_read_project(project, self.c.config)
+        reach = self._effective_reach(reach, None, org, project, source)
+        return self.c.memory_repo.due_for_revisit(
+            today.isoformat(),
+            limit=limit,
+            project=project,
+            source=source,
+            org=org,
+            include_org=include_org,
+            include_global=include_global,
+            reach=reach,
+        )
 
     def quality_warnings_for(self, memory_id: str) -> list[str]:
         """What still applies to a stored memory, as save would report it."""
@@ -976,6 +1017,8 @@ class MemoryService:
             "body": detail["body"] if detail else "",
             "journeys": self._journeys_of(memory["id"]),
         }
+        if memory.get("revisit_when"):
+            record["revisit_when"] = memory["revisit_when"]
         full_id = memory["id"]
         record["provenance"] = {k: memory.get(k) for k in ("commit_sha", "branch", "session_id", "thread_id")}
         record["provenance"]["dirty"] = None if memory.get("dirty") is None else bool(memory["dirty"])

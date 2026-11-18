@@ -11,6 +11,7 @@ from arcane.cli.analyze import analyze
 from arcane.cli.artifact import artifact
 from arcane.cli.backup import backup
 from arcane.cli.config import config
+from arcane.cli.coverage import coverage
 from arcane.cli.draft import draft
 from arcane.cli.ingest import ingest
 from arcane.cli.journey import journey
@@ -80,6 +81,7 @@ main.add_command(link)
 main.add_command(trace)
 main.add_command(why)
 main.add_command(migrate)
+main.add_command(coverage)
 main.add_command(config)
 main.add_command(ingest)
 main.add_command(analyze)

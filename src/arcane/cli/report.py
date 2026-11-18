@@ -4,20 +4,11 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 import click
 
-from arcane.cli._utils import create_container
-
-
-def _parse_date(value: str | None, param: str) -> date | None:
-    if value is None:
-        return None
-    try:
-        return datetime.strptime(value, "%Y-%m-%d").date()
-    except ValueError as exc:
-        raise click.BadParameter("use YYYY-MM-DD", param_hint=param) from exc
+from arcane.cli._utils import create_container, parse_date
 
 
 @click.command()
@@ -32,8 +23,8 @@ def report(since: str | None, until: str | None, days: int, org: str | None, pro
     from arcane.domain.scope import canonicalize_project, slugify
     from arcane.services.report import build_report, render_markdown
 
-    end = _parse_date(until, "--until") or date.today()
-    start = _parse_date(since, "--since") or end - timedelta(days=max(days, 1) - 1)
+    end = parse_date(until, "--until") or date.today()
+    start = parse_date(since, "--since") or end - timedelta(days=max(days, 1) - 1)
     if start > end:
         raise click.BadParameter("must not be after --until", param_hint="--since")
 
