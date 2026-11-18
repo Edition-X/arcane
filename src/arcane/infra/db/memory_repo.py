@@ -428,6 +428,15 @@ class MemoryRepository:
         )
         return [_process_row(r) for r in rows]
 
+    def list_for_project(self, org: str, project: str) -> list[dict[str, Any]]:
+        """Every memory of *project* in *org*, with its details body, oldest first."""
+        rows = self.db.fetchall(
+            "SELECT m.*, d.body AS details FROM memories m LEFT JOIN memory_details d ON d.memory_id = m.id "
+            "WHERE m.org = ? AND m.project = ? ORDER BY m.created_at",
+            (org, project),
+        )
+        return [_process_row(r) for r in rows]
+
     def reassign_project(self, old: str, new: str, *, org: str) -> int:
         """Move every memory in *org*'s project *old* to *new*; return rows updated.
 
