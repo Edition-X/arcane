@@ -149,7 +149,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    # Windows passed in about 24 minutes on PR #66 and PR #67, and on PR #67 it was
+    # also cancelled at the old 25-minute limit with no failing test. 40 leaves headroom.
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
