@@ -165,3 +165,12 @@ def test_options_excerpt_stops_at_the_next_section_or_paragraph(arcane: Arcane) 
     assert by_title["Alternatives heading"]["options"] == "- A - B"
     assert by_title["Counted heading"]["options"] == "- A"
     assert by_title["Titled heading"]["options"] == "foo"
+
+
+def test_options_excerpt_joins_the_rejected_part_after_the_options(arcane: Arcane) -> None:
+    async def scenario(c: Client) -> dict[str, Any]:
+        await _decision(c, "Split", [FILE], "Options:\n- A\n\nRejected: B because slow\n\nWe chose A.")
+        return await _decision(c, "Newest", [FILE])
+
+    [prior] = arcane.run(scenario)["prior_decisions"]
+    assert prior["options"] == "- A Rejected: B because slow"

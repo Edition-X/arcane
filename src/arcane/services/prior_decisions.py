@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import os
-import re
 from typing import Any
 
 from arcane.services.container import ServiceContainer
+from arcane.services.details_sections import OPTIONS_WORDS, find_sections
 from arcane.services.why import path_matches
 
 MAX_CURRENT = 5
@@ -14,28 +14,6 @@ MAX_SUPERSEDED = 3
 EXCERPT_CHARS = 300
 # Only decisions are weighed against a new decision.
 PRIOR_CATEGORIES = ("decision",)
-
-# The heading that opens an options section: a markdown heading ("## Alternatives considered"),
-# a bold one ("**Rejected**", "**Options considered:**"), a bare "Options considered" line, or a
-# plain line whose words end in a colon within 80 characters ("Options considered for the
-# cache:"). Prose such as "Options were limited." has no colon, so it is not taken for one.
-_OPTIONS_WORDS = r"(?:options(?:[ \t]+considered)?|rejected(?:[ \t]+options)?|alternatives)"
-_OPTIONS_HEADING = re.compile(
-    rf"^[ \t]*(?:#{{1,6}}[ \t]*{_OPTIONS_WORDS}\b[^:\n]*:?"
-    rf"|\*\*{_OPTIONS_WORDS}\b[^*\n]*\*\*[ \t]*:?|\*\*{_OPTIONS_WORDS}\b[^*:\n]*:\*\*"
-    rf"|{_OPTIONS_WORDS}\b[^:\n]{{0,80}}:|{_OPTIONS_WORDS}[ \t]*$)"
-    r"[ \t]*(?P<rest>.*)$",
-    re.IGNORECASE,
-)
-# What ends an options section, besides a blank line after it: a markdown heading, a bold-only
-# line, or a known section name with a colon, bold or not. Not any "Name: reason" line, which
-# is how options themselves are often listed.
-_NEXT_SECTION = re.compile(
-    r"^[ \t]*(?:#{1,6}[ \t]|\*\*[^*]+\*\*[ \t]*:?[ \t]*$"
-    r"|(?:\*\*)?(?:context|decision|tradeoffs?|trade-offs?|follow-?ups?|why|consequences|outcome|notes?)"
-    r"[ \t]*(?:\*\*)?[ \t]*:)",
-    re.IGNORECASE,
-)
 
 
 def shared_files(mine: list[str], theirs: list[str]) -> list[str]:
@@ -45,26 +23,19 @@ def shared_files(mine: list[str], theirs: list[str]) -> list[str]:
 
 
 def options_excerpt(details: str | None) -> str | None:
-    """The options/rejected/alternatives part of a details body, cut to ``EXCERPT_CHARS``."""
-    if not details:
+    """The options/rejected/alternatives sections of a details body, joined and cut to ``EXCERPT_CHARS``."""
+    parts: list[str] = []
+    for section in find_sections(details, OPTIONS_WORDS, blank_ends="blank"):
+        text = " ".join(line.strip() for line in section.lines if line.strip())
+        # The first section reads as the options themselves; a later one keeps its heading ("Rejected: B").
+        if text and parts:
+            text = f"{section.label}: {text}"
+        if text:
+            parts.append(text)
+    text = " ".join(parts)
+    if not text:
         return None
-    lines = details.splitlines()
-    for i, line in enumerate(lines):
-        match = _OPTIONS_HEADING.match(line)
-        if not match:
-            continue
-        section = [(match.group("rest") or "").strip()]
-        for nxt in lines[i + 1 :]:
-            if not nxt.strip() and any(section):
-                break
-            if _NEXT_SECTION.match(nxt) and not _OPTIONS_HEADING.match(nxt):
-                break
-            section.append(nxt.strip())
-        text = " ".join(part for part in section if part)
-        if not text:
-            return None
-        return text if len(text) <= EXCERPT_CHARS else text[: EXCERPT_CHARS - 1].rstrip() + "…"
-    return None
+    return text if len(text) <= EXCERPT_CHARS else text[: EXCERPT_CHARS - 1].rstrip() + "…"
 
 
 class PriorDecisionsService:
