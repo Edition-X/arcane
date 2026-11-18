@@ -17,6 +17,7 @@ ID_PREFIX = 8
 # A details section is kept when its heading or label names one of these.
 _KEPT = re.compile(r"\b(options?|alternatives?|trade-?offs?|considered|rejected)\b", re.IGNORECASE)
 _HEADING = re.compile(r"^#{1,6}\s+(?P<label>.+?)\s*#*\s*$")
+_LIST_ITEM = re.compile(r"^(?:[-*+]|\d+[.)])\s")
 _LABEL = re.compile(r"^\W{0,2}(?P<label>[A-Z][\w /&-]{0,40}?)\W{0,2}:(?:\s+(?P<rest>.*))?$")
 
 
@@ -26,7 +27,8 @@ def _split_sections(body: str) -> list[tuple[str, list[str]]]:
     for line in body.splitlines():
         stripped = line.strip()
         heading = _HEADING.match(stripped)
-        label = None if heading else _LABEL.match(stripped)
+        # A list item ("- Pros: ...", "1. Option A: ...") belongs to its section; it never opens one.
+        label = None if heading or _LIST_ITEM.match(stripped) else _LABEL.match(stripped)
         if heading:
             sections.append((heading["label"].strip("*_ "), []))
         elif label:

@@ -137,3 +137,26 @@ def test_project_alone_finds_a_project_in_another_org(arcane: Arcane) -> None:
         handle.write("orgs:\n  overrides:\n    toybox: personal\n")
     pinned = arcane.cli("decisions", "--project", "toybox").stdout
     assert pinned.startswith("# Decision log: personal/toybox\n\n1 current")
+
+
+def test_bullet_lines_stay_inside_their_section(arcane: Arcane) -> None:
+    async def scenario(c: Client) -> None:
+        await c.call(
+            "memory_save", title="Bulleted trade-offs", what="Pick one", why="Because", category="decision",
+            details="Tradeoffs:\n- Pros: lower blast radius\n- Cons: adds a temporary playbook\n\nFollow-up: later",
+        )  # fmt: skip
+        await c.call(
+            "memory_save", title="Bulleted options", what="Pick one", why="Because", category="decision",
+            details="Options considered:\n- Option A: keep tags\n1. Option B: pin digests\n* Option C: vendor it",
+        )  # fmt: skip
+
+    arcane.run(scenario)
+    out = arcane.cli("decisions").stdout
+
+    assert "**Tradeoffs**\n\n> - Pros: lower blast radius\n> - Cons: adds a temporary playbook\n" in out
+    assert "**Pros**" not in out and "**Cons**" not in out and "Follow-up" not in out
+    assert (
+        "**Options considered**\n\n> - Option A: keep tags\n> 1. Option B: pin digests\n> * Option C: vendor it\n"
+        in out
+    )
+    assert "**Option A**" not in out
