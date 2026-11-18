@@ -9,6 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from arcane.domain.dates import parse_iso_date
 from arcane.domain.enums import (
     ArtifactType,
     Category,
@@ -49,6 +50,8 @@ class RawMemoryInput(BaseModel):
 
     ttl_days: int | None = None
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    # ISO date (YYYY-MM-DD) from which memory_context lists this memory as due for a second look.
+    revisit_when: str | None = None
 
     @field_validator("category", mode="before")
     @classmethod
@@ -59,6 +62,14 @@ class RawMemoryInput(BaseModel):
         if v not in valid:
             raise ValueError(f"Invalid category '{v}'. Must be one of: {', '.join(sorted(valid))}")
         return v
+
+    @field_validator("revisit_when", mode="before")
+    @classmethod
+    def validate_revisit_when(cls, v: str | None) -> str | None:
+        """A real ``YYYY-MM-DD`` date, or ``None`` for none (an empty string counts as none)."""
+        if v is None or v == "":
+            return None
+        return parse_iso_date(str(v), "revisit_when")
 
     @field_validator("confidence", mode="before")
     @classmethod
@@ -97,6 +108,7 @@ class Memory(BaseModel):
     dirty: bool | None = None
     session_id: str | None = None
     thread_id: str | None = None
+    revisit_when: str | None = None
 
     @staticmethod
     def from_raw(raw: RawMemoryInput, project: str, org: str = "", file_path: str = "") -> Memory:
@@ -120,6 +132,7 @@ class Memory(BaseModel):
             metadata={"journey_id": raw.journey_id} if raw.journey_id else {},
             ttl_days=raw.ttl_days,
             confidence=raw.confidence,
+            revisit_when=raw.revisit_when,
         )
 
 

@@ -66,6 +66,7 @@ One focused memory per commit is better than a large dump at session end.
 | `LINEAR_API_KEY` | Linear API key | — |
 | `ARCANE_LOG_LEVEL` | Log verbosity (`DEBUG`/`INFO`/`WARNING`) | `INFO` |
 | `ARCANE_OLLAMA_AUTOSTART` | `0` stops Arcane starting a local Ollama when it is down (tests set this) | on |
+| `ARCANE_TODAY` | Fix today's date (`YYYY-MM-DD`) for `revisit_when` checks; tests set it | local date |
 | `ARCANE_TOOL_PROFILE` | MCP tool set: `core` (13 memory/journey/artifact-search/insights tools) or `full` (all tools) | `core` |
 
 ## Project Structure Quick-Ref
