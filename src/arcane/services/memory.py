@@ -33,6 +33,7 @@ from arcane.infra.paths import relative_vault_path, vault_path
 from arcane.infra.redaction import redact, redact_values
 from arcane.infra.search import tiered_search
 from arcane.services.container import ServiceContainer
+from arcane.services.prior_decisions import PriorDecisionsService
 
 logger = logging.getLogger(__name__)
 
@@ -536,12 +537,10 @@ class MemoryService:
 
     def _with_prior_decisions(self, result: MemorySaveResult) -> MemorySaveResult:
         """Add ``prior_decisions`` to a save result; never blocks or changes the save."""
-        from arcane.services.prior_decisions import PriorDecisionsService
-
         try:
             prior = PriorDecisionsService(self.c).for_memory(result["id"])
         except Exception:
-            logger.debug("Prior-decisions lookup failed; save unaffected", exc_info=True)
+            logger.warning("Prior-decisions lookup failed; the save is unaffected", exc_info=True)
             return result
         if prior:
             result["prior_decisions"] = prior

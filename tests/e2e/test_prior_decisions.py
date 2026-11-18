@@ -60,9 +60,9 @@ def test_superseded_listed_apart_and_the_one_being_replaced_left_out(arcane: Arc
     async def scenario(c: Client) -> dict[str, Any]:
         old = await _decision(c, "Old way", [FILE], "Options considered: A, B\nDecision: A")
         mid = await _decision(c, "Middle way", [FILE], "Alternatives:\nx then y\n\nTradeoffs: none")
-        await _decision(c, "Replacement", [FILE], supersedes=old["id"])
+        replacement = await _decision(c, "Replacement", [FILE], supersedes=old["id"])
         new = await _decision(c, "Newest", [FILE], supersedes=mid["id"])
-        return {"old": old, "new": new}
+        return {"old": old, "new": new, "replacement": replacement}
 
     out = arcane.run(scenario)
     prior = out["new"]["prior_decisions"]
@@ -70,7 +70,9 @@ def test_superseded_listed_apart_and_the_one_being_replaced_left_out(arcane: Arc
     assert [p["title"] for p in prior if "superseded_by" not in p] == ["Replacement"]
     # "Middle way" is what "Newest" replaces, so it is not a prior decision to it; the older "Old way" still is.
     assert set(by_title) == {"Replacement", "Old way"}
-    assert by_title["Old way"]["superseded_by"] and by_title["Old way"]["options"] == "A, B"
+    assert by_title["Old way"]["id"] == out["old"]["id"]
+    assert by_title["Old way"]["superseded_by"] == out["replacement"]["id"]
+    assert by_title["Old way"]["options"] == "A, B"
     assert "Middle way" not in by_title
 
 
@@ -84,8 +86,9 @@ def test_caps_and_excerpt_length(arcane: Arcane) -> None:
         return await _decision(c, "Newest", [FILE])
 
     prior = arcane.run(scenario)["prior_decisions"]
-    current = [p for p in prior if "superseded_by" not in p]
-    assert len(current) == 5 and len(prior) - len(current) == 3
+    # Current ones newest first, then replaced ones newest first.
+    assert [p["title"] for p in prior] == ["Cur 11", "Cur 10", "Cur 9", "Cur 8", "Cur 7", "Cur 3", "Cur 2", "Cur 1"]
+    assert all("superseded_by" in p for p in prior[5:])
     assert all(len(p["options"]) <= 300 for p in prior)
 
 
@@ -118,6 +121,19 @@ def test_cli_save_prints_prior_decisions(arcane: Arcane) -> None:
         "--details",
         "Options considered: A, B",
     )
-    out = arcane.cli("save", "--title", "Second", "--what", "w", "--category", "decision", "--related-files", FILE)
+    arcane.cli("save", "--title", "Second", "--what", "w", "--category", "decision", "--related-files", FILE)
+    out = arcane.cli("save", "--title", "Third", "--what", "w", "--category", "decision", "--related-files", FILE)
     assert "Prior decisions on these files:" in out.stdout
-    assert "First" in out.stdout and "Options: A, B" in out.stdout
+    assert "First" in out.stdout and "Second" in out.stdout and "Options: A, B" in out.stdout
+
+
+def test_options_excerpt_reads_name_reason_lists_and_ignores_prose(arcane: Arcane) -> None:
+    async def scenario(c: Client) -> dict[str, Any]:
+        await _decision(c, "Listed", [FILE], "Options considered:\nRedis: too heavy\nDict: chosen\n\nDecision: dict")
+        await _decision(c, "Prose options", [FILE], "Options were limited because of the deadline.")
+        await _decision(c, "Prose rejected", [FILE], "Rejected the Redis idea since ops refused.")
+        return await _decision(c, "Newest", [FILE])
+
+    by_title = {p["title"]: p for p in arcane.run(scenario)["prior_decisions"]}
+    assert by_title["Listed"]["options"] == "Redis: too heavy Dict: chosen"
+    assert "options" not in by_title["Prose options"] and "options" not in by_title["Prose rejected"]

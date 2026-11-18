@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 
@@ -11,23 +12,35 @@ from arcane.services.why import path_matches
 MAX_CURRENT = 5
 MAX_SUPERSEDED = 3
 EXCERPT_CHARS = 300
+# Only decisions are weighed against a new decision.
+CATEGORIES = ("decision",)
 
+# The heading that opens an options section: "## Options considered", "**Rejected**", or a
+# plain "Alternatives:" line. A plain line needs the colon, so prose such as "Options were
+# limited" is not taken for a heading.
+_OPTIONS_WORDS = r"(?:options(?:[ \t]+considered)?|rejected(?:[ \t]+options)?|alternatives)"
 _OPTIONS_HEADING = re.compile(
-    r"^[ \t]*(?:#{1,6}[ \t]*|\*\*)?(?:options(?:[ \t]+considered)?|rejected(?:[ \t]+options)?|alternatives)"
-    r"(?:\*\*)?[ \t]*:?(?:\*\*)?[ \t]*(?P<rest>.*)$",
+    rf"^[ \t]*(?:(?:#{{1,6}}[ \t]*|\*\*){_OPTIONS_WORDS}(?:\*\*)?[ \t]*:?(?:\*\*)?|{_OPTIONS_WORDS}[ \t]*:)"
+    r"[ \t]*(?P<rest>.*)$",
     re.IGNORECASE,
 )
-_ANY_HEADING = re.compile(r"^[ \t]*(?:#{1,6}[ \t]|\*\*[^*]+\*\*[ \t]*:?[ \t]*$|[A-Z][A-Za-z ]{1,30}:[ \t]*\S?)")
+# What ends an options section: a markdown heading, a bold-only line, or a known section name
+# with a colon. Not any "Name: reason" line, which is how options themselves are often listed.
+_NEXT_SECTION = re.compile(
+    r"^[ \t]*(?:#{1,6}[ \t]|\*\*[^*]+\*\*[ \t]*:?[ \t]*$"
+    r"|(?:context|decision|tradeoffs?|trade-offs?|follow-?ups?|why|consequences|outcome|notes?)[ \t]*:)",
+    re.IGNORECASE,
+)
 
 
 def shared_files(mine: list[str], theirs: list[str]) -> list[str]:
     """The paths in *theirs* that name a file in *mine*, in *theirs*' order."""
     # path_matches is one-way (stored ends with target); a save may name either form, so try both.
-    return [t for t in theirs if any(path_matches(t, m) or path_matches(m, t) for m in mine)]
+    return [path for path in theirs if any(path_matches(path, m) or path_matches(m, path) for m in mine)]
 
 
 def options_excerpt(details: str | None) -> str | None:
-    """The options/rejected/alternatives part of a details body, cut to about 300 characters."""
+    """The options/rejected/alternatives part of a details body, cut to ``EXCERPT_CHARS``."""
     if not details:
         return None
     lines = details.splitlines()
@@ -37,7 +50,7 @@ def options_excerpt(details: str | None) -> str | None:
             continue
         section = [match.group("rest").strip()]
         for nxt in lines[i + 1 :]:
-            if _ANY_HEADING.match(nxt) and not _OPTIONS_HEADING.match(nxt):
+            if _NEXT_SECTION.match(nxt) and not _OPTIONS_HEADING.match(nxt):
                 break
             section.append(nxt.strip())
         text = " ".join(part for part in section if part)
@@ -48,29 +61,35 @@ def options_excerpt(details: str | None) -> str | None:
 
 
 class PriorDecisionsService:
+    """Finds the earlier decisions on the files a newly saved decision names."""
+
     def __init__(self, container: ServiceContainer) -> None:
         self.c = container
 
     def for_memory(self, memory_id: str) -> list[dict[str, Any]]:
-        """Earlier decisions in *memory_id*'s project that share a file with it; best effort, [] on failure.
+        """Earlier decisions in *memory_id*'s project that share a file with it.
 
-        Up to 5 current ones, then up to 3 replaced ones, newest first. Each has ``id``, ``title``,
-        ``date``, ``shared_files``, ``superseded_by`` when replaced, and ``options`` when its details
-        have an options section.
+        Up to ``MAX_CURRENT`` current ones, then up to ``MAX_SUPERSEDED`` replaced ones, each
+        group newest first. Each has ``id``, ``title``, ``date``, ``shared_files``,
+        ``superseded_by`` when replaced, and ``options`` when its details have an options
+        section. Candidates come from the query ``arcane why`` uses; ``shared_files`` keeps
+        the real matches.
         """
         memory = self.c.memory_repo.get(memory_id)
         if not memory or memory.get("category") != "decision" or not memory.get("related_files"):
             return []
         mine: list[str] = memory["related_files"]
-        phrases = sorted({_phrase(p) for p in mine if _phrase(p)})
-        found = self.c.memory_repo.decision_candidates_for_files(phrases, memory["org"], memory["project"])
+        found = self.c.memory_repo.why_candidates_for_files(
+            sorted({os.path.basename(p) for p in mine}), CATEGORIES, memory["org"], memory["project"]
+        )
+        found.sort(key=lambda row: row["created_at"], reverse=True)
         # What this memory replaces is its own history, not a prior decision to weigh.
         skip = {memory_id} | {r["id"] for r in self.c.relationship_repo.supersedes(memory_id)}
-        hits = [(r, shared_files(mine, r["related_files"])) for r in found if r["id"] not in skip]
-        hits = [(r, files) for r, files in hits if files]
-        replaced = self.c.relationship_repo.superseded_by([r["id"] for r, _ in hits])
-        current = [h for h in hits if h[0]["id"] not in replaced][:MAX_CURRENT]
-        old = [h for h in hits if h[0]["id"] in replaced][:MAX_SUPERSEDED]
+        hits = [(row, shared_files(mine, row["related_files"])) for row in found if row["id"] not in skip]
+        hits = [(row, files) for row, files in hits if files]
+        replaced = self.c.relationship_repo.superseded_by([row["id"] for row, _ in hits])
+        current = [(row, files) for row, files in hits if row["id"] not in replaced][:MAX_CURRENT]
+        old = [(row, files) for row, files in hits if row["id"] in replaced][:MAX_SUPERSEDED]
         out: list[dict[str, Any]] = []
         for row, files in current + old:
             entry: dict[str, Any] = {
@@ -86,8 +105,3 @@ class PriorDecisionsService:
                 entry["options"] = options
             out.append(entry)
         return out
-
-
-def _phrase(path: str) -> str:
-    """The file name of *path* as FTS words, e.g. ``a/b/quux_handler.py`` -> ``quux handler py``."""
-    return " ".join(re.findall(r"[^\W_]+", path.strip().rsplit("/", 1)[-1]))
