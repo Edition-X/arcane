@@ -419,21 +419,16 @@ class MemoryRepository:
         rows = self.db.fetchall(f"SELECT * FROM memories WHERE {' AND '.join(where)} ORDER BY created_at", params)
         return [_process_row(r) for r in rows]
 
-    def list_for_export(self, org: str) -> list[dict[str, Any]]:
-        """Every memory in *org*, with its details body, oldest first."""
+    def list_for_export(self, org: str, project: str | None = None) -> list[dict[str, Any]]:
+        """Every memory in *org* (only *project*'s when given), with its details body, oldest first."""
+        where, params = ("m.org = ?", [org])
+        if project is not None:
+            where += " AND m.project = ?"
+            params.append(project)
         rows = self.db.fetchall(
             "SELECT m.*, d.body AS details FROM memories m LEFT JOIN memory_details d ON d.memory_id = m.id "
-            "WHERE m.org = ? ORDER BY m.created_at",
-            (org,),
-        )
-        return [_process_row(r) for r in rows]
-
-    def list_for_project(self, org: str, project: str) -> list[dict[str, Any]]:
-        """Every memory of *project* in *org*, with its details body, oldest first."""
-        rows = self.db.fetchall(
-            "SELECT m.*, d.body AS details FROM memories m LEFT JOIN memory_details d ON d.memory_id = m.id "
-            "WHERE m.org = ? AND m.project = ? ORDER BY m.created_at",
-            (org, project),
+            f"WHERE {where} ORDER BY m.created_at",
+            tuple(params),
         )
         return [_process_row(r) for r in rows]
 

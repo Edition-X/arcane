@@ -121,7 +121,7 @@ def test_tags_and_text_forms_name_a_pr_and_near_misses_do_not(arcane: Arcane) ->
         40: {"what": "Only a near miss: INF-#40, abc#40, #400, pr-400 and PR 4000"},
         41: {"what": "Only another project", "project": "toybox"},
     }
-    for number in forms:
+    for number in (3, *forms):
         git(repo, "checkout", "-q", "-b", f"feat/p{number}", "main")
         _commit(repo, f"p{number}")
         _merge(repo, number, f"feat/p{number}", f"Add {number}")
@@ -140,9 +140,38 @@ def test_tags_and_text_forms_name_a_pr_and_near_misses_do_not(arcane: Arcane) ->
     assert _rules(prs[31]) == _rules(prs[32]) == _rules(prs[33]) == {"tag"}
     assert _rules(prs[34]) == _rules(prs[35]) == _rules(prs[36]) == _rules(prs[37]) == {"text"}
     assert prs[38]["matched_by"] == [{"rule": "text", "memory_id": ids[38]}]  # found in the details body
-    assert prs[39]["matched_by"] == [{"rule": "text", "memory_id": ids[39]}]  # #3900 does not cover PR 390 or 3
+    assert prs[39]["matched_by"] == [{"rule": "text", "memory_id": ids[39]}]
+    assert not prs[3]["covered"]  # "#39" and "#3900" are not PR 3
     assert not prs[40]["covered"]  # INF-#40, abc#40, #400, pr-400 and PR 4000 are not PR 40
     assert not prs[41]["covered"]  # another project's memory does not count
+
+
+def test_a_memory_saved_at_the_merge_commit_covers_the_pr(arcane: Arcane) -> None:
+    repo = arcane.repo
+    git(repo, "checkout", "-q", "-b", "feat/merged")
+    _commit(repo, "merged")
+    merge = _merge(repo, 71, "feat/merged", "Add merged")
+    note = _save(arcane, "Saved on main after the merge")
+
+    pr = _by_number(_coverage(arcane))[71]
+    assert pr["sha"] == merge
+    assert pr["matched_by"] == [{"rule": "commit_sha", "memory_id": note}]
+
+
+def test_a_squash_merge_is_a_pr_by_its_number(arcane: Arcane) -> None:
+    repo = arcane.repo
+    _commit(repo, "squashed")
+    git(repo, "commit", "-q", "--amend", "-m", "feat: add squashing (#72)")
+    squashed = git(repo, "rev-parse", "HEAD").strip()
+    _commit(repo, "squashed-bare")
+    git(repo, "commit", "-q", "--amend", "-m", "feat: add bare squashing (#73)")
+    note = _save(arcane, "Squash note", what="Shipped as PR #72")
+    _forget_provenance(arcane, note)
+
+    prs = _by_number(_coverage(arcane))
+    assert prs[72]["kind"] == "pr" and prs[72]["sha"] == squashed and prs[72]["branch"] is None
+    assert prs[72]["matched_by"] == [{"rule": "text", "memory_id": note}]
+    assert not prs[73]["covered"]
 
 
 def test_the_default_branch_name_never_matches_a_pr_head_branch(arcane: Arcane) -> None:
@@ -180,7 +209,9 @@ def test_text_summary_lists_uncovered_items_newest_first(arcane: Arcane) -> None
     assert "#61" not in done.stdout.split("Uncovered")[1]
 
 
-def test_window_and_edge_cases_exit_zero(arcane: Arcane, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_window_keeps_commits_below_an_older_dated_one(
+    arcane: Arcane, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("GIT_COMMITTER_DATE", "2020-01-02T10:00:00+00:00")
     monkeypatch.setenv("GIT_AUTHOR_DATE", "2020-01-02T10:00:00+00:00")
     old = _commit(arcane.repo, "ancient")
@@ -188,13 +219,39 @@ def test_window_and_edge_cases_exit_zero(arcane: Arcane, tmp_path: Path, monkeyp
     _commit(arcane.repo, "recent")
 
     default = _coverage(arcane)
-    assert old not in {i["sha"] for i in default["items"]}
+    shas = {item["sha"] for item in default["items"]}
+    # The two setup commits sit below the 2020 one, and are still in the window.
+    assert old not in shas and default["total"] == 3
     wide = _coverage(arcane, "--since", "2019-12-01")
-    # git stops at the first commit older than --since, so the two commits under "ancient" are cut off.
-    assert old in {i["sha"] for i in wide["items"]} and (default["total"], wide["total"]) == (1, 4)
-    assert _coverage(arcane, "--days", "36500")["total"] == wide["total"]
+    assert old in {item["sha"] for item in wide["items"]} and wide["total"] == 4
+    assert _coverage(arcane, "--days", "36500")["total"] == 4
     assert "no commits" in arcane.cli("coverage", "--since", (date.today() + timedelta(days=2)).isoformat()).stdout
 
+
+def test_days_counts_today_as_the_first_day(arcane: Arcane, monkeypatch: pytest.MonkeyPatch) -> None:
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    monkeypatch.setenv("GIT_COMMITTER_DATE", f"{yesterday}T12:00:00+00:00")
+    _commit(arcane.repo, "yesterday")
+    monkeypatch.undo()
+    today = _commit(arcane.repo, "today")
+
+    one = {item["sha"] for item in _coverage(arcane, "--days", "1")["items"]}
+    two = {item["sha"] for item in _coverage(arcane, "--days", "2")["items"]}
+    assert today in one and len(one) == len(two) - 1
+
+
+def test_default_branch_falls_back_to_origin_main_then_local_main(arcane: Arcane) -> None:
+    repo = arcane.repo
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    behind = git(repo, "rev-parse", "HEAD").strip()
+    _commit(repo, "local-only")
+    assert _coverage(arcane)["branch"] == "origin/main"
+    assert behind in {item["sha"] for item in _coverage(arcane)["items"]}
+    git(repo, "update-ref", "-d", "refs/remotes/origin/main")
+    assert _coverage(arcane)["branch"] == "main"
+
+
+def test_edge_cases_exit_zero(arcane: Arcane, tmp_path: Path) -> None:
     plain = tmp_path / "plain"
     plain.mkdir()
     outside = subprocess.run([ARCANE, "coverage"], cwd=plain, env=arcane.env("full"), capture_output=True, text=True)
@@ -202,3 +259,13 @@ def test_window_and_edge_cases_exit_zero(arcane: Arcane, tmp_path: Path, monkeyp
 
     bad = arcane.cli("coverage", "--since", "yesterday", check=False)
     assert bad.returncode == 2 and "YYYY-MM-DD" in bad.stderr
+
+
+def test_a_failing_git_log_is_an_error_not_an_empty_window(arcane: Arcane) -> None:
+    repo = arcane.repo
+    root = git(repo, "rev-list", "--max-parents=0", "HEAD").strip()
+    (repo / ".git" / "objects" / root[:2] / root[2:]).unlink()
+
+    result = _coverage(arcane)
+    assert result == {"error": "git log failed on main"}
+    assert "no commits" not in arcane.cli("coverage").stdout
