@@ -34,6 +34,8 @@ def test_overlapping_decisions_come_back_with_options_and_shared_files(arcane: A
     async def scenario(c: Client) -> dict[str, Any]:
         first = await _decision(c, "Cache handler results", [FILE, "docs/a.md"], OPTIONS)
         await _decision(c, "Unrelated", ["other/file.py"], OPTIONS)
+        # Same file name in another directory is an FTS candidate but not the same file.
+        await _decision(c, "Same name elsewhere", ["lib/quux_handler.py"], OPTIONS)
         await c.call("memory_save", title="A bug", what="w", category="bug", related_files=[FILE])
         # An absolute path from another checkout still names the same file.
         absolute = await _decision(c, "Old absolute path", [f"/Users/x/repo/{FILE}"])

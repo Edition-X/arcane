@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from arcane.services.container import ServiceContainer
+from arcane.services.why import path_matches
 
 MAX_CURRENT = 5
 MAX_SUPERSEDED = 3
@@ -19,15 +20,10 @@ _OPTIONS_HEADING = re.compile(
 _ANY_HEADING = re.compile(r"^[ \t]*(?:#{1,6}[ \t]|\*\*[^*]+\*\*[ \t]*:?[ \t]*$|[A-Z][A-Za-z ]{1,30}:[ \t]*\S?)")
 
 
-def same_file(a: str, b: str) -> bool:
-    """Whether two stored paths name one file: equal, or one ends with "/" + the other."""
-    a, b = a.strip(), b.strip()
-    return bool(a and b) and (a == b or a.endswith("/" + b) or b.endswith("/" + a))
-
-
 def shared_files(mine: list[str], theirs: list[str]) -> list[str]:
     """The paths in *theirs* that name a file in *mine*, in *theirs*' order."""
-    return [t for t in theirs if any(same_file(m, t) for m in mine)]
+    # path_matches is one-way (stored ends with target); a save may name either form, so try both.
+    return [t for t in theirs if any(path_matches(t, m) or path_matches(m, t) for m in mine)]
 
 
 def options_excerpt(details: str | None) -> str | None:
