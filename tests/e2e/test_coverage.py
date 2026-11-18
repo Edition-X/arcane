@@ -270,4 +270,5 @@ def test_a_failing_git_log_is_an_error_not_an_empty_window(arcane: Arcane) -> No
 
     result = _coverage(arcane)
     assert result == {"error": "git log failed on main"}
-    assert "no commits" not in arcane.cli("coverage").stdout
+    text = arcane.cli("coverage")
+    assert text.returncode == 0 and "git log failed on main" in text.stdout

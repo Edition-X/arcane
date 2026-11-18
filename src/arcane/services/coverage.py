@@ -55,8 +55,11 @@ def _git(cwd: str, *args: str) -> str | None:
 
 
 def default_branch(cwd: str) -> str | None:
-    """The default branch: ``origin/HEAD``, else ``origin/main``, ``origin/master``, local ``main``,
-    ``master``, and last ``HEAD``. None when the directory has no commits."""
+    """The branch coverage walks, or None when the directory has no commits.
+
+    Tried in order: ``origin/HEAD``, ``origin/main``, ``origin/master``, local ``main``, ``master``,
+    then ``HEAD``. A remote branch wins over the local one, so merges not yet pushed are not counted.
+    """
     remote_head = _git(cwd, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
     if remote_head and remote_head.strip():
         return remote_head.strip()
@@ -178,7 +181,7 @@ def build_coverage(container: ServiceContainer, cwd: str, since: date) -> dict[s
     scope = resolve_scope(cwd, container.config)
     index = _index_memories(container.memory_repo.list_for_export(scope.org, scope.project))
 
-    items = []
+    items: list[dict[str, Any]] = []
     for item, shas in walked:
         matched_by = _matches(item, shas, index, branch)
         items.append({**item, "matched_by": matched_by, "covered": bool(matched_by)})
