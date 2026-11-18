@@ -21,6 +21,7 @@ from arcane.domain.scope import (
     resolve_write_scope,
     slugify,
 )
+from arcane.infra.clock import today as clock_today
 from arcane.infra.db.ids import IdentifierResolutionError
 from arcane.infra.db.memory_repo import REVISIT_CAP
 from arcane.services.memory import MemoryService
@@ -338,15 +339,17 @@ def handle_context(
     # Normalise detail level — fall back to standard for unknown values
     detail = _normalize_detail(detail)
     try:
-        due = svc.revisit_due(
-            project=project_final,
-            org=org_final,
-            include_org=plan.include_org,
-            include_global=plan.include_global,
-            reach=plan.reach,
-        )
+        today = clock_today()
     except ValueError as exc:  # a malformed ARCANE_TODAY
         return json.dumps({"error": str(exc)})
+    due = svc.revisit_due(
+        today,
+        project=project_final,
+        org=org_final,
+        include_org=plan.include_org,
+        include_global=plan.include_global,
+        reach=plan.reach,
+    )
 
     memories = []
     for r in results:
@@ -450,6 +453,7 @@ def handle_update(
     revisit_when: str | None = None,
 ) -> str:
     try:
+        # "" passes through: it clears the date.
         revisit_when = parse_iso_date(revisit_when, "revisit_when") if revisit_when else revisit_when
     except ValueError as exc:
         return json.dumps({"error": str(exc)})

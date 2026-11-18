@@ -204,6 +204,7 @@ def test_the_block_does_not_change_with_the_query(arcane: Arcane) -> None:
     env = {**arcane.env("full"), "ARCANE_TODAY": TODAY["ARCANE_TODAY"]}
     for args in (["--project"], ["--project", "--query", "zzzz nothing matches"]):
         out = subprocess.run([ARCANE, "context", *args], cwd=arcane.repo, env=env, capture_output=True, text=True)
+        assert out.returncode == 0, out.stderr
         assert "Due for a second look" not in out.stdout
 
 

@@ -24,6 +24,7 @@ from arcane.domain.scope import (
     slugify,
     validate_org,
 )
+from arcane.infra.clock import today as clock_today
 from arcane.services.backup import BackupError, create_backup
 
 
@@ -264,9 +265,10 @@ def context(project: bool, source: str | None, limit: int, query: str | None) ->
             limit=limit, project=project_name, source=source, query=query, org=org
         )
         try:
-            due = service.revisit_due(project=project_name, source=source, org=org)
+            today = clock_today()
         except ValueError as exc:  # a malformed ARCANE_TODAY
             raise click.ClickException(str(exc)) from exc
+        due = service.revisit_due(today, project=project_name, source=source, org=org)
 
     _echo_revisit(due)
     if not results:

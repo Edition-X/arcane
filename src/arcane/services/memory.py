@@ -23,7 +23,6 @@ from arcane.domain.scope import (
     slugify,
     validate_org,
 )
-from arcane.infra.clock import today as clock_today
 from arcane.infra.db.fts import key_terms_query, prefix_or_query
 from arcane.infra.db.ids import IdentifierResolutionError, resolve_entity_id
 from arcane.infra.db.memory_repo import REVISIT_CAP, join_details
@@ -953,6 +952,7 @@ class MemoryService:
 
     def revisit_due(
         self,
+        today: date,
         limit: int = REVISIT_CAP,
         project: str | None = None,
         source: str | None = None,
@@ -964,13 +964,14 @@ class MemoryService:
         """Current memories whose ``revisit_when`` has come, oldest date first.
 
         Settles the reach as ``get_context_reach`` does for a call with no query, so the block
-        is the same whatever query the context was asked for.
+        is the same whatever query the context was asked for. *today* comes from the caller
+        (``infra.clock.today``), so a malformed ``ARCANE_TODAY`` is reported before this runs.
         """
         if project:
             project = resolve_read_project(project, self.c.config)
         reach = self._effective_reach(reach, None, org, project, source)
         return self.c.memory_repo.due_for_revisit(
-            clock_today().isoformat(),
+            today.isoformat(),
             limit=limit,
             project=project,
             source=source,
