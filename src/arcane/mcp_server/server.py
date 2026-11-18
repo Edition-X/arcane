@@ -261,7 +261,6 @@ def _create_server(container: ServiceContainer) -> Server:
                         },
                         "revisit_when": {
                             "type": "string",
-                            "pattern": "^(\\d{4}-\\d{2}-\\d{2})?$",
                             "description": "YYYY-MM-DD: memory_context lists it from then on. Empty string clears.",
                         },
                     },

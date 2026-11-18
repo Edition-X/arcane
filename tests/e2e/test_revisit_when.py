@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 from typing import Any
 
-from tests.e2e.conftest import ARCANE, Arcane, Client
+from tests.e2e.conftest import ARCANE, Arcane, Client, FakeOllama
 
 TODAY = {"ARCANE_TODAY": "2026-06-15"}
 
@@ -160,12 +160,18 @@ def test_context_cli_prints_the_same_block(arcane: Arcane) -> None:
     assert "Revisit: 2026-06-01" in shown
 
 
-def test_a_bad_today_override_is_an_error_not_a_silent_fallback(arcane: Arcane) -> None:
+def test_a_bad_today_override_is_an_error_not_a_traceback_or_a_silent_fallback(arcane: Arcane) -> None:
     arcane.cli("save", "--title", "Some memory", "--what", "w")
     env = {**arcane.env("full"), "ARCANE_TODAY": "next week"}
     run = subprocess.run([ARCANE, "context"], cwd=arcane.repo, env=env, capture_output=True, text=True)
     assert run.returncode != 0
-    assert "ARCANE_TODAY" in run.stderr + run.stdout
+    assert "ARCANE_TODAY" in run.stderr
+    assert "Traceback" not in run.stderr
+
+    async def scenario(c: Client) -> None:
+        assert "ARCANE_TODAY" in await c.error("memory_context")
+
+    arcane.run(scenario, extra_env={"ARCANE_TODAY": "next week"})
 
 
 def test_a_store_from_before_the_column_is_migrated_on_open(arcane: Arcane) -> None:
@@ -180,3 +186,54 @@ def test_a_store_from_before_the_column_is_migrated_on_open(arcane: Arcane) -> N
     arcane.run(scenario, extra_env=TODAY)
     assert "revisit_when" in [row[1] for row in arcane.sql("PRAGMA table_info(memories)")]
     assert arcane.sql("SELECT revisit_when FROM memories WHERE title = 'Written before'") == [(None,)]
+
+
+def test_the_block_does_not_change_with_the_query(arcane: Arcane) -> None:
+    """A query that matches nothing makes context widen to the org; the due list must not follow it."""
+
+    async def scenario(c: Client) -> None:
+        for n in range(3):  # three own memories: the project can answer without the org
+            await _save(c, f"Own memory {n}")
+        await _save(c, "Sibling due", revisit_when="2026-02-02", project="gadget")
+        assert "revisit" not in await c.call("memory_context")
+        assert "revisit" not in await c.call("memory_context", query="zzzz nothing matches")
+        assert "revisit" not in await c.call("memory_context", query="Own memory")
+
+    arcane.run(scenario, extra_env=TODAY)
+
+    env = {**arcane.env("full"), "ARCANE_TODAY": TODAY["ARCANE_TODAY"]}
+    for args in (["--project"], ["--project", "--query", "zzzz nothing matches"]):
+        out = subprocess.run([ARCANE, "context", *args], cwd=arcane.repo, env=env, capture_output=True, text=True)
+        assert "Due for a second look" not in out.stdout
+
+
+def test_a_thin_project_lists_the_sibling_whatever_the_query(arcane: Arcane) -> None:
+    async def scenario(c: Client) -> None:
+        await _save(c, "Only own memory")
+        await _save(c, "Sibling due", revisit_when="2026-02-02", project="gadget")
+        for kwargs in ({}, {"query": "zzzz nothing matches"}, {"query": "Only own memory"}):
+            assert [r["title"] for r in (await c.call("memory_context", **kwargs))["revisit"]] == ["Sibling due"]
+
+    arcane.run(scenario, extra_env=TODAY)
+
+
+def test_a_memory_due_today_is_listed_and_one_due_tomorrow_is_not(arcane: Arcane) -> None:
+    async def scenario(c: Client) -> None:
+        await _save(c, "Due today", revisit_when="2026-06-15")
+        await _save(c, "Due tomorrow", revisit_when="2026-06-16")
+        assert [r["title"] for r in (await c.call("memory_context"))["revisit"]] == ["Due today"]
+
+    arcane.run(scenario, extra_env=TODAY)
+
+
+def test_changing_only_the_date_does_not_embed_again(arcane: Arcane, ollama: FakeOllama) -> None:
+    async def scenario(c: Client) -> None:
+        saved = await _save(c, "Embedded once")
+        ollama.prompts.clear()
+        await c.call("memory_update", memory_id=saved["id"], revisit_when="2026-09-01")
+        await c.call("memory_update", memory_id=saved["id"], revisit_when="")
+        assert ollama.prompts == []
+        await c.call("memory_update", memory_id=saved["id"], what="Changed text")
+        assert len(ollama.prompts) == 1
+
+    arcane.run(scenario)

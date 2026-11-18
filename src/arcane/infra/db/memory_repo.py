@@ -62,6 +62,9 @@ def _parse_list(raw: Any) -> list[str]:
     return []
 
 
+# Most memories memory_context lists as due for a second look.
+REVISIT_CAP = 5
+
 PROVENANCE_COLUMNS = ("commit_sha", "branch", "dirty", "session_id", "thread_id")
 
 
@@ -274,6 +277,15 @@ class MemoryRepository:
         return "(m.ttl_days IS NULL OR (unixepoch('now') - unixepoch(m.created_at)) < m.ttl_days * 86400)"
 
     @staticmethod
+    def _not_superseded_clause() -> str:
+        """SQL fragment that filters out memories a newer one replaced (a ``supersedes`` edge points at them)."""
+        return """NOT EXISTS (
+            SELECT 1 FROM relationships r
+            WHERE r.relation = 'supersedes' AND r.source_type = 'memory' AND r.target_type = 'memory'
+              AND r.target_id = m.id
+        )"""
+
+    @staticmethod
     def _scope_where(
         org: str,
         project: str | None,
@@ -341,7 +353,7 @@ class MemoryRepository:
     def due_for_revisit(
         self,
         today: str,
-        limit: int = 5,
+        limit: int = REVISIT_CAP,
         project: str | None = None,
         source: str | None = None,
         org: str | None = None,
@@ -358,11 +370,7 @@ class MemoryRepository:
             "m.revisit_when IS NOT NULL",
             "m.revisit_when <= ?",
             MemoryRepository._not_expired_clause(),
-            """NOT EXISTS (
-                SELECT 1 FROM relationships r
-                WHERE r.relation = 'supersedes' AND r.source_type = 'memory' AND r.target_type = 'memory'
-                  AND r.target_id = m.id
-            )""",
+            MemoryRepository._not_superseded_clause(),
         ]
         params: list[Any] = [today]
         if org is not None:
@@ -514,11 +522,7 @@ class MemoryRepository:
             JOIN memories m ON m.rowid = memories_fts.rowid
             WHERE memories_fts MATCH ?
               AND m.id IN ({",".join("?" * len(ids))})
-              AND NOT EXISTS (
-                  SELECT 1 FROM relationships r
-                  WHERE r.relation = 'supersedes' AND r.source_type = 'memory' AND r.target_type = 'memory'
-                    AND r.target_id = m.id
-              )
+              AND {MemoryRepository._not_superseded_clause()}
             """,
             [fts_query, *ids],
         )

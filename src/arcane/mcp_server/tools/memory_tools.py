@@ -22,17 +22,17 @@ from arcane.domain.scope import (
     slugify,
 )
 from arcane.infra.db.ids import IdentifierResolutionError
+from arcane.infra.db.memory_repo import REVISIT_CAP
 from arcane.services.memory import MemoryService
 
 logger = logging.getLogger(__name__)
 
 VALID_CATEGORIES = tuple(c.value for c in Category)
 VALID_SCOPES = ("project", "org", "global")
-REVISIT_CAP = 5
 
 
 def revisit_entry(r: dict[str, Any]) -> dict[str, Any]:
-    """A memory due for a second look, as memory_context and `arcane context` list it."""
+    """A memory due for a second look, as memory_context lists it in its `revisit` block."""
     return {
         "id": r["id"],
         "title": r.get("title", "Untitled"),
@@ -74,7 +74,7 @@ Use the `detail` parameter to control token usage:
 
 When the project has fewer than {WIDEN_BELOW} matching memories, context also reads the org's other projects; the `scope` block then has `widened: true` and each memory has `scope_match`. `scope` overrides this: project, org (org-level memories only), global, or all (every project in every org).
 
-A `revisit` block lists up to 5 current memories whose `revisit_when` date has come, oldest first; check them before relying on them."""
+A `revisit` block lists up to {REVISIT_CAP} current memories whose `revisit_when` date has come, oldest first; check them before relying on them."""
 
 
 def handle_save(
@@ -214,7 +214,7 @@ def _search_hit(r: dict, detail: str) -> dict:
     # Shown at every detail level: a hit from another project must be told from a local one.
     where = _location(r)
     files = {"related_files": r["related_files"]} if r.get("related_files") else {}
-    revisit = {"revisit_when": r["revisit_when"]} if r.get("revisit_when") else {}
+    revisit_field = {"revisit_when": r["revisit_when"]} if r.get("revisit_when") else {}
     if detail == "minimal":
         return {
             "id": r["id"],
@@ -240,7 +240,7 @@ def _search_hit(r: dict, detail: str) -> dict:
             "has_details": bool(r.get("has_details")),
             "ttl_days": r.get("ttl_days"),
             "confidence": r.get("confidence"),
-            **revisit,
+            **revisit_field,
             **replaced,
         }
     # standard (default)
@@ -255,7 +255,7 @@ def _search_hit(r: dict, detail: str) -> dict:
         **where,
         "date": r.get("created_at", "")[:10],
         "has_details": bool(r.get("has_details")),
-        **revisit,
+        **revisit_field,
         **replaced,
     }
 
@@ -337,14 +337,16 @@ def handle_context(
 
     # Normalise detail level — fall back to standard for unknown values
     detail = _normalize_detail(detail)
-    due = svc.revisit_due(
-        limit=REVISIT_CAP,
-        project=project_final,
-        org=org_final,
-        include_org=plan.include_org,
-        include_global=plan.include_global,
-        reach=reach,
-    )
+    try:
+        due = svc.revisit_due(
+            project=project_final,
+            org=org_final,
+            include_org=plan.include_org,
+            include_global=plan.include_global,
+            reach=plan.reach,
+        )
+    except ValueError as exc:  # a malformed ARCANE_TODAY
+        return json.dumps({"error": str(exc)})
 
     memories = []
     for r in results:
@@ -448,6 +450,10 @@ def handle_update(
     revisit_when: str | None = None,
 ) -> str:
     try:
+        revisit_when = parse_iso_date(revisit_when, "revisit_when") if revisit_when else revisit_when
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)})
+    try:
         superseded_id = svc.c.memory_repo.resolve_prefix(supersedes) if supersedes else None
         if supersedes and superseded_id is None:
             return json.dumps({"error": f"Superseded memory not found: {supersedes}"})
@@ -461,7 +467,7 @@ def handle_update(
             supersedes=superseded_id,
             revisit_when=revisit_when,
         )
-    except (IdentifierResolutionError, ValueError) as exc:
+    except IdentifierResolutionError as exc:
         return json.dumps({"error": str(exc)})
     if not updated:
         return json.dumps({"error": f"Memory not found: {memory_id}"})

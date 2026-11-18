@@ -134,7 +134,7 @@ When `detail` is not `minimal` and a project resolves, the response also include
 field gains a one-line prompt to call `journey_complete` or `journey_abandon` on them.
 The key is omitted entirely when no journeys are stale.
 
-When any current memory in the scope the call reads has a `revisit_when` date of today or earlier, the response starts with a `revisit` block: up to 5 entries of `id`, `title`, `category`, `revisit_when` and `project`, oldest date first. It appears whatever `query` and `detail` are, and is omitted when nothing is due. Replaced and expired memories are left out. Today comes from the local date, or from `ARCANE_TODAY` (`YYYY-MM-DD`) when set. `arcane context` prints the same block above its memory list.
+When any current memory in the scope the call reads (settled as for a call with no `query`, so a query never widens it) has a `revisit_when` date of today or earlier, the response starts with a `revisit` block: up to 5 entries of `id`, `title`, `category`, `revisit_when` and `project`, oldest date first. It is the same whatever `query` and `detail` are, and is omitted when nothing is due. Replaced and expired memories are left out. Today comes from the local date, or from `ARCANE_TODAY` (`YYYY-MM-DD`) when set. `arcane context` prints the same block above its memory list.
 
 ---
 

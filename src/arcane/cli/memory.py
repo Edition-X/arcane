@@ -10,7 +10,6 @@ from typing import Any
 import click
 
 from arcane.cli._utils import create_container
-from arcane.cli.revisit import echo_revisit
 from arcane.domain.dates import parse_iso_date
 from arcane.domain.enums import Category
 from arcane.domain.models import RawMemoryInput
@@ -234,6 +233,17 @@ def delete(memory_id: str) -> None:
     click.echo(f"Deleted memory {memory_id}" if deleted else f"No memory found for {memory_id}")
 
 
+def _echo_revisit(due: list[dict[str, Any]]) -> None:
+    """Print the memories due for a second look, oldest date first; nothing when none are due."""
+    if not due:
+        return
+    click.echo(f"Due for a second look ({len(due)}):")
+    for r in due:
+        project_part = f" ({r['project']})" if r.get("project") else ""
+        cat_part = f" [{r['category']}]" if r.get("category") else ""
+        click.echo(f"- [{r['revisit_when']}] {r['title']}{project_part}{cat_part} (id: {r['id'][:12]})")
+
+
 @click.command()
 @click.option("--project", is_flag=True, default=False)
 @click.option("--source", default=None)
@@ -250,12 +260,15 @@ def context(project: bool, source: str | None, limit: int, query: str | None) ->
         else:
             project_name, org = None, None
         service = MemoryService(container)
-        results, total, reach = service.get_context_reach(
+        results, total, _ = service.get_context_reach(
             limit=limit, project=project_name, source=source, query=query, org=org
         )
-        due = service.revisit_due(project=project_name, source=source, org=org, reach=reach)
+        try:
+            due = service.revisit_due(project=project_name, source=source, org=org)
+        except ValueError as exc:  # a malformed ARCANE_TODAY
+            raise click.ClickException(str(exc)) from exc
 
-    echo_revisit(due)
+    _echo_revisit(due)
     if not results:
         click.echo("No memories found.")
         return

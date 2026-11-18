@@ -51,7 +51,7 @@ class RawMemoryInput(BaseModel):
     ttl_days: int | None = None
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     # ISO date (YYYY-MM-DD) from which memory_context lists this memory as due for a second look.
-    revisit_when: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    revisit_when: str | None = None
 
     @field_validator("category", mode="before")
     @classmethod
@@ -66,6 +66,7 @@ class RawMemoryInput(BaseModel):
     @field_validator("revisit_when", mode="before")
     @classmethod
     def validate_revisit_when(cls, v: str | None) -> str | None:
+        """A real ``YYYY-MM-DD`` date, or ``None`` for none (an empty string counts as none)."""
         if v is None or v == "":
             return None
         return parse_iso_date(str(v), "revisit_when")
