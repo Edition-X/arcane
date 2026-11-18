@@ -10,6 +10,8 @@ from typing import Any
 import click
 
 from arcane.cli._utils import create_container
+from arcane.cli.revisit import echo_revisit
+from arcane.domain.dates import parse_iso_date
 from arcane.domain.enums import Category
 from arcane.domain.models import RawMemoryInput
 from arcane.domain.scope import (
@@ -50,6 +52,11 @@ def init() -> None:
 @click.option("--project", default=None, help="Project name")
 @click.option("--journey-id", default=None, help="Link to a journey")
 @click.option("--supersedes", default=None, help="ID or prefix of an earlier memory this one replaces")
+@click.option(
+    "--revisit-when",
+    default=None,
+    help="YYYY-MM-DD: `arcane context` lists this memory from that date on",
+)
 def save(
     title: str,
     what: str,
@@ -64,6 +71,7 @@ def save(
     project: str | None,
     journey_id: str | None,
     supersedes: str | None,
+    revisit_when: str | None,
 ) -> None:
     """Save a memory to the current session."""
     from arcane.services.memory import MemoryService
@@ -82,6 +90,11 @@ def save(
         except OSError as e:
             raise click.ClickException(f"Failed to read '{details_file}': {e}") from e
 
+    try:
+        revisit_when = parse_iso_date(revisit_when, "--revisit-when") if revisit_when else None
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+
     raw = RawMemoryInput(
         title=title,
         what=what,
@@ -94,6 +107,7 @@ def save(
         source=source,
         journey_id=journey_id,
         supersedes=supersedes,
+        revisit_when=revisit_when,
     )
 
     with create_container() as container:
@@ -200,6 +214,8 @@ def details(memory_id: str, as_json: bool) -> None:
         click.echo(f"Replaces: {replaced['title']} ({replaced['id']})")
     if "superseded_by" in record:
         click.echo(f"Replaced by: {record['superseded_by']['title']} ({record['superseded_by']['id']})")
+    if record.get("revisit_when"):
+        click.echo(f"Revisit: {record['revisit_when']}")
     provenance = {k: v for k, v in record["provenance"].items() if v is not None}
     if provenance:
         click.echo("Provenance: " + ", ".join(f"{k}={v}" for k, v in provenance.items()))
@@ -233,10 +249,13 @@ def context(project: bool, source: str | None, limit: int, query: str | None) ->
             project_name, org = resolved.project, resolved.org
         else:
             project_name, org = None, None
-        results, total = MemoryService(container).get_context(
+        service = MemoryService(container)
+        results, total, reach = service.get_context_reach(
             limit=limit, project=project_name, source=source, query=query, org=org
         )
+        due = service.revisit_due(project=project_name, source=source, org=org, reach=reach)
 
+    echo_revisit(due)
     if not results:
         click.echo("No memories found.")
         return

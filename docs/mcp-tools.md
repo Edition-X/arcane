@@ -29,6 +29,7 @@ Save a memory for future sessions. Call this before ending any session where you
 | `supersedes` | string | no | ID or unambiguous prefix of an earlier memory this one replaces (a reversed decision, a newer fix). Search then marks the old one `superseded_by` and ranks it lower; context leaves it out. A bad reference adds a `supersedes_not_found`/`supersedes_not_linked` warning and saves unlinked. |
 | `ttl_days` | integer | no | Days until this memory expires from search results. Omit for permanent memories. |
 | `confidence` | number | no | Confidence in accuracy 0.0–1.0. Omit if not applicable. |
+| `revisit_when` | string | no | A real date as `YYYY-MM-DD`. From that day on, `memory_context` lists the memory in its `revisit` block until it is replaced or expires. A bad date is an error. |
 
 A `decision` that records too little reasoning saves anyway and adds a warning for each gap: `no_why` (empty why), `why_only_says_who_asked` (why names who asked, no reason after it), `no_options` (details names no alternatives). A `decision` or `bug` with no details gets `no_details`, and a decision then gets no `no_options`. Each warning names `memory_update` as the fix.
 
@@ -79,6 +80,8 @@ Search memories using keyword and vector search. Call at session start and whene
 | `minimal` | `id`, `title`, `category`, `score`, `project`, `org`, `scope_match` |
 | `standard` | `id`, `title`, `category`, `score`, `what`, `tags`, `related_files`, `project`, `org`, `scope_match`, `date`, `has_details` |
 | `full` | `id`, `title`, `what`, `why`, `impact`, `category`, `tags`, `related_files`, `project`, `org`, `scope_match`, `created_at`, `score`, `has_details`, `ttl_days`, `confidence` |
+
+`standard` and `full` hits also carry `revisit_when` when the memory has one.
 
 **Widening.** When the current project has fewer than 3 memories matching the query's key words, a search without `scope` also reads the org's other projects, and ranks all hits by relevance; the project's own hits win only near-ties, unless one of them holds every key word of the query and the other hit does not. It never crosses into another org on its own. `scope_match` says where a hit came from: `project`, `org`, `global`, `other_project` or `other_org`. An explicit `scope` of `project`, `org` or `global` never widens, and neither does `include_org=false`.
 
@@ -131,13 +134,15 @@ When `detail` is not `minimal` and a project resolves, the response also include
 field gains a one-line prompt to call `journey_complete` or `journey_abandon` on them.
 The key is omitted entirely when no journeys are stale.
 
+When any current memory in the scope the call reads has a `revisit_when` date of today or earlier, the response starts with a `revisit` block: up to 5 entries of `id`, `title`, `category`, `revisit_when` and `project`, oldest date first. It appears whatever `query` and `detail` are, and is omitted when nothing is due. Replaced and expired memories are left out. Today comes from the local date, or from `ARCANE_TODAY` (`YYYY-MM-DD`) when set. `arcane context` prints the same block above its memory list.
+
 ---
 
 ### `memory_details`
 
 **Profile:** `core`
 
-Get the whole record of a memory. The reply holds `memory_id`, `title`, `category`, `tags`, `date`, `what`, `why`, `impact`, `related_files`, `journeys` (each `id`, `title`, `status`, oldest link first; empty when the memory is in none), `has_details` and `body` (the extended `details` text). It adds `superseded_by` when a newer memory replaced this one, and `supersedes` listing the memories this one replaced.
+Get the whole record of a memory. The reply holds `memory_id`, `title`, `category`, `tags`, `date`, `what`, `why`, `impact`, `related_files`, `journeys` (each `id`, `title`, `status`, oldest link first; empty when the memory is in none), `has_details` and `body` (the extended `details` text). It adds `revisit_when` when one is set, `superseded_by` when a newer memory replaced this one, and `supersedes` listing the memories this one replaced.
 
 A memory saved without `details` has no body: `has_details` is `false` and `body` is `""`, not an error. An ID that matches no memory is an error.
 
@@ -164,6 +169,7 @@ Update a memory in place. Prefer this over `memory_save` when a save warns `near
 | `tags` | array of strings | no | Replace the tags |
 | `details_append` | string | no | Text appended to the details |
 | `supersedes` | string | no | ID or prefix of an earlier memory this one replaces. An unknown ID is an error. |
+| `revisit_when` | string | no | `YYYY-MM-DD` to set the date `memory_context` lists the memory from; an empty string clears it. A bad date is an error. |
 
 ---
 

@@ -8,6 +8,7 @@ import os
 from datetime import datetime
 from typing import Any
 
+from arcane.domain.dates import parse_iso_date
 from arcane.domain.enums import Category
 from arcane.domain.models import RawMemoryInput
 from arcane.domain.provenance import capture_provenance
@@ -27,6 +28,19 @@ logger = logging.getLogger(__name__)
 
 VALID_CATEGORIES = tuple(c.value for c in Category)
 VALID_SCOPES = ("project", "org", "global")
+REVISIT_CAP = 5
+
+
+def revisit_entry(r: dict[str, Any]) -> dict[str, Any]:
+    """A memory due for a second look, as memory_context and `arcane context` list it."""
+    return {
+        "id": r["id"],
+        "title": r.get("title", "Untitled"),
+        "category": r.get("category", ""),
+        "revisit_when": r["revisit_when"],
+        "project": r.get("project"),
+    }
+
 
 SAVE_DESCRIPTION = """Save a memory for future sessions. You MUST call this before ending any session where you made changes, fixed bugs, made decisions, or learned something.
 
@@ -41,7 +55,9 @@ When filling `details`, prefer: Context, Options considered, Decision, Tradeoffs
 
 `why` is the reasoning, the reason this was chosen; "User asked for X" is not one. For a decision, put the alternatives you weighed in `details` ("Options considered: ..."), not in `why`. Gaps come back as warnings; fix them with memory_update.
 
-When this memory replaces an earlier one (a reversed decision, a newer fix), pass `supersedes` with the old memory's ID: search then marks the old one as replaced and ranks it below the new one, and context leaves it out."""
+When this memory replaces an earlier one (a reversed decision, a newer fix), pass `supersedes` with the old memory's ID: search then marks the old one as replaced and ranks it below the new one, and context leaves it out.
+
+Pass `revisit_when` (YYYY-MM-DD) to have memory_context list this memory once that date arrives, for a call that should be checked again."""
 
 SEARCH_DESCRIPTION = f"""Search memories using keyword and semantic search. Call this at session start and when the user's request relates to a topic with prior context.
 
@@ -56,7 +72,9 @@ Use the `detail` parameter to control token usage:
 - standard: title, category, tags, date, what (default)
 - full: all fields including why and impact
 
-When the project has fewer than {WIDEN_BELOW} matching memories, context also reads the org's other projects; the `scope` block then has `widened: true` and each memory has `scope_match`. `scope` overrides this: project, org (org-level memories only), global, or all (every project in every org)."""
+When the project has fewer than {WIDEN_BELOW} matching memories, context also reads the org's other projects; the `scope` block then has `widened: true` and each memory has `scope_match`. `scope` overrides this: project, org (org-level memories only), global, or all (every project in every org).
+
+A `revisit` block lists up to 5 current memories whose `revisit_when` date has come, oldest first; check them before relying on them."""
 
 
 def handle_save(
@@ -77,10 +95,15 @@ def handle_save(
     confidence: float | None = None,
     source: str | None = None,
     supersedes: str | None = None,
+    revisit_when: str | None = None,
     caller: dict[str, Any] | None = None,
 ) -> str:
     """Save a memory. ``caller`` is set by the server, never by the agent; ``caller["meta"]`` is the call's ``_meta``."""
     handler_warnings: list[str] = []
+    try:
+        revisit_when = parse_iso_date(revisit_when, "revisit_when") if revisit_when else None
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)})
 
     # Sanitise category at the handler boundary so the domain model stays strict
     if category and category not in VALID_CATEGORIES:
@@ -150,6 +173,7 @@ def handle_save(
         supersedes=supersedes,
         ttl_days=ttl_days,
         confidence=confidence,
+        revisit_when=revisit_when,
     )
     caller = caller or {}
     provenance = capture_provenance(os.getcwd(), meta=caller.get("meta"))
@@ -190,6 +214,7 @@ def _search_hit(r: dict, detail: str) -> dict:
     # Shown at every detail level: a hit from another project must be told from a local one.
     where = _location(r)
     files = {"related_files": r["related_files"]} if r.get("related_files") else {}
+    revisit = {"revisit_when": r["revisit_when"]} if r.get("revisit_when") else {}
     if detail == "minimal":
         return {
             "id": r["id"],
@@ -215,6 +240,7 @@ def _search_hit(r: dict, detail: str) -> dict:
             "has_details": bool(r.get("has_details")),
             "ttl_days": r.get("ttl_days"),
             "confidence": r.get("confidence"),
+            **revisit,
             **replaced,
         }
     # standard (default)
@@ -229,6 +255,7 @@ def _search_hit(r: dict, detail: str) -> dict:
         **where,
         "date": r.get("created_at", "")[:10],
         "has_details": bool(r.get("has_details")),
+        **revisit,
         **replaced,
     }
 
@@ -310,6 +337,14 @@ def handle_context(
 
     # Normalise detail level — fall back to standard for unknown values
     detail = _normalize_detail(detail)
+    due = svc.revisit_due(
+        limit=REVISIT_CAP,
+        project=project_final,
+        org=org_final,
+        include_org=plan.include_org,
+        include_global=plan.include_global,
+        reach=reach,
+    )
 
     memories = []
     for r in results:
@@ -358,6 +393,7 @@ def handle_context(
             )
 
     payload: dict = {
+        **({"revisit": [revisit_entry(r) for r in due]} if due else {}),
         "total": total,
         "showing": len(memories),
         "memories": memories,
@@ -409,6 +445,7 @@ def handle_update(
     tags: list[str] | None = None,
     details_append: str | None = None,
     supersedes: str | None = None,
+    revisit_when: str | None = None,
 ) -> str:
     try:
         superseded_id = svc.c.memory_repo.resolve_prefix(supersedes) if supersedes else None
@@ -422,8 +459,9 @@ def handle_update(
             tags=tags,
             details_append=details_append,
             supersedes=superseded_id,
+            revisit_when=revisit_when,
         )
-    except IdentifierResolutionError as exc:
+    except (IdentifierResolutionError, ValueError) as exc:
         return json.dumps({"error": str(exc)})
     if not updated:
         return json.dumps({"error": f"Memory not found: {memory_id}"})

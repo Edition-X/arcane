@@ -89,8 +89,8 @@ class MemoryRepository:
                 id, title, what, why, impact, tags, category, project, org,
                 source, related_files, file_path, section_anchor,
                 created_at, updated_at, metadata, ttl_days, confidence,
-                commit_sha, branch, dirty, session_id, thread_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                commit_sha, branch, dirty, session_id, thread_id, revisit_when
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 mem["id"],
@@ -116,6 +116,7 @@ class MemoryRepository:
                 None if mem.get("dirty") is None else int(bool(mem["dirty"])),
                 mem.get("session_id"),
                 mem.get("thread_id"),
+                mem.get("revisit_when"),
             ),
         )
         rowid = cursor.lastrowid
@@ -186,8 +187,11 @@ class MemoryRepository:
         tags: list[str] | None = None,
         details_append: str | None = None,
         provenance: dict[str, Any] | None = None,
+        revisit_when: str | None = None,
     ) -> bool:
         """Update an existing memory by exact ID.
+
+        ``revisit_when`` is set to a date, cleared by an empty string, left alone when ``None``.
 
         ``provenance`` replaces all five origin columns (``None`` values included),
         so a re-save that rewrote the content also records where it was rewritten.
@@ -216,6 +220,10 @@ class MemoryRepository:
         if tags is not None:
             sets.append("tags = ?")
             params.append(json.dumps(tags))
+
+        if revisit_when is not None:
+            sets.append("revisit_when = ?")
+            params.append(revisit_when or None)
 
         if provenance is not None:
             for column in PROVENANCE_COLUMNS:
@@ -329,6 +337,54 @@ class MemoryRepository:
             else:
                 r["scope_rank"] = 0
         return rows
+
+    def due_for_revisit(
+        self,
+        today: str,
+        limit: int = 5,
+        project: str | None = None,
+        source: str | None = None,
+        org: str | None = None,
+        include_org: bool = True,
+        include_global: bool = True,
+        reach: Reach = "layers",
+    ) -> list[dict[str, Any]]:
+        """Live memories whose ``revisit_when`` is *today* or earlier, oldest date first.
+
+        Live means not expired and not replaced (no ``supersedes`` edge points at it).
+        The scope arguments match ``list_recent`` so the block covers what context reads.
+        """
+        where_clauses = [
+            "m.revisit_when IS NOT NULL",
+            "m.revisit_when <= ?",
+            MemoryRepository._not_expired_clause(),
+            """NOT EXISTS (
+                SELECT 1 FROM relationships r
+                WHERE r.relation = 'supersedes' AND r.source_type = 'memory' AND r.target_type = 'memory'
+                  AND r.target_id = m.id
+            )""",
+        ]
+        params: list[Any] = [today]
+        if org is not None:
+            scope_sql, scope_params = self._scope_where(org, project, include_org, include_global, reach=reach)
+            where_clauses.append(scope_sql)
+            params += scope_params
+        elif project:
+            where_clauses.append("m.project = ?")
+            params.append(project)
+        if source:
+            where_clauses.append("m.source = ?")
+            params.append(source)
+        rows = self.db.fetchall(
+            f"""
+            SELECT m.* FROM memories m
+            WHERE {" AND ".join(where_clauses)}
+            ORDER BY m.revisit_when ASC, m.created_at ASC
+            LIMIT ?
+            """,
+            [*params, limit],
+        )
+        return [_process_row(r) for r in rows]
 
     def find_by_title(self, title: str, project: str, org: str | None = None) -> dict[str, Any] | None:
         """Newest live memory titled *title* (ignoring case and edge spaces) in the exact scope layer.

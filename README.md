@@ -110,7 +110,7 @@ The CLI reads and writes the same store as the MCP server. `arcane <command> --h
 
 | Task | Command |
 |---|---|
-| Save a memory | `arcane save --title "..." --what "..." --category decision` |
+| Save a memory | `arcane save --title "..." --what "..." --category decision` (`--revisit-when YYYY-MM-DD` to resurface it later) |
 | Search | `arcane search "query"`, or `--project` / `--scope project\|org\|global\|all` to search from the current project |
 | Print context for an agent prompt | `arcane context` |
 | Read or delete one memory | `arcane details <id>`, `arcane delete <id>` |

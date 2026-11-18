@@ -241,7 +241,7 @@ def _create_server(container: ServiceContainer) -> Server:
             Tool(
                 name="memory_update",
                 description=(
-                    "Update an existing memory in place — what, why, impact, tags, or appended "
+                    "Update an existing memory in place — what, why, impact, tags, revisit_when, or appended "
                     "details. Prefer this over memory_save when a near_duplicate warning points "
                     "at an existing memory. Changing why or details returns warnings for what "
                     "a decision still lacks."
@@ -258,6 +258,11 @@ def _create_server(container: ServiceContainer) -> Server:
                         "supersedes": {
                             "type": "string",
                             "description": "ID or prefix of an earlier memory this one replaces.",
+                        },
+                        "revisit_when": {
+                            "type": "string",
+                            "pattern": "^(\\d{4}-\\d{2}-\\d{2})?$",
+                            "description": "YYYY-MM-DD: memory_context lists it from then on. Empty string clears.",
                         },
                     },
                     "required": ["memory_id"],
