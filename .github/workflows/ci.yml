@@ -149,6 +149,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.os }}
+    # Windows took 24 to 25 minutes on #66 and #67 and was cancelled at a
+    # 25-minute limit with no failing test; 40 leaves room for the suite to grow.
     timeout-minutes: 40
     strategy:
       fail-fast: false
