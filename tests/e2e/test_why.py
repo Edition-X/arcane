@@ -144,3 +144,29 @@ def test_why_rejects_an_unknown_commit(arcane: Arcane) -> None:
     bad = arcane.cli("why", "deadbeef1", check=False)
     assert bad.returncode != 0
     assert "not a commit" in bad.stderr
+
+
+def test_why_merge_commit_lists_the_files_it_brought_in(arcane: Arcane) -> None:
+    git(arcane.repo, "checkout", "-q", "-b", "feature")
+    _commit(arcane, "src/merged.py", "from the branch\n")
+    git(arcane.repo, "checkout", "-q", "main")
+    _commit(arcane, "src/main_only.py", "on main\n")
+
+    async def save(c: Client) -> None:
+        await c.call(
+            "memory_save",
+            title="Merge the parser",
+            what="Parser lives in merged.py",
+            why="One place",
+            category="decision",
+            related_files=["src/merged.py"],
+        )
+
+    arcane.run(save)
+    git(arcane.repo, "merge", "-q", "--no-ff", "-m", "Merge feature", "feature")
+    merge = git(arcane.repo, "rev-parse", "HEAD").strip()
+    assert len(git(arcane.repo, "rev-list", "--parents", "-n", "1", merge).split()) == 3  # a real merge
+
+    out = _why(arcane, merge[:8])
+    assert out["files"] == ["src/merged.py"]
+    assert [(m["title"], m["via"]) for m in out["memories"]] == [("Merge the parser", "file")]

@@ -10,7 +10,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from arcane.domain.scope import resolve_write_scope
-from arcane.infra.db.memory_repo import MemoryRepository
 from arcane.services.container import ServiceContainer
 
 # Categories that answer "why is the code like this": the call made, and the fault fixed.
@@ -90,7 +89,7 @@ class WhyService:
 
         scope = None if everywhere else resolve_write_scope(None, self.c.config, repo_path=cwd)
         if sha:
-            names = (_git(cwd, "show", "--name-only", "--format=", sha) or "").splitlines()
+            names = self._touched(cwd, sha)
             result = WhyResult(target=target, kind="commit", commit=sha, files=[normalize_path(n) for n in names if n])
             rows = [dict(r, via="commit") for r in self._by_commit(sha, scope)]
         else:
@@ -120,45 +119,26 @@ class WhyService:
         result.superseded = [e for e in out if "superseded_by" in e]
         return result
 
+    @staticmethod
+    def _touched(cwd: str, sha: str) -> list[str]:
+        """Files *sha* changed; for a merge, the files it brought in from the second parent onto the first."""
+        parents = (_git(cwd, "rev-list", "--parents", "-n", "1", sha) or "").split()[1:]
+        if len(parents) > 1:
+            out = _git(cwd, "diff", "--name-only", f"{sha}^1", sha)
+        else:
+            out = _git(cwd, "show", "--name-only", "--format=", sha)
+        return (out or "").splitlines()
+
     def _by_commit(self, sha: str, scope: Any) -> list[dict[str, Any]]:
-        where, params = self._where(scope)
-        rows = self.c.db.fetchall(
-            "SELECT m.* FROM memories m WHERE "
-            "(m.commit_sha = ? OR (length(m.commit_sha) >= 7 AND ? LIKE m.commit_sha || '%')) "
-            f"AND {where}",
-            [sha, sha, *params],
-        )
-        return [self._decode(r) for r in rows]
+        org, project = (None, None) if scope is None else (scope.org, scope.project)
+        return self.c.memory_repo.by_commit_sha(sha, org, project)
 
     def _by_files(self, files: list[str], scope: Any) -> list[dict[str, Any]]:
-        if not files:
-            return []
-        where, params = self._where(scope)
-        marks = " OR ".join("m.related_files LIKE ? ESCAPE '\\'" for _ in files)
-        likes = [
-            "%" + os.path.basename(f).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%" for f in files
-        ]
-        categories = ",".join("?" * len(WHY_CATEGORIES))
-        rows = self.c.db.fetchall(
-            f"SELECT m.* FROM memories m WHERE m.category IN ({categories}) AND ({marks}) AND {where}",
-            [*WHY_CATEGORIES, *likes, *params],
+        org, project = (None, None) if scope is None else (scope.org, scope.project)
+        rows = self.c.memory_repo.why_candidates_for_files(
+            [os.path.basename(f) for f in files], WHY_CATEGORIES, org, project
         )
-        return [
-            r for r in map(self._decode, rows) if any(path_matches(s, f) for s in r["related_files"] for f in files)
-        ]
-
-    @staticmethod
-    def _where(scope: Any) -> tuple[str, list[Any]]:
-        not_expired = MemoryRepository._not_expired_clause()
-        if scope is None:
-            return not_expired, []
-        return f"m.org = ? AND m.project = ? AND {not_expired}", [scope.org, scope.project]
-
-    @staticmethod
-    def _decode(row: dict[str, Any]) -> dict[str, Any]:
-        from arcane.infra.db.memory_repo import _process_row
-
-        return _process_row(row)
+        return [r for r in rows if any(path_matches(s, f) for s in r["related_files"] for f in files)]
 
     @staticmethod
     def _entry(row: dict[str, Any], files: list[str]) -> dict[str, Any]:
