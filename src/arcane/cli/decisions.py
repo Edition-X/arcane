@@ -14,7 +14,8 @@ from arcane.cli._utils import create_container
 @click.option(
     "--project",
     default=None,
-    help="Project (default: the current git remote's). Without --org, its pinned org or any org.",
+    help="Project (default: the current git remote's). Without --org it uses the project's pinned org from the "
+    "config; with none pinned it lists that project name in every org.",
 )
 @click.option("--org", default=None, help="Org. Alone, it logs every project of the org.")
 @click.option("--format", "fmt", type=click.Choice(["md", "json"]), default="md", show_default=True)
@@ -22,11 +23,10 @@ from arcane.cli._utils import create_container
 def decisions(project: str | None, org: str | None, fmt: str, out: str | None) -> None:
     """Print the decision log: current decisions newest first, then the ones replaced."""
     from arcane.domain.scope import resolve_read_project, resolve_scope, slugify
-    from arcane.infra.redaction import redact
+    from arcane.infra.redaction import redact_values
     from arcane.services.decisions import build_decision_log, render_markdown
 
     with create_container() as container:
-        here = resolve_scope(os.getcwd(), container.config)
         scope_org: str | None
         scope_project: str | None
         if org and not project:
@@ -37,11 +37,14 @@ def decisions(project: str | None, org: str | None, fmt: str, out: str | None) -
             overrides = container.config.orgs.overrides
             scope_org = slugify(org) if org else overrides.get(scope_project or "")
         else:
+            here = resolve_scope(os.getcwd(), container.config)
             scope_org, scope_project = here.org, here.project
-        log = build_decision_log(container, org=scope_org, project=scope_project)
-        text = json.dumps(log, indent=2) + "\n" if fmt == "json" else render_markdown(log)
-        text = redact(text, container.ignore_patterns)
+        # Redact the values, not the rendered text: a pattern matching "title" must not rewrite a JSON key.
+        log = redact_values(
+            build_decision_log(container, org=scope_org, project=scope_project), container.ignore_patterns
+        )
 
+    text = json.dumps(log, indent=2) + "\n" if fmt == "json" else render_markdown(log)
     if out is None:
         click.echo(text, nl=False)
         return

@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from tests.e2e.conftest import Arcane, Client
+from tests.e2e.conftest import Arcane, Client, git
 
 DETAILS = """Context: why we looked.
 
@@ -91,14 +91,14 @@ def test_only_option_sections_of_details_appear_and_are_capped(arcane: Arcane) -
     assert "only background" not in out  # no matching section: details omitted
 
     long_section = out.split("**Options**\n\n> ", 1)[1].split("\n\n", 1)[0]
-    assert len(long_section) <= 1201 and long_section.endswith("…")
+    assert 1100 <= len(long_section) <= 1201 and long_section.endswith("…")
 
 
 def test_output_is_deterministic_and_written_only_with_out(arcane: Arcane, tmp_path: Path) -> None:
     _fill(arcane)
     first = arcane.cli("decisions").stdout
     assert arcane.cli("decisions").stdout == first
-    assert not list(arcane.repo.glob("*.md"))
+    assert git(arcane.repo, "status", "--porcelain") == ""  # nothing written without --out
 
     target = tmp_path / "log.md"
     message = arcane.cli("decisions", "--out", str(target)).stdout
@@ -160,3 +160,80 @@ def test_bullet_lines_stay_inside_their_section(arcane: Arcane) -> None:
         in out
     )
     assert "**Option A**" not in out
+
+
+def _save_decisions(arcane: Arcane, details_by_title: dict[str, str]) -> None:
+    async def scenario(c: Client) -> None:
+        for title, details in details_by_title.items():
+            await c.call(
+                "memory_save", title=title, what="Pick one", why="Because", category="decision", details=details
+            )
+
+    arcane.run(scenario)
+
+
+def _options(arcane: Arcane) -> dict[str, list[dict[str, str]]]:
+    data = json.loads(arcane.cli("decisions", "--format", "json").stdout)
+    return {d["title"]: d["options"] for d in data["decisions"]}
+
+
+def test_every_heading_form_and_name_reason_lines_are_kept_whole(arcane: Arcane) -> None:
+    _save_decisions(
+        arcane,
+        {
+            "Bold colon inside": "**Options considered:**\n- A\n- B\n**Decision:** A",
+            "Bold colon outside": "**Options considered**:\n- A\n- B",
+            "Name reason lines": "Options:\nTags: simple but they move\nDigests: exact\n\nDecision: digests",
+            "Lowercase": "options considered:\n- tags\n- digests",
+            "Prose": "Options were limited because of the deadline.",
+        },
+    )
+    options = _options(arcane)
+
+    assert options["Bold colon inside"] == [{"label": "Options considered", "text": "- A\n- B"}]
+    assert options["Bold colon outside"] == [{"label": "Options considered", "text": "- A\n- B"}]
+    assert options["Name reason lines"] == [{"label": "Options", "text": "Tags: simple but they move\nDigests: exact"}]
+    assert options["Lowercase"] == [{"label": "options considered", "text": "- tags\n- digests"}]
+    assert options["Prose"] == []
+
+
+def test_a_code_fence_inside_options_stays_in_one_blockquote(arcane: Arcane) -> None:
+    _save_decisions(
+        arcane,
+        {
+            "Fenced": "Options:\n```bash\n# install the thing\nmake all\n```\n- Redis\n\nDecision: dict",
+            "Fence cut short": "Options:\n```\n" + "word " * 600 + "\n```",
+        },
+    )
+    out = arcane.cli("decisions").stdout
+
+    assert "**Options**\n\n> ```bash\n> # install the thing\n> make all\n> ```\n> - Redis\n\n" in out
+    assert "Decision: dict" not in out
+    cut = out.split("**Options**\n\n> ```\n", 1)[1].split("\n\n", 1)[0]
+    assert cut.endswith("…\n> ```")  # the cap closes the fence it cut, so the rest of the log renders normally
+
+
+def test_json_and_markdown_carry_the_same_what_why_and_options(arcane: Arcane) -> None:
+    ids = _fill(arcane)
+    data = json.loads(arcane.cli("decisions", "--format", "json").stdout)
+    entry = next(d for d in data["decisions"] if d["id"] == ids["new"])
+    out = arcane.cli("decisions").stdout
+
+    assert f"**What:** {entry['what']}\n\n**Why:** {entry['why']}\n" in out
+    assert [o["label"] for o in entry["options"]] == ["Options considered", "Trade-offs"]
+    for option in entry["options"]:
+        quoted = "\n".join(f"> {line}".rstrip() for line in option["text"].splitlines())
+        assert f"**{option['label']}**\n\n{quoted}\n" in out
+
+
+def test_memoryignore_redacts_values_never_json_keys_or_labels(arcane: Arcane) -> None:
+    _save_decisions(arcane, {"Cache choice": "Options considered:\n- the title wins\n- a rank"})
+    (arcane.home / ".memoryignore").write_text("title\nWhat\n", encoding="utf-8")
+
+    data = json.loads(arcane.cli("decisions", "--format", "json").stdout)
+    [entry] = data["decisions"]
+    assert set(entry) == {"id", "date", "title", "project", "what", "why", "options"}
+    assert entry["options"][0]["text"] == "- the [REDACTED] wins\n- a rank"
+
+    out = arcane.cli("decisions").stdout
+    assert "**What:** Pick one" in out and "[REDACTED]" in out

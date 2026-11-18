@@ -6,58 +6,55 @@ order, so a regenerated file diffs only where a decision changed.
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from arcane.services.container import ServiceContainer
+from arcane.services.details_sections import DECISION_LOG_WORDS, find_sections
 
-SECTION_LIMIT = 1200
-ID_PREFIX = 8
-
-# A details section is kept when its heading or label names one of these.
-_KEPT = re.compile(r"\b(options?|alternatives?|trade-?offs?|considered|rejected)\b", re.IGNORECASE)
-_HEADING = re.compile(r"^#{1,6}\s+(?P<label>.+?)\s*#*\s*$")
-_LIST_ITEM = re.compile(r"^(?:[-*+]|\d+[.)])\s")
-_LABEL = re.compile(r"^\W{0,2}(?P<label>[A-Z][\w /&-]{0,40}?)\W{0,2}:(?:\s+(?P<rest>.*))?$")
+SECTION_LIMIT_CHARS = 1200
+ID_PREFIX_CHARS = 8
 
 
-def _split_sections(body: str) -> list[tuple[str, list[str]]]:
-    """Cut *body* at markdown headings and at capitalised ``Label:`` lines."""
-    sections: list[tuple[str, list[str]]] = []
-    for line in body.splitlines():
-        stripped = line.strip()
-        heading = _HEADING.match(stripped)
-        # A list item ("- Pros: ...", "1. Option A: ...") belongs to its section; it never opens one.
-        label = None if heading or _LIST_ITEM.match(stripped) else _LABEL.match(stripped)
-        if heading:
-            sections.append((heading["label"].strip("*_ "), []))
-        elif label:
-            sections.append((label["label"].strip("*_ "), [label["rest"]] if label["rest"] else []))
-        elif sections:
-            sections[-1][1].append(line)
-    return sections
-
-
-def _cap(text: str, limit: int = SECTION_LIMIT) -> str:
+def _cap(text: str, limit: int = SECTION_LIMIT_CHARS) -> str:
+    """Cut *text* to about *limit* characters at a word boundary, ending with "…"; close a code fence the cut opened."""
     if len(text) <= limit:
         return text
-    return text[:limit].rsplit(None, 1)[0].rstrip() + "…"
+    cut = text[:limit].rsplit(None, 1)[0].rstrip() + "…"
+    if sum(1 for line in cut.splitlines() if line.lstrip().startswith(("```", "~~~"))) % 2:
+        cut += "\n```"
+    return cut
 
 
 def extract_options(details: str | None) -> list[dict[str, str]]:
-    """The options, alternatives, trade-offs, considered and rejected sections of *details*, each capped."""
-    if not details:
-        return []
-    found = []
-    for label, lines in _split_sections(details):
-        text = "\n".join(lines).strip()
-        if text and _KEPT.search(label):
-            found.append({"label": label, "text": _cap(text)})
-    return found
+    """The options, alternatives, trade-offs, considered and rejected sections of a details body.
+
+    Args:
+        details: The free-form details body, or ``None``.
+
+    Returns:
+        One ``{"label", "text"}`` dict per non-empty section, in order, each text capped at
+        ``SECTION_LIMIT_CHARS`` with its line breaks kept. Empty when no section matches.
+    """
+    sections = find_sections(details, DECISION_LOG_WORDS, stop_at_blank=False)
+    return [{"label": s.label, "text": _cap(s.text)} for s in sections if s.text]
 
 
 def build_decision_log(container: ServiceContainer, *, org: str | None, project: str | None) -> dict[str, Any]:
-    """Current and replaced decisions of *project* (or of the whole *org* when *project* is ``None``)."""
+    """Collect the current and replaced decisions of one project, or of one org.
+
+    A decision counts as replaced when any memory supersedes it, even one that has since expired.
+    Expired decisions are left out of both lists.
+
+    Args:
+        container: The service container holding the store.
+        org: Only this org; ``None`` reads every org.
+        project: Only this project; ``None`` reads every project of *org*.
+
+    Returns:
+        ``{"org", "project", "decisions", "replaced"}``, both lists newest first. A current decision has
+        ``id``, ``date``, ``title``, ``project``, ``what``, ``why`` and ``options``; a replaced one has
+        the first four and ``replaced_by`` (``id``, ``title``, ``date``).
+    """
     rows = container.memory_repo.list_decisions(org=org, project=project)
     replaced_by = container.relationship_repo.superseded_by([r["id"] for r in rows])
     current, replaced = [], []
@@ -83,44 +80,57 @@ def build_decision_log(container: ServiceContainer, *, org: str | None, project:
 
 
 def _short(memory_id: str) -> str:
-    return memory_id[:ID_PREFIX]
+    """The first ``ID_PREFIX_CHARS`` characters of a memory id."""
+    return memory_id[:ID_PREFIX_CHARS]
+
+
+def _entry_blocks(d: dict[str, Any], where: str) -> list[str]:
+    """The Markdown blocks of one current decision, without surrounding blank lines."""
+    blocks = [f"### {d['date']} · {d['title']} (`{_short(d['id'])}`){where}"]
+    if d["what"]:
+        blocks.append(f"**What:** {d['what']}")
+    if d["why"]:
+        blocks.append(f"**Why:** {d['why']}")
+    for option in d["options"]:
+        quoted = "\n".join(f"> {line}".rstrip() for line in option["text"].splitlines())
+        blocks += [f"**{option['label']}**", quoted]
+    return blocks
 
 
 def render_markdown(log: dict[str, Any]) -> str:
-    """Render the log as markdown: current decisions newest first, then the replaced ones."""
+    """Render a decision log as Markdown: current decisions newest first, then the replaced ones.
+
+    Args:
+        log: The result of ``build_decision_log``.
+
+    Returns:
+        The document, ending in one newline. Entries show their project when the log spans a whole org.
+    """
     scope = "/".join(x for x in (log["org"], log["project"]) if x)
     org_wide = log["project"] is None
-    lines = [
+
+    def where(d: dict[str, Any]) -> str:
+        return f" · {d['project']}" if org_wide and d["project"] else ""
+
+    blocks = [
         f"# Decision log: {scope}" if scope else "# Decision log",
-        "",
         f"{len(log['decisions'])} current · {len(log['replaced'])} replaced",
-        "",
         "## Decisions",
     ]
     if not log["decisions"]:
-        lines += ["", "No current decisions."]
+        blocks.append("No current decisions.")
     for d in log["decisions"]:
-        where = f" · {d['project']}" if org_wide and d["project"] else ""
-        lines += ["", f"### {d['date']} · {d['title']} (`{_short(d['id'])}`){where}", ""]
-        if d["what"]:
-            lines += [f"**What:** {d['what']}", ""]
-        if d["why"]:
-            lines += [f"**Why:** {d['why']}", ""]
-        for option in d["options"]:
-            lines += [f"**{option['label']}**", ""]
-            lines += [f"> {line}".rstrip() for line in option["text"].splitlines()]
-            lines.append("")
-        lines.pop()  # each entry ends without a blank line; the next heading adds one
-    lines += ["", "## Replaced"]
+        blocks += _entry_blocks(d, where(d))
+    blocks.append("## Replaced")
     if not log["replaced"]:
-        lines += ["", "Nothing replaced."]
+        blocks.append("Nothing replaced.")
     else:
-        lines.append("")
-    for d in log["replaced"]:
-        by = d["replaced_by"]
-        where = f" · {d['project']}" if org_wide and d["project"] else ""
-        lines.append(
-            f"- {d['date']} · {d['title']} (`{_short(d['id'])}`){where} — replaced by `{_short(by['id'])}` "
-            f"{by['title']} ({by['date']})"
+        # One list: its items sit on consecutive lines, so join them into a single block.
+        blocks.append(
+            "\n".join(
+                f"- {d['date']} · {d['title']} (`{_short(d['id'])}`){where(d)} — replaced by "
+                f"`{_short(d['replaced_by']['id'])}` {d['replaced_by']['title']} ({d['replaced_by']['date']})"
+                for d in log["replaced"]
+            )
         )
-    return "\n".join(lines) + "\n"
+    return "\n\n".join(blocks) + "\n"
