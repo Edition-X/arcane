@@ -114,6 +114,7 @@ The CLI reads and writes the same store as the MCP server. `arcane <command> --h
 | Search | `arcane search "query"`, or `--project` / `--scope project\|org\|global\|all` to search from the current project |
 | Print context for an agent prompt | `arcane context` |
 | Read or delete one memory | `arcane details <id>`, `arcane delete <id>` |
+| Find the decisions behind code | `arcane why <file>` or `arcane why <sha>`, `--all` for every project, `--json` for agents |
 | Track an investigation | `arcane journey start --title "..."`, then `update`, `complete`, `list`, `show` |
 | Ingest evidence | `arcane ingest git`, `arcane ingest gha --owner <owner> --repo <repo>`, `arcane ingest linear --team <key>` |
 | Analyse the store | `arcane analyze velocity`, `arcane analyze health`, `arcane analyze usage` |

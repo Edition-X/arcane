@@ -30,6 +30,7 @@ from arcane.cli.memory import (
 from arcane.cli.migrate import migrate
 from arcane.cli.relationship import link, trace
 from arcane.cli.report import export, report
+from arcane.cli.why import why
 
 
 class ArcaneGroup(click.Group):
@@ -77,6 +78,7 @@ main.add_command(merge_projects)
 main.add_command(journey)
 main.add_command(link)
 main.add_command(trace)
+main.add_command(why)
 main.add_command(migrate)
 main.add_command(config)
 main.add_command(ingest)
