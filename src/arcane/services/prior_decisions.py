@@ -68,7 +68,9 @@ class PriorDecisionsService:
         mine: list[str] = memory["related_files"]
         phrases = sorted({_phrase(p) for p in mine if _phrase(p)})
         found = self.c.memory_repo.decision_candidates_for_files(phrases, memory["org"], memory["project"])
-        hits = [(r, shared_files(mine, r["related_files"])) for r in found if r["id"] != memory_id]
+        # What this memory replaces is its own history, not a prior decision to weigh.
+        skip = {memory_id} | {r["id"] for r in self.c.relationship_repo.supersedes(memory_id)}
+        hits = [(r, shared_files(mine, r["related_files"])) for r in found if r["id"] not in skip]
         hits = [(r, files) for r, files in hits if files]
         replaced = self.c.relationship_repo.superseded_by([r["id"] for r, _ in hits])
         current = [h for h in hits if h[0]["id"] not in replaced][:MAX_CURRENT]

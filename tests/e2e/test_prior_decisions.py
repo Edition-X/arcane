@@ -54,7 +54,7 @@ def test_overlapping_decisions_come_back_with_options_and_shared_files(arcane: A
     assert out["absolute"]["prior_decisions"][0]["title"] == "Cache handler results"
 
 
-def test_superseded_listed_apart_and_target_not_in_current_list(arcane: Arcane) -> None:
+def test_superseded_listed_apart_and_the_one_being_replaced_left_out(arcane: Arcane) -> None:
     async def scenario(c: Client) -> dict[str, Any]:
         old = await _decision(c, "Old way", [FILE], "Options considered: A, B\nDecision: A")
         mid = await _decision(c, "Middle way", [FILE], "Alternatives:\nx then y\n\nTradeoffs: none")
@@ -66,9 +66,10 @@ def test_superseded_listed_apart_and_target_not_in_current_list(arcane: Arcane) 
     prior = out["new"]["prior_decisions"]
     by_title = {p["title"]: p for p in prior}
     assert [p["title"] for p in prior if "superseded_by" not in p] == ["Replacement"]
-    assert set(by_title) == {"Replacement", "Old way", "Middle way"}
+    # "Middle way" is what "Newest" replaces, so it is not a prior decision to it; the older "Old way" still is.
+    assert set(by_title) == {"Replacement", "Old way"}
     assert by_title["Old way"]["superseded_by"] and by_title["Old way"]["options"] == "A, B"
-    assert by_title["Middle way"]["options"] == "x then y"
+    assert "Middle way" not in by_title
 
 
 def test_caps_and_excerpt_length(arcane: Arcane) -> None:
