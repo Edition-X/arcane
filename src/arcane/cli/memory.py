@@ -117,6 +117,15 @@ def save(
     click.echo(f"File: {result['file_path']}")
     for warning in result.get("warnings", []):
         click.echo(f"Warning: {warning}")
+    prior = result.get("prior_decisions", [])
+    if prior:
+        click.echo("Prior decisions on these files:")
+        for entry in prior:
+            replaced = " (superseded)" if entry.get("superseded_by") else ""
+            click.echo(f"  {entry['id'][:8]}  {entry['date']}  {entry['title']}{replaced}")
+            click.echo(f"     Files: {', '.join(entry['shared_files'])}")
+            if entry.get("options"):
+                click.echo(f"     Options: {entry['options']}")
 
 
 @click.command()
