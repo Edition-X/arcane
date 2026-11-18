@@ -11,6 +11,7 @@ from arcane.cli.analyze import analyze
 from arcane.cli.artifact import artifact
 from arcane.cli.backup import backup
 from arcane.cli.config import config
+from arcane.cli.decisions import decisions
 from arcane.cli.draft import draft
 from arcane.cli.ingest import ingest
 from arcane.cli.journey import journey
@@ -84,6 +85,7 @@ main.add_command(analyze)
 main.add_command(artifact)
 main.add_command(draft)
 main.add_command(report)
+main.add_command(decisions)
 main.add_command(export)
 
 

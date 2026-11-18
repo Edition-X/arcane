@@ -419,6 +419,23 @@ class MemoryRepository:
         rows = self.db.fetchall(f"SELECT * FROM memories WHERE {' AND '.join(where)} ORDER BY created_at", params)
         return [_process_row(r) for r in rows]
 
+    def list_decisions(self, *, org: str | None = None, project: str | None = None) -> list[dict[str, Any]]:
+        """Unexpired decisions with their details body, newest first, replaced ones included."""
+        where = ["m.category = 'decision'", self._not_expired_clause()]
+        params: list[Any] = []
+        if org:
+            where.append("m.org = ?")
+            params.append(org)
+        if project:
+            where.append("m.project = ?")
+            params.append(project)
+        rows = self.db.fetchall(
+            "SELECT m.*, d.body AS details FROM memories m LEFT JOIN memory_details d ON d.memory_id = m.id "
+            f"WHERE {' AND '.join(where)} ORDER BY m.created_at DESC, m.id",
+            params,
+        )
+        return [_process_row(r) for r in rows]
+
     def list_for_export(self, org: str) -> list[dict[str, Any]]:
         """Every memory in *org*, with its details body, oldest first."""
         rows = self.db.fetchall(

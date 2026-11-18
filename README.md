@@ -118,6 +118,7 @@ The CLI reads and writes the same store as the MCP server. `arcane <command> --h
 | Ingest evidence | `arcane ingest git`, `arcane ingest gha --owner <owner> --repo <repo>`, `arcane ingest linear --team <key>` |
 | Analyse the store | `arcane analyze velocity`, `arcane analyze health`, `arcane analyze usage` |
 | Report on a period | `arcane report --days 7`, or `--since`/`--until`, `--org`, `--format json` |
+| Print the decision log | `arcane decisions`, or `--project`, `--org`, `--format json`, `--out decisions.md` |
 | Draft content | `arcane draft blog`, `arcane draft adr <memory-id>` |
 | Link and trace | `arcane link <source> <target> --relation led_to`, `arcane trace <id>` |
 | Export one org | `arcane export --org <org>` |
