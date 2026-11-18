@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import os
+import posixpath
 import re
 import subprocess
 from dataclasses import dataclass, field
-from pathlib import PurePosixPath
 from typing import Any
 
 from arcane.domain.scope import resolve_write_scope
@@ -24,7 +24,7 @@ class WhyError(Exception):
 
 def normalize_path(path: str) -> str:
     """Turn a path into the posix form memories are compared in: no ``./``, no ``..``, no ``//``."""
-    return PurePosixPath(os.path.normpath(path.strip().replace("\\", "/"))).as_posix()
+    return posixpath.normpath(path.strip().replace("\\", "/"))
 
 
 def path_matches(stored: str, target: str) -> bool:
@@ -95,7 +95,10 @@ class WhyService:
             rows = [dict(r, via="commit") for r in self._by_commit(sha, scope)]
         else:
             absolute = os.path.abspath(os.path.join(cwd, target))
-            rel = os.path.relpath(absolute, root)
+            try:
+                rel = os.path.relpath(absolute, root)
+            except ValueError:  # another drive on Windows
+                rel = ".."
             path = normalize_path(absolute if rel.startswith("..") else rel)
             result = WhyResult(target=target, kind="file", files=[path])
             rows = []
