@@ -519,6 +519,27 @@ class MemoryRepository:
             self._annotate_scope_rank(processed, org, project)
         return processed
 
+    def decision_candidates_for_files(
+        self, phrases: list[str], org: str, project: str, limit: int = 200
+    ) -> list[dict[str, Any]]:
+        """Live decisions of one project whose indexed ``related_files`` hold any of the FTS *phrases*.
+
+        A phrase is a run of path words, so this finds candidates only; the caller checks the paths.
+        """
+        if not phrases:
+            return []
+        match = "related_files : (" + " OR ".join('"' + p.replace('"', '""') + '"' for p in phrases) + ")"
+        rows = self.db.fetchall(
+            f"""
+            SELECT m.* FROM memories_fts JOIN memories m ON m.rowid = memories_fts.rowid
+            WHERE memories_fts MATCH ? AND m.category = 'decision' AND m.org = ? AND m.project = ?
+              AND {MemoryRepository._not_expired_clause()}
+            ORDER BY m.created_at DESC LIMIT ?
+            """,
+            (match, org, project, limit),
+        )
+        return [_process_row(r) for r in rows]
+
     def count_project_matches(self, fts_query: str, org: str, project: str, source: str | None = None) -> int:
         """Live memories of one project that match the FTS expression *fts_query*.
 

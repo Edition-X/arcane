@@ -526,12 +526,26 @@ class MemoryService:
         if existing is not None:
             return self._merge_into(existing, raw, today, warnings, provenance)
         logger.debug("Created memory id=%s project=%s", mem.id, project)
-        return {
+        result: MemorySaveResult = {
             "id": mem.id,
             "file_path": str(file_path),
             "action": "created",
             "warnings": quality_warnings(raw.category, raw.why, raw.details) + warnings,
         }
+        return self._with_prior_decisions(result)
+
+    def _with_prior_decisions(self, result: MemorySaveResult) -> MemorySaveResult:
+        """Add ``prior_decisions`` to a save result; never blocks or changes the save."""
+        from arcane.services.prior_decisions import PriorDecisionsService
+
+        try:
+            prior = PriorDecisionsService(self.c).for_memory(result["id"])
+        except Exception:
+            logger.debug("Prior-decisions lookup failed; save unaffected", exc_info=True)
+            return result
+        if prior:
+            result["prior_decisions"] = prior
+        return result
 
     def _merge_into(
         self,
@@ -586,12 +600,14 @@ class MemoryService:
         logger.debug("Merged duplicate memory id=%s", existing_id)
         # A merge leaves the stored why and details in place when the input omits them, so
         # what is thin is the stored memory, not the incoming save.
-        return {
-            "id": existing_id,
-            "file_path": file_path,
-            "action": "updated",
-            "warnings": self.quality_warnings_for(existing_id) + warnings,
-        }
+        return self._with_prior_decisions(
+            {
+                "id": existing_id,
+                "file_path": file_path,
+                "action": "updated",
+                "warnings": self.quality_warnings_for(existing_id) + warnings,
+            }
+        )
 
     def search(
         self,
