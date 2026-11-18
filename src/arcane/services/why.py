@@ -5,11 +5,11 @@ from __future__ import annotations
 import os
 import posixpath
 import re
-import subprocess
 from dataclasses import dataclass, field
 from typing import Any
 
 from arcane.domain.scope import resolve_write_scope
+from arcane.infra.git import git_output
 from arcane.services.container import ServiceContainer
 
 # Categories that answer "why is the code like this": the call made, and the fault fixed.
@@ -61,8 +61,9 @@ class WhyResult:
 
 
 def _git(cwd: str, *args: str) -> str | None:
-    proc = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, check=False)
-    return proc.stdout.strip() if proc.returncode == 0 else None
+    """Stripped stdout of ``git -C cwd <args>``, or None when git fails (see ``git_output``)."""
+    out = git_output(cwd, *args)
+    return None if out is None else out.strip()
 
 
 class WhyService:
