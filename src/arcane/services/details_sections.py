@@ -9,12 +9,14 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import Literal
 
 # The words that open an options section; a heading may carry more after them ("Options considered for
 # the cache"). Plural "options" only, so a line such as "Option A: keep tags" is a list entry, not a heading.
-OPTIONS_WORDS = r"(?:options(?:[ \t]+considered)?|rejected(?:[ \t]+options)?|alternatives)"
+_OPTIONS_BASE = r"options(?:[ \t]+considered)?|rejected(?:[ \t]+options)?|alternatives"
+OPTIONS_WORDS = rf"(?:{_OPTIONS_BASE})"
 # The decision log keeps the trade-offs and "considered" sections too.
-DECISION_LOG_WORDS = r"(?:options(?:[ \t]+considered)?|rejected(?:[ \t]+options)?|alternatives|trade-?offs?|considered)"
+DECISION_LOG_WORDS = rf"(?:{_OPTIONS_BASE}|trade-?offs?|considered)"
 
 # What ends a section, besides a blank line after it: a markdown heading, a bold-only line, or a known
 # section name with a colon, bold or not. Not any "Name: reason" line, which is how options themselves
@@ -26,6 +28,20 @@ _NEXT_SECTION = re.compile(
     re.IGNORECASE,
 )
 _FENCE = re.compile(r"^[ \t]*(?:```|~~~)")
+_LIST_ITEM = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]")
+
+# How a blank line ends a section: "blank" at the first blank line after content; "prose" only when
+# the next non-blank line is neither a list item, nor indented, nor a code fence, so a list may
+# have gaps but a paragraph after it is left out.
+BlankEnds = Literal["blank", "prose"]
+
+
+def _continues_after_blank(lines: list[str], start: int) -> bool:
+    """Whether the first non-blank line from *start* continues a list: a list item, indented text or a fence."""
+    for line in lines[start:]:
+        if line.strip():
+            return bool(_LIST_ITEM.match(line) or line[0] in " \t" or _FENCE.match(line))
+    return False
 
 
 @dataclass(frozen=True)
@@ -59,7 +75,7 @@ def _heading(words: str) -> re.Pattern[str]:
     )
 
 
-def find_sections(details: str | None, words: str, *, stop_at_blank: bool) -> list[DetailsSection]:
+def find_sections(details: str | None, words: str, *, blank_ends: BlankEnds) -> list[DetailsSection]:
     """The sections of *details* whose heading starts with one of *words*, in order.
 
     A section runs from its heading to the next markdown heading, bold-only line, known section name
@@ -69,7 +85,8 @@ def find_sections(details: str | None, words: str, *, stop_at_blank: bool) -> li
     Args:
         details: The free-form details body; ``None`` or empty gives no sections.
         words: A regex fragment for the heading words, such as ``OPTIONS_WORDS``; matched ignoring case.
-        stop_at_blank: End a section at the first blank line after its content.
+        blank_ends: ``"blank"`` ends a section at the first blank line after its content; ``"prose"`` only
+            when the next non-blank line is not a list item, indented or a code fence.
 
     Returns:
         The wanted sections, each with its label and lines; a section with no text is still returned.
@@ -97,8 +114,9 @@ def find_sections(details: str | None, words: str, *, stop_at_blank: bool) -> li
             if _FENCE.match(line):
                 in_fence = not in_fence
             elif not in_fence:
-                if stop_at_blank and not line.strip() and any(part.strip() for part in body):
-                    break
+                if not line.strip() and any(part.strip() for part in body):
+                    if blank_ends == "blank" or not _continues_after_blank(lines, i + 1):
+                        break
                 if _NEXT_SECTION.match(line) or heading.match(line):
                     break
             body.append(line.rstrip())

@@ -130,7 +130,7 @@ def test_project_alone_finds_a_project_in_another_org(arcane: Arcane) -> None:
     ids = _fill(arcane)  # run from the acme/widget repo; toybox lives in org personal
 
     out = arcane.cli("decisions", "--project", "toybox").stdout
-    assert out.startswith("# Decision log: toybox\n\n1 current · 0 replaced\n")
+    assert out.startswith("# Decision log: toybox (all orgs)\n\n1 current · 0 replaced\n")
     assert f"Other project decision (`{ids['other'][:8]}`)" in out
 
     with (arcane.home / "config.yaml").open("a", encoding="utf-8") as handle:
@@ -237,3 +237,22 @@ def test_memoryignore_redacts_values_never_json_keys_or_labels(arcane: Arcane) -
 
     out = arcane.cli("decisions").stdout
     assert "**What:** Pick one" in out and "[REDACTED]" in out
+
+
+def test_prose_after_an_options_list_stays_out_and_fences_close_with_their_own_marker(arcane: Arcane) -> None:
+    _save_decisions(
+        arcane,
+        {
+            "Prose after": "Options:\n- A\n- B\n\nWe went with A after a long chat.\n\nMore narrative.",
+            "Gapped list": "Options:\n- A\n\n- B\n\n  indented note\n\nRisks: none",
+            "Tilde fence": "Options:\n~~~\n" + "word " * 600 + "\n~~~",
+            "Open fence": "Options:\n- A\n```bash\nmake all",
+        },
+    )
+    options = _options(arcane)
+
+    assert options["Prose after"] == [{"label": "Options", "text": "- A\n- B"}]
+    assert options["Gapped list"] == [{"label": "Options", "text": "- A\n\n- B\n\n  indented note"}]
+    [tilde] = options["Tilde fence"]
+    assert tilde["text"].startswith("~~~\n") and tilde["text"].endswith("…\n~~~")
+    assert options["Open fence"] == [{"label": "Options", "text": "- A\n```bash\nmake all\n```"}]

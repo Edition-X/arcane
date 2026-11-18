@@ -15,14 +15,21 @@ SECTION_LIMIT_CHARS = 1200
 ID_PREFIX_CHARS = 8
 
 
+def _close_open_fence(text: str) -> str:
+    """Close a code fence *text* leaves open, with the marker it opened with, so it cannot swallow what follows."""
+    opener: str | None = None
+    for line in text.splitlines():
+        marker = line.lstrip()[:3]
+        if marker in ("```", "~~~"):
+            opener = None if opener == marker else (opener or marker)
+    return text if opener is None else f"{text}\n{opener}"
+
+
 def _cap(text: str, limit: int = SECTION_LIMIT_CHARS) -> str:
-    """Cut *text* to about *limit* characters at a word boundary, ending with "…"; close a code fence the cut opened."""
+    """Cut *text* to about *limit* characters at a word boundary, ending with "…"."""
     if len(text) <= limit:
         return text
-    cut = text[:limit].rsplit(None, 1)[0].rstrip() + "…"
-    if sum(1 for line in cut.splitlines() if line.lstrip().startswith(("```", "~~~"))) % 2:
-        cut += "\n```"
-    return cut
+    return text[:limit].rsplit(None, 1)[0].rstrip() + "…"
 
 
 def extract_options(details: str | None) -> list[dict[str, str]]:
@@ -33,10 +40,11 @@ def extract_options(details: str | None) -> list[dict[str, str]]:
 
     Returns:
         One ``{"label", "text"}`` dict per non-empty section, in order, each text capped at
-        ``SECTION_LIMIT_CHARS`` with its line breaks kept. Empty when no section matches.
+        ``SECTION_LIMIT_CHARS`` with its line breaks kept and any code fence closed. Empty when no
+        section matches. A section ends at a blank line followed by prose, so later paragraphs stay out.
     """
-    sections = find_sections(details, DECISION_LOG_WORDS, stop_at_blank=False)
-    return [{"label": s.label, "text": _cap(s.text)} for s in sections if s.text]
+    sections = find_sections(details, DECISION_LOG_WORDS, blank_ends="prose")
+    return [{"label": s.label, "text": _close_open_fence(_cap(s.text))} for s in sections if s.text]
 
 
 def build_decision_log(container: ServiceContainer, *, org: str | None, project: str | None) -> dict[str, Any]:
@@ -84,14 +92,14 @@ def _short(memory_id: str) -> str:
     return memory_id[:ID_PREFIX_CHARS]
 
 
-def _entry_blocks(d: dict[str, Any], where: str) -> list[str]:
+def _entry_blocks(decision: dict[str, Any], where: str) -> list[str]:
     """The Markdown blocks of one current decision, without surrounding blank lines."""
-    blocks = [f"### {d['date']} · {d['title']} (`{_short(d['id'])}`){where}"]
-    if d["what"]:
-        blocks.append(f"**What:** {d['what']}")
-    if d["why"]:
-        blocks.append(f"**Why:** {d['why']}")
-    for option in d["options"]:
+    blocks = [f"### {decision['date']} · {decision['title']} (`{_short(decision['id'])}`){where}"]
+    if decision["what"]:
+        blocks.append(f"**What:** {decision['what']}")
+    if decision["why"]:
+        blocks.append(f"**Why:** {decision['why']}")
+    for option in decision["options"]:
         quoted = "\n".join(f"> {line}".rstrip() for line in option["text"].splitlines())
         blocks += [f"**{option['label']}**", quoted]
     return blocks
@@ -104,13 +112,17 @@ def render_markdown(log: dict[str, Any]) -> str:
         log: The result of ``build_decision_log``.
 
     Returns:
-        The document, ending in one newline. Entries show their project when the log spans a whole org.
+        The document, ending in one newline. Entries show their project when the log spans a whole
+        org; the heading says "all orgs" when it spans every org that has the project.
     """
     scope = "/".join(x for x in (log["org"], log["project"]) if x)
+    if log["org"] is None and log["project"]:
+        scope += " (all orgs)"
     org_wide = log["project"] is None
 
-    def where(d: dict[str, Any]) -> str:
-        return f" · {d['project']}" if org_wide and d["project"] else ""
+    def where(decision: dict[str, Any]) -> str:
+        """The " · project" suffix of an entry, only when the log covers a whole org."""
+        return f" · {decision['project']}" if org_wide and decision["project"] else ""
 
     blocks = [
         f"# Decision log: {scope}" if scope else "# Decision log",
@@ -119,8 +131,8 @@ def render_markdown(log: dict[str, Any]) -> str:
     ]
     if not log["decisions"]:
         blocks.append("No current decisions.")
-    for d in log["decisions"]:
-        blocks += _entry_blocks(d, where(d))
+    for decision in log["decisions"]:
+        blocks += _entry_blocks(decision, where(decision))
     blocks.append("## Replaced")
     if not log["replaced"]:
         blocks.append("Nothing replaced.")
@@ -128,9 +140,9 @@ def render_markdown(log: dict[str, Any]) -> str:
         # One list: its items sit on consecutive lines, so join them into a single block.
         blocks.append(
             "\n".join(
-                f"- {d['date']} · {d['title']} (`{_short(d['id'])}`){where(d)} — replaced by "
-                f"`{_short(d['replaced_by']['id'])}` {d['replaced_by']['title']} ({d['replaced_by']['date']})"
-                for d in log["replaced"]
+                f"- {old['date']} · {old['title']} (`{_short(old['id'])}`){where(old)} — replaced by "
+                f"`{_short(old['replaced_by']['id'])}` {old['replaced_by']['title']} ({old['replaced_by']['date']})"
+                for old in log["replaced"]
             )
         )
     return "\n\n".join(blocks) + "\n"

@@ -23,12 +23,19 @@ def shared_files(mine: list[str], theirs: list[str]) -> list[str]:
 
 
 def options_excerpt(details: str | None) -> str | None:
-    """The options/rejected/alternatives part of a details body, cut to ``EXCERPT_CHARS``."""
-    for section in find_sections(details, OPTIONS_WORDS, stop_at_blank=True):
-        text = " ".join(part.strip() for part in section.lines if part.strip())
+    """The options/rejected/alternatives sections of a details body, joined and cut to ``EXCERPT_CHARS``."""
+    parts: list[str] = []
+    for section in find_sections(details, OPTIONS_WORDS, blank_ends="blank"):
+        text = " ".join(line.strip() for line in section.lines if line.strip())
+        # The first section reads as the options themselves; a later one keeps its heading ("Rejected: B").
+        if text and parts:
+            text = f"{section.label}: {text}"
         if text:
-            return text if len(text) <= EXCERPT_CHARS else text[: EXCERPT_CHARS - 1].rstrip() + "…"
-    return None
+            parts.append(text)
+    text = " ".join(parts)
+    if not text:
+        return None
+    return text if len(text) <= EXCERPT_CHARS else text[: EXCERPT_CHARS - 1].rstrip() + "…"
 
 
 class PriorDecisionsService:
