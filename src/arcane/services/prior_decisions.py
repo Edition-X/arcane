@@ -13,22 +13,24 @@ MAX_CURRENT = 5
 MAX_SUPERSEDED = 3
 EXCERPT_CHARS = 300
 # Only decisions are weighed against a new decision.
-CATEGORIES = ("decision",)
+PRIOR_CATEGORIES = ("decision",)
 
 # The heading that opens an options section: "## Options considered", "**Rejected**", or a
-# plain "Alternatives:" line. A plain line needs the colon, so prose such as "Options were
-# limited" is not taken for a heading.
+# plain "Alternatives:" line. The words end the heading or take a colon, so prose such as
+# "Options were limited" or "### Rejected approach" is not taken for one.
 _OPTIONS_WORDS = r"(?:options(?:[ \t]+considered)?|rejected(?:[ \t]+options)?|alternatives)"
 _OPTIONS_HEADING = re.compile(
-    rf"^[ \t]*(?:(?:#{{1,6}}[ \t]*|\*\*){_OPTIONS_WORDS}(?:\*\*)?[ \t]*:?(?:\*\*)?|{_OPTIONS_WORDS}[ \t]*:)"
-    r"[ \t]*(?P<rest>.*)$",
+    rf"^[ \t]*(?:#{{1,6}}[ \t]*|\*\*)?{_OPTIONS_WORDS}"
+    r"(?:(?:\*\*)?[ \t]*:(?:\*\*)?[ \t]*(?P<rest>.*)|(?:\*\*)?[ \t]*)$",
     re.IGNORECASE,
 )
-# What ends an options section: a markdown heading, a bold-only line, or a known section name
-# with a colon. Not any "Name: reason" line, which is how options themselves are often listed.
+# What ends an options section, besides a blank line after it: a markdown heading, a bold-only
+# line, or a known section name with a colon, bold or not. Not any "Name: reason" line, which
+# is how options themselves are often listed.
 _NEXT_SECTION = re.compile(
     r"^[ \t]*(?:#{1,6}[ \t]|\*\*[^*]+\*\*[ \t]*:?[ \t]*$"
-    r"|(?:context|decision|tradeoffs?|trade-offs?|follow-?ups?|why|consequences|outcome|notes?)[ \t]*:)",
+    r"|(?:\*\*)?(?:context|decision|tradeoffs?|trade-offs?|follow-?ups?|why|consequences|outcome|notes?)"
+    r"[ \t]*(?:\*\*)?[ \t]*:)",
     re.IGNORECASE,
 )
 
@@ -48,8 +50,10 @@ def options_excerpt(details: str | None) -> str | None:
         match = _OPTIONS_HEADING.match(line)
         if not match:
             continue
-        section = [match.group("rest").strip()]
+        section = [(match.group("rest") or "").strip()]
         for nxt in lines[i + 1 :]:
+            if not nxt.strip() and any(section):
+                break
             if _NEXT_SECTION.match(nxt) and not _OPTIONS_HEADING.match(nxt):
                 break
             section.append(nxt.strip())
@@ -80,7 +84,7 @@ class PriorDecisionsService:
             return []
         mine: list[str] = memory["related_files"]
         found = self.c.memory_repo.why_candidates_for_files(
-            sorted({os.path.basename(p) for p in mine}), CATEGORIES, memory["org"], memory["project"]
+            sorted({os.path.basename(p) for p in mine}), PRIOR_CATEGORIES, memory["org"], memory["project"]
         )
         found.sort(key=lambda row: row["created_at"], reverse=True)
         # What this memory replaces is its own history, not a prior decision to weigh.

@@ -5,6 +5,7 @@ The real ``arcane mcp`` server and ``arcane save`` CLI run against a temp store.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from tests.e2e.conftest import Arcane, Client
@@ -34,7 +35,7 @@ def test_overlapping_decisions_come_back_with_options_and_shared_files(arcane: A
     async def scenario(c: Client) -> dict[str, Any]:
         first = await _decision(c, "Cache handler results", [FILE, "docs/a.md"], OPTIONS)
         await _decision(c, "Unrelated", ["other/file.py"], OPTIONS)
-        # Same file name in another directory is an FTS candidate but not the same file.
+        # Same file name in another directory is a candidate but not the same file.
         await _decision(c, "Same name elsewhere", ["lib/quux_handler.py"], OPTIONS)
         await c.call("memory_save", title="A bug", what="w", category="bug", related_files=[FILE])
         # An absolute path from another checkout still names the same file.
@@ -48,7 +49,7 @@ def test_overlapping_decisions_come_back_with_options_and_shared_files(arcane: A
     assert set(prior) == {"Cache handler results", "Old absolute path"}
     entry = prior["Cache handler results"]
     assert entry["shared_files"] == [FILE]
-    assert entry["date"] == entry["date"][:10] and len(entry["date"]) == 10
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", entry["date"])
     assert entry["options"].startswith("- Redis cache: too heavy")
     assert "Decision" not in entry["options"] and "Why now" not in entry["options"]
     assert "options" not in prior["Old absolute path"]
@@ -108,7 +109,7 @@ def test_not_run_for_other_categories_or_no_files_and_merged_saves_get_it(arcane
 
 
 def test_cli_save_prints_prior_decisions(arcane: Arcane) -> None:
-    arcane.cli(
+    first = arcane.cli(
         "save",
         "--title",
         "First",
@@ -121,10 +122,12 @@ def test_cli_save_prints_prior_decisions(arcane: Arcane) -> None:
         "--details",
         "Options considered: A, B",
     )
-    arcane.cli("save", "--title", "Second", "--what", "w", "--category", "decision", "--related-files", FILE)
-    out = arcane.cli("save", "--title", "Third", "--what", "w", "--category", "decision", "--related-files", FILE)
+    first_id = re.search(r"\(id: ([0-9a-f-]+)\)", first.stdout).group(1)  # type: ignore[union-attr]
+    base = ("save", "--what", "w", "--category", "decision", "--related-files", FILE)
+    arcane.cli(*base, "--title", "Second", "--supersedes", first_id)
+    out = arcane.cli(*base, "--title", "Third")
     assert "Prior decisions on these files:" in out.stdout
-    assert "First" in out.stdout and "Second" in out.stdout and "Options: A, B" in out.stdout
+    assert "Second" in out.stdout and "First (superseded)" in out.stdout and "Options: A, B" in out.stdout
 
 
 def test_options_excerpt_reads_name_reason_lists_and_ignores_prose(arcane: Arcane) -> None:
@@ -137,3 +140,16 @@ def test_options_excerpt_reads_name_reason_lists_and_ignores_prose(arcane: Arcan
     by_title = {p["title"]: p for p in arcane.run(scenario)["prior_decisions"]}
     assert by_title["Listed"]["options"] == "Redis: too heavy Dict: chosen"
     assert "options" not in by_title["Prose options"] and "options" not in by_title["Prose rejected"]
+
+
+def test_options_excerpt_stops_at_the_next_section_or_paragraph(arcane: Arcane) -> None:
+    async def scenario(c: Client) -> dict[str, Any]:
+        await _decision(c, "Bold", [FILE], "**Options considered:** A, B\n**Decision:** A")
+        await _decision(c, "Paragraph after", [FILE], "Options: A, B\n\nWe chose A since it is fast.")
+        await _decision(c, "Heading prose", [FILE], "### Rejected approach\nfoo")
+        return await _decision(c, "Newest", [FILE])
+
+    by_title = {p["title"]: p for p in arcane.run(scenario)["prior_decisions"]}
+    assert by_title["Bold"]["options"] == "A, B"
+    assert by_title["Paragraph after"]["options"] == "A, B"
+    assert "options" not in by_title["Heading prose"]
