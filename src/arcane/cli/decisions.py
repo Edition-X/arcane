@@ -11,7 +11,11 @@ from arcane.cli._utils import create_container
 
 
 @click.command()
-@click.option("--project", default=None, help="Project (default: the current git remote's).")
+@click.option(
+    "--project",
+    default=None,
+    help="Project (default: the current git remote's). Without --org, its pinned org or any org.",
+)
 @click.option("--org", default=None, help="Org. Alone, it logs every project of the org.")
 @click.option("--format", "fmt", type=click.Choice(["md", "json"]), default="md", show_default=True)
 @click.option("--out", default=None, help="Write to this file instead of printing.")
@@ -23,11 +27,17 @@ def decisions(project: str | None, org: str | None, fmt: str, out: str | None) -
 
     with create_container() as container:
         here = resolve_scope(os.getcwd(), container.config)
+        scope_org: str | None
+        scope_project: str | None
         if org and not project:
             scope_org, scope_project = slugify(org), None
+        elif project:
+            scope_project = resolve_read_project(project, container.config)
+            # A named project may live in another org than the cwd's: use its pinned org, else any org.
+            overrides = container.config.orgs.overrides
+            scope_org = slugify(org) if org else overrides.get(scope_project or "")
         else:
-            scope_org = slugify(org) if org else here.org
-            scope_project = resolve_read_project(project, container.config) if project else here.project
+            scope_org, scope_project = here.org, here.project
         log = build_decision_log(container, org=scope_org, project=scope_project)
         text = json.dumps(log, indent=2) + "\n" if fmt == "json" else render_markdown(log)
         text = redact(text, container.ignore_patterns)

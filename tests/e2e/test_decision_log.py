@@ -124,3 +124,16 @@ def test_json_format_and_scope_overrides(arcane: Arcane) -> None:
 
     empty = arcane.cli("decisions", "--project", "nothing-here").stdout
     assert "No current decisions." in empty and "Nothing replaced." in empty
+
+
+def test_project_alone_finds_a_project_in_another_org(arcane: Arcane) -> None:
+    ids = _fill(arcane)  # run from the acme/widget repo; toybox lives in org personal
+
+    out = arcane.cli("decisions", "--project", "toybox").stdout
+    assert out.startswith("# Decision log: toybox\n\n1 current · 0 replaced\n")
+    assert f"Other project decision (`{ids['other'][:8]}`)" in out
+
+    with (arcane.home / "config.yaml").open("a", encoding="utf-8") as handle:
+        handle.write("orgs:\n  overrides:\n    toybox: personal\n")
+    pinned = arcane.cli("decisions", "--project", "toybox").stdout
+    assert pinned.startswith("# Decision log: personal/toybox\n\n1 current")
