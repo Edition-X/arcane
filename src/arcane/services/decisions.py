@@ -92,9 +92,9 @@ def _short(memory_id: str) -> str:
     return memory_id[:ID_PREFIX_CHARS]
 
 
-def _entry_blocks(decision: dict[str, Any], where: str) -> list[str]:
+def _entry_blocks(decision: dict[str, Any], project_suffix: str) -> list[str]:
     """The Markdown blocks of one current decision, without surrounding blank lines."""
-    blocks = [f"### {decision['date']} · {decision['title']} (`{_short(decision['id'])}`){where}"]
+    blocks = [f"### {decision['date']} · {decision['title']} (`{_short(decision['id'])}`){project_suffix}"]
     if decision["what"]:
         blocks.append(f"**What:** {decision['what']}")
     if decision["why"]:
@@ -120,7 +120,7 @@ def render_markdown(log: dict[str, Any]) -> str:
         scope += " (all orgs)"
     org_wide = log["project"] is None
 
-    def where(decision: dict[str, Any]) -> str:
+    def project_suffix(decision: dict[str, Any]) -> str:
         """The " · project" suffix of an entry, only when the log covers a whole org."""
         return f" · {decision['project']}" if org_wide and decision["project"] else ""
 
@@ -132,7 +132,7 @@ def render_markdown(log: dict[str, Any]) -> str:
     if not log["decisions"]:
         blocks.append("No current decisions.")
     for decision in log["decisions"]:
-        blocks += _entry_blocks(decision, where(decision))
+        blocks += _entry_blocks(decision, project_suffix(decision))
     blocks.append("## Replaced")
     if not log["replaced"]:
         blocks.append("Nothing replaced.")
@@ -140,7 +140,7 @@ def render_markdown(log: dict[str, Any]) -> str:
         # One list: its items sit on consecutive lines, so join them into a single block.
         blocks.append(
             "\n".join(
-                f"- {old['date']} · {old['title']} (`{_short(old['id'])}`){where(old)} — replaced by "
+                f"- {old['date']} · {old['title']} (`{_short(old['id'])}`){project_suffix(old)} — replaced by "
                 f"`{_short(old['replaced_by']['id'])}` {old['replaced_by']['title']} ({old['replaced_by']['date']})"
                 for old in log["replaced"]
             )

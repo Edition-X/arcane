@@ -105,6 +105,10 @@ def test_output_is_deterministic_and_written_only_with_out(arcane: Arcane, tmp_p
     assert "Wrote 3 decisions and 1 replaced" in message
     assert target.read_text(encoding="utf-8") == first
 
+    failed = arcane.cli("decisions", "--out", str(tmp_path / "missing" / "log.md"), check=False)
+    assert failed.returncode == 1 and "Traceback" not in failed.stderr
+    assert "Cannot write" in failed.stderr and "No such file or directory" in failed.stderr
+
 
 def test_json_format_and_scope_overrides(arcane: Arcane) -> None:
     ids = _fill(arcane)

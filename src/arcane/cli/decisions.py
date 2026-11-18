@@ -48,6 +48,9 @@ def decisions(project: str | None, org: str | None, fmt: str, out: str | None) -
     if out is None:
         click.echo(text, nl=False)
         return
-    with open(out, "w", encoding="utf-8") as handle:
-        handle.write(text)
+    try:
+        with open(out, "w", encoding="utf-8") as handle:
+            handle.write(text)
+    except OSError as exc:
+        raise click.ClickException(f"Cannot write {out}: {exc.strerror or exc}") from exc
     click.echo(f"Wrote {len(log['decisions'])} decisions and {len(log['replaced'])} replaced to {os.path.abspath(out)}")
